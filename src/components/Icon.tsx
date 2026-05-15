@@ -80,8 +80,9 @@ export const Icon: React.FC<IconProps> = ({ name, size = 20, color = '#0E0E10', 
       <Rect x="2.5" y="7" width="19" height="12" rx="2.2" {...p} />
       <Path d="M2.5 11h19" {...p} />
     </G>,
-    chevL: <Path d="M14 5l-7 7 7 7" {...p} />,
-    chevR: <Path d="M10 5l7 7-7 7" {...p} />,
+    chevL:    <Path d="M14 5l-7 7 7 7" {...p} />,
+    chevR:    <Path d="M10 5l7 7-7 7" {...p} />,
+    chevDown: <Path d="M5 9l7 7 7-7" {...p} />,
     close: <G>
       <Path d="M6 6l12 12M18 6L6 18" {...p} />
     </G>,
@@ -151,6 +152,11 @@ export const Icon: React.FC<IconProps> = ({ name, size = 20, color = '#0E0E10', 
     </G>,
     moon: <G>
       <Path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" {...p} />
+    </G>,
+    wallet: <G>
+      <Path d="M3 8.5a2 2 0 0 1 2-2h12a1.5 1.5 0 0 1 1.5 1.5V8.5" {...p} />
+      <Path d="M3 8v10.5A1.5 1.5 0 0 0 4.5 20H19a2 2 0 0 0 2-2v-8a1.5 1.5 0 0 0-1.5-1.5H3z" {...p} />
+      <Circle cx="16.5" cy="14" r="1.1" {...p} />
     </G>,
   };
 

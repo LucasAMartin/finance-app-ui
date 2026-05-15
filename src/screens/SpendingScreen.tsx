@@ -4,20 +4,43 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, OVER_DOT, OVER_BG, OVER_TEXT } from '../theme';
 import { CATS, TRANSACTIONS, TREND } from '../data';
 import { Icon } from '../components/Icon';
-import { Money, Segmented, CircleBtn } from '../components/shared';
+import { Money, Segmented } from '../components/shared';
 import { TrendChart } from '../components/TrendChart';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CHART_W = SCREEN_W - 40 - 36; // 20px padding each side, 18px inner padding each side
 
 interface Props {
   theme: Theme;
-  onBack: () => void;
+  onOpenDrawer: () => void;
 }
 
 const fmt = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`;
 
-export function SpendingScreen({ theme, onBack }: Props) {
+function IconBtn({
+  onPress,
+  children,
+  size = 40,
+}: {
+  onPress?: () => void;
+  children: React.ReactNode;
+  size?: number;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.5}
+      delayPressIn={0}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
+
+export function SpendingScreen({ theme, onOpenDrawer }: Props) {
   const insets = useSafeAreaInsets();
   const [period, setPeriod] = useState('Month');
   const card = getCardStyle(theme);
@@ -80,21 +103,32 @@ export function SpendingScreen({ theme, onBack }: Props) {
       contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 50 }}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
+      {/* Header: home-style chrome (hamburger left, bell + theme right) */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity
-          onPress={onBack}
-          style={[styles.circleBtn, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
-        >
-          <Icon name="chevL" size={18} color={theme.text} />
-        </TouchableOpacity>
-        <CircleBtn theme={theme}><Icon name="filter" size={18} color={theme.text} /></CircleBtn>
+        <IconBtn onPress={onOpenDrawer}>
+          <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
+        </IconBtn>
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          <IconBtn>
+            <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
+          </IconBtn>
+          <ThemeToggle />
+        </View>
+      </View>
+
+      <View style={{ paddingBottom: 14, paddingTop: 4 }}>
+        <Text style={{ fontSize: 13, color: theme.textSec, fontWeight: '500', marginBottom: 2 }}>
+          Spending
+        </Text>
+        <Text style={{ fontSize: 26, fontWeight: '700', letterSpacing: -0.6, color: theme.text }}>
+          {span.charAt(0).toUpperCase() + span.slice(1)}
+        </Text>
       </View>
 
       {/* Big number + status */}
       <View style={{ marginBottom: 24 }}>
         <Text style={{ fontSize: 11, color: theme.textSec, textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: '600', marginBottom: 8 }}>
-          Total · {span}
+          Total
         </Text>
         <Money value={total} size={44} weight="600" prefix="$" theme={theme} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>

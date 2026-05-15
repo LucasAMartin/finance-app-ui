@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, TouchableOpacity, StyleSheet, Platform, Animated } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
@@ -13,27 +13,64 @@ interface TabBarProps {
 }
 
 const TABS = [
-  { id: 'home',    icon: 'home'    },
-  { id: 'budgets', icon: 'chart'   },
-  { id: 'cards',   icon: 'cards'   },
-  { id: 'profile', icon: 'profile' },
+  { id: 'home',     icon: 'home'    },
+  { id: 'spending', icon: 'chart'   },
+  { id: 'budget',   icon: 'wallet'  },
+  { id: 'profile',  icon: 'profile' },
 ];
+
+const TAB_W = 46;
+const TAB_GAP = 4;
+const PILL_PAD = 6;
+const TAB_STEP = TAB_W + TAB_GAP;
+
+// Snappy spring — tight tension + high friction keeps the slide quick and prevents bounce.
+const SPRING_CONFIG = { tension: 220, friction: 22, useNativeDriver: true } as const;
 
 export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  const activeIndex = Math.max(0, TABS.findIndex(t => t.id === active));
+  const idx = useRef(new Animated.Value(activeIndex)).current;
+
+  // Sync with external active changes (e.g., from drawer navigation).
+  useEffect(() => {
+    Animated.spring(idx, { ...SPRING_CONFIG, toValue: activeIndex }).start();
+  }, [activeIndex]);
+
+  const slideTX = idx.interpolate({
+    inputRange: TABS.map((_, i) => i),
+    outputRange: TABS.map((_, i) => i * TAB_STEP),
+  });
+
+  // Start the slide on press, before the parent state has round-tripped — kills the perceived delay.
+  const handlePress = (id: string, i: number) => {
+    Animated.spring(idx, { ...SPRING_CONFIG, toValue: i }).start();
+    onTabPress?.(id);
+  };
 
   const pill = (
     <View style={styles.pillRow}>
-      {TABS.map(t => {
+      {/* Sliding dark pill — single background that follows the active tab */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.activePill,
+          {
+            backgroundColor: theme.text,
+            transform: [{ translateX: slideTX }],
+          },
+        ]}
+      />
+
+      {TABS.map((t, i) => {
         const isActive = t.id === active;
         return (
           <TouchableOpacity
             key={t.id}
-            onPress={() => onTabPress?.(t.id)}
-            style={[
-              styles.tabBtn,
-              { backgroundColor: isActive ? theme.text : 'transparent' },
-            ]}
+            onPress={() => handlePress(t.id, i)}
+            style={styles.tabBtn}
+            activeOpacity={0.7}
+            delayPressIn={0}
           >
             <Icon
               name={t.icon}
@@ -47,10 +84,11 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
 
       <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
 
-      {/* Voice/Add button */}
       <TouchableOpacity
         onPress={onAdd}
         style={[styles.tabBtn, { backgroundColor: theme.accent.fill }]}
+        activeOpacity={0.7}
+        delayPressIn={0}
       >
         <Icon name="mic" size={20} color={theme.accent.ink} stroke={1.6} />
       </TouchableOpacity>
@@ -110,13 +148,13 @@ const styles = StyleSheet.create({
   pillRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 6,
-    gap: 4,
+    padding: PILL_PAD,
+    gap: TAB_GAP,
   },
   tabBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: TAB_W,
+    height: TAB_W,
+    borderRadius: TAB_W / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -124,5 +162,13 @@ const styles = StyleSheet.create({
     width: 1,
     height: 24,
     marginHorizontal: 2,
+  },
+  activePill: {
+    position: 'absolute',
+    top: PILL_PAD,
+    left: PILL_PAD,
+    width: TAB_W,
+    height: TAB_W,
+    borderRadius: TAB_W / 2,
   },
 });

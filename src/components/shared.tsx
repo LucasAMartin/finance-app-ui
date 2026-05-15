@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
 import { Theme } from '../theme';
 
 // ── Money display ──────────────────────────────────────────────
@@ -34,24 +34,81 @@ interface SegmentedProps {
   theme: Theme;
 }
 
+const SEG_SPRING = { tension: 220, friction: 22, useNativeDriver: true } as const;
+
 export function Segmented({ value, onChange, options, theme }: SegmentedProps) {
+  const normalized = options.map(o =>
+    typeof o === 'string' ? { value: o, label: o } : o,
+  );
+  const activeIndex = Math.max(0, normalized.findIndex(o => o.value === value));
+
+  // Measure widths of each segment so the sliding pill can land on the exact position
+  // regardless of label length. Padded by 0 since the buttons set their own padding.
+  const [segWidths, setSegWidths] = useState<number[]>([]);
+  const idx = useRef(new Animated.Value(activeIndex)).current;
+
+  useEffect(() => {
+    Animated.spring(idx, { ...SEG_SPRING, toValue: activeIndex }).start();
+  }, [activeIndex]);
+
+  const onSegLayout = (i: number) => (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setSegWidths(prev => {
+      if (prev[i] === w) return prev;
+      const next = prev.slice();
+      next[i] = w;
+      return next;
+    });
+  };
+
+  // All widths known? Build the interpolation offsets (cumulative left positions).
+  const measured = segWidths.length === normalized.length && segWidths.every(w => w > 0);
+  const offsets = measured
+    ? normalized.reduce<number[]>((acc, _, i) => {
+        const prev = i === 0 ? 0 : acc[i - 1] + segWidths[i - 1];
+        return [...acc, prev];
+      }, [])
+    : null;
+
+  const slideTX = measured && offsets
+    ? idx.interpolate({
+        inputRange: normalized.map((_, i) => i),
+        outputRange: offsets,
+      })
+    : null;
+
+  const handlePress = (v: string, i: number) => {
+    Animated.spring(idx, { ...SEG_SPRING, toValue: i }).start();
+    onChange(v);
+  };
+
+  const activeW = measured ? segWidths[activeIndex] : 0;
+
   return (
     <View style={[styles.segOuter, { backgroundColor: theme.chipBg }]}>
-      {options.map(o => {
-        const v = typeof o === 'string' ? o : o.value;
-        const label = typeof o === 'string' ? o : o.label;
-        const active = v === value;
+      {slideTX != null && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.segActive,
+            {
+              width: activeW,
+              backgroundColor: theme.text,
+              transform: [{ translateX: slideTX }],
+            },
+          ]}
+        />
+      )}
+      {normalized.map((o, i) => {
+        const active = o.value === value;
         return (
           <TouchableOpacity
-            key={v}
-            onPress={() => onChange(v)}
+            key={o.value}
+            onPress={() => handlePress(o.value, i)}
+            onLayout={onSegLayout(i)}
             activeOpacity={0.7}
-            style={[
-              styles.segBtn,
-              active && {
-                backgroundColor: theme.text,
-              },
-            ]}
+            delayPressIn={0}
+            style={styles.segBtn}
           >
             <Text
               style={{
@@ -61,7 +118,7 @@ export function Segmented({ value, onChange, options, theme }: SegmentedProps) {
                 letterSpacing: 0.2,
               }}
             >
-              {label}
+              {o.label}
             </Text>
           </TouchableOpacity>
         );
@@ -171,7 +228,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderRadius: 100,
     padding: 3,
-    gap: 2,
+    position: 'relative',
   },
   segBtn: {
     paddingHorizontal: 11,
@@ -179,6 +236,13 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  segActive: {
+    position: 'absolute',
+    top: 3,
+    left: 3,
+    bottom: 3,
+    borderRadius: 100,
   },
   circleBtn: {
     borderWidth: 1,

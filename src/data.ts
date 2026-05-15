@@ -45,6 +45,7 @@ export interface UpcomingBill {
   id: string;
   name: string;
   icon: string;
+  cat: string;
   amount: number;
   dueDate: string;
   daysUntil: number;
@@ -52,9 +53,9 @@ export interface UpcomingBill {
 }
 
 export const UPCOMING_BILLS: UpcomingBill[] = [
-  { id: 'b1', name: 'Rent',    icon: 'home',   amount: 1200,  dueDate: 'May 28', daysUntil: 14 },
-  { id: 'b2', name: 'Spotify', icon: 'film',   amount: 10.99, dueDate: 'May 30', daysUntil: 16 },
-  { id: 'b3', name: 'PG&E',    icon: 'doc',    amount: 95,    dueDate: 'Jun 8',  daysUntil: 25, estimate: true },
+  { id: 'b1', name: 'Rent',    icon: 'home', cat: 'bills',         amount: 1200,  dueDate: 'May 28', daysUntil: 14 },
+  { id: 'b2', name: 'Spotify', icon: 'film', cat: 'entertainment', amount: 10.99, dueDate: 'May 30', daysUntil: 16 },
+  { id: 'b3', name: 'PG&E',    icon: 'doc',  cat: 'bills',         amount: 95,    dueDate: 'Jun 8',  daysUntil: 25, estimate: true },
 ];
 
 // Last 7 days sparkline data
@@ -156,3 +157,78 @@ export const TREND: Record<string, TrendConfig> = {
     budget: 2400, prev: 1840, periodLabel: 'month', span: 'past 6 months',
   },
 };
+
+// ─────────────────────────────────────────────────────────────
+// 50/30/20 spending groups — Needs / Wants / Savings.
+// Each group has a target share of monthly income; subcategories
+// carry their own spent vs budget figures.
+// ─────────────────────────────────────────────────────────────
+export interface SpendSub {
+  label: string;
+  icon: string;
+  spent: number;
+  budget: number;
+}
+export interface SpendGroup {
+  key: 'needs' | 'wants' | 'savings';
+  label: string;
+  targetPct: number; // 0.5 / 0.3 / 0.2 — the 50/30/20 rule
+  subs: SpendSub[];
+}
+
+export const MONTHLY_INCOME = 5200;
+
+export const SPEND_GROUPS: SpendGroup[] = [
+  {
+    key: 'needs',
+    label: 'Needs',
+    targetPct: 0.5,
+    subs: [
+      { label: 'Housing',        icon: 'home', spent: 1350, budget: 1350 },
+      { label: 'Groceries',      icon: 'cart', spent: 412,  budget: 500  },
+      { label: 'Transportation', icon: 'car',  spent: 286,  budget: 360  },
+      { label: 'Utilities',      icon: 'doc',  spent: 198,  budget: 240  },
+    ],
+  },
+  {
+    key: 'wants',
+    label: 'Wants',
+    targetPct: 0.3,
+    subs: [
+      { label: 'Dining',        icon: 'fork', spent: 318, budget: 400 },
+      { label: 'Shopping',      icon: 'bag',  spent: 240, budget: 300 },
+      { label: 'Entertainment', icon: 'film', spent: 142, budget: 180 },
+      { label: 'Coffee',        icon: 'cup',  spent: 88,  budget: 90  },
+    ],
+  },
+  {
+    key: 'savings',
+    label: 'Savings',
+    targetPct: 0.2,
+    subs: [
+      { label: 'Emergency fund', icon: 'tag',    spent: 600, budget: 650 },
+      { label: 'Retirement',     icon: 'repeat', spent: 415, budget: 415 },
+    ],
+  },
+];
+
+// ─────────────────────────────────────────────────────────────
+// Month-by-month budget history — drives the home Budget switcher.
+// Index 0 is the current month; later indices step into the past.
+// ─────────────────────────────────────────────────────────────
+export interface MonthBudget {
+  key: string;
+  month: string;
+  spent: number;
+  budget: number;
+  expectedPct: number;     // 1 for completed months
+  remainingLabel: string;
+}
+
+export const MONTH_BUDGETS: MonthBudget[] = [
+  { key: '2026-05', month: 'May',      spent: 400.07,  budget: 2400, expectedPct: 14 / 31, remainingLabel: '17 days remaining' },
+  { key: '2026-04', month: 'April',    spent: 2180.50, budget: 2400, expectedPct: 1, remainingLabel: 'Month complete' },
+  { key: '2026-03', month: 'March',    spent: 2540.00, budget: 2400, expectedPct: 1, remainingLabel: 'Month complete' },
+  { key: '2026-02', month: 'February', spent: 1975.30, budget: 2300, expectedPct: 1, remainingLabel: 'Month complete' },
+  { key: '2026-01', month: 'January',  spent: 2410.00, budget: 2400, expectedPct: 1, remainingLabel: 'Month complete' },
+];

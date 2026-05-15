@@ -13,11 +13,34 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, OVER_DOT } from '../theme';
 import { CATS } from '../data';
 import { Icon } from '../components/Icon';
-import { BackBtn } from '../components/shared';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 interface Props {
   theme: Theme;
-  onBack: () => void;
+  onOpenDrawer: () => void;
+}
+
+// Naked icon button — matches the home-screen header chrome.
+function IconBtn({
+  onPress,
+  children,
+  size = 40,
+}: {
+  onPress?: () => void;
+  children: React.ReactNode;
+  size?: number;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.5}
+      delayPressIn={0}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      style={[styles.iconBtn, { width: size, height: size }]}
+    >
+      {children}
+    </TouchableOpacity>
+  );
 }
 
 interface IncomeItem {
@@ -42,7 +65,7 @@ const initialExpenseBudgets = (): Record<string, number> => {
 const fmtMoney = (v: number) =>
   `$${Math.round(v).toLocaleString()}`;
 
-export function BudgetScreen({ theme, onBack }: Props) {
+export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const insets = useSafeAreaInsets();
   const card = getCardStyle(theme);
 
@@ -75,28 +98,27 @@ export function BudgetScreen({ theme, onBack }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Header: back + month + add ─────────────────── */}
-        <View style={styles.header}>
-          <BackBtn theme={theme} onBack={onBack} />
-          <View style={styles.monthNav}>
-            <TouchableOpacity style={styles.chevBtn}>
-              <Icon name="chevL" size={16} color={theme.textSec} />
-            </TouchableOpacity>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginHorizontal: 8 }}>
-              May 2026
-            </Text>
-            <TouchableOpacity style={styles.chevBtn}>
-              <Icon name="chevR" size={16} color={theme.textSec} />
-            </TouchableOpacity>
+        {/* ─── Header: home-style chrome (hamburger left, bell + theme right) ─ */}
+        <View style={styles.headerChrome}>
+          <IconBtn onPress={onOpenDrawer}>
+            <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
+          </IconBtn>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            <IconBtn>
+              <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
+            </IconBtn>
+            <ThemeToggle />
           </View>
-          <TouchableOpacity
-            style={[
-              styles.iconBtn,
-              { backgroundColor: theme.surface, borderColor: theme.hairline },
-            ]}
-          >
-            <Icon name="cal" size={17} color={theme.text} stroke={1.6} />
-          </TouchableOpacity>
+        </View>
+
+        {/* Title block — Budget + month indicator */}
+        <View style={styles.titleBlock}>
+          <Text style={{ fontSize: 13, color: theme.textSec, fontWeight: '500', marginBottom: 2 }}>
+            May 2026
+          </Text>
+          <Text style={{ fontSize: 26, fontWeight: '700', letterSpacing: -0.6, color: theme.text }}>
+            Budget
+          </Text>
         </View>
 
         {/* ─── Hero: Left to budget ─────────────────────────── */}
@@ -299,27 +321,17 @@ function EditableRow({
 }
 
 const styles = StyleSheet.create({
-  header: {
+  headerChrome: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 14,
+    paddingBottom: 8,
   },
-  monthNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  chevBtn: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
+  titleBlock: {
+    paddingBottom: 22,
+    paddingTop: 4,
   },
   iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

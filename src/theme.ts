@@ -36,15 +36,15 @@ export function makeTheme(
     dark,
     accent: ACCENTS[accentKey],
     cardStyle,
-    bg:       dark ? '#0D0D10' : '#F4F2EC',
-    surface:  dark ? '#16161A' : '#FFFFFF',
-    surface2: dark ? '#1D1D22' : '#FBFAF6',
-    text:     dark ? '#F4F2EC' : '#0E0E10',
-    textSec:  dark ? 'rgba(244,242,236,0.55)' : 'rgba(14,14,16,0.55)',
-    textTer:  dark ? 'rgba(244,242,236,0.32)' : 'rgba(14,14,16,0.32)',
-    sep:      dark ? 'rgba(255,255,255,0.08)' : 'rgba(14,14,16,0.08)',
-    hairline: dark ? 'rgba(255,255,255,0.10)' : 'rgba(14,14,16,0.10)',
-    chipBg:   dark ? 'rgba(255,255,255,0.06)' : 'rgba(14,14,16,0.04)',
+    bg:       dark ? '#0B1020' : '#F7F8FA',
+    surface:  dark ? '#141B2E' : '#FFFFFF',
+    surface2: dark ? '#1B2438' : '#FAFBFC',
+    text:     dark ? '#E8ECF5' : '#0E0E10',
+    textSec:  dark ? 'rgba(232,236,245,0.60)' : 'rgba(14,14,16,0.55)',
+    textTer:  dark ? 'rgba(232,236,245,0.36)' : 'rgba(14,14,16,0.32)',
+    sep:      dark ? 'rgba(173,189,222,0.10)' : 'rgba(14,14,16,0.08)',
+    hairline: dark ? 'rgba(173,189,222,0.14)' : 'rgba(14,14,16,0.10)',
+    chipBg:   dark ? 'rgba(173,189,222,0.08)' : 'rgba(14,14,16,0.04)',
   };
 }
 
@@ -77,15 +77,17 @@ export function getCardStyle(theme: Theme) {
   };
 }
 
-// Muted pastel colors for category chart segments
+// Muted pastel colors for category chart segments.
+// Dark variants tuned to read against the navy-blue dark background — bumped luminance
+// and cooled hues slightly so they sit naturally on #0B1020.
 export const CAT_PASTEL: Record<string, { light: string; dark: string }> = {
-  groceries:     { light: '#A3CCA8', dark: '#5C9A6E' },
-  dining:        { light: '#D5BA8E', dark: '#B8895A' },
-  transport:     { light: '#93B6CA', dark: '#5A8CA6' },
-  shopping:      { light: '#B5A7D6', dark: '#8171B5' },
-  coffee:        { light: '#C9C58C', dark: '#9E9B5A' },
-  bills:         { light: '#91C9C5', dark: '#5A9E9A' },
-  entertainment: { light: '#D5A7B5', dark: '#B5708A' },
+  groceries:     { light: '#A3CCA8', dark: '#7CC499' },
+  dining:        { light: '#D5BA8E', dark: '#D6A57A' },
+  transport:     { light: '#93B6CA', dark: '#7CB2D1' },
+  shopping:      { light: '#B5A7D6', dark: '#A296D6' },
+  coffee:        { light: '#C9C58C', dark: '#CBC57F' },
+  bills:         { light: '#91C9C5', dark: '#7BC4BF' },
+  entertainment: { light: '#D5A7B5', dark: '#D69BB2' },
 };
 
 export const catPastel = (cat: string, dark: boolean) =>
@@ -95,3 +97,28 @@ export const catPastel = (cat: string, dark: boolean) =>
 export const OVER_BG   = '#F4E9E5';
 export const OVER_TEXT = '#8A3218';
 export const OVER_DOT  = '#D4522A';
+
+// Accent colors for the three 50/30/20 spending groups.
+// Import GROUP_COLORS in any component that needs to color by group.
+export const GROUP_COLORS: Record<string, { light: string; dark: string }> = {
+  needs:   { light: '#5E82A8', dark: '#7CA0CB' },
+  wants:   { light: '#C19A4B', dark: '#D3AE5C' },
+  savings: { light: '#6E9B82', dark: '#74B394' },
+};
+
+// Maps every transaction category key to its spending group.
+// Add new categories here so icon colors stay consistent automatically.
+export const CAT_TO_GROUP: Record<string, 'needs' | 'wants' | 'savings'> = {
+  groceries:     'needs',
+  transport:     'needs',
+  bills:         'needs',
+  dining:        'wants',
+  shopping:      'wants',
+  entertainment: 'wants',
+  coffee:        'wants',
+};
+
+export function catGroupColor(cat: string, dark: boolean): string {
+  const group = CAT_TO_GROUP[cat] ?? 'wants';
+  return dark ? GROUP_COLORS[group].dark : GROUP_COLORS[group].light;
+}
