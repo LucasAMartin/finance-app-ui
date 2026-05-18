@@ -13,7 +13,13 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow finance-app to recognize speech so you can add expenses hands-free.",
+        "NSMicrophoneUsageDescription": "Allow finance-app to use the microphone to log expenses by voice.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.finance-app"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,10 +27,27 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow finance-app to use the microphone to log expenses by voice.",
+          "speechRecognitionPermission": "Allow finance-app to recognize speech so you can add expenses hands-free."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1763f437-ae34-458a-b522-5ab5ab6b3535"
+      }
     }
   }
 }

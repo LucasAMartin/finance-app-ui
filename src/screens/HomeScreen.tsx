@@ -410,18 +410,16 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
                       >
                         {m.month} {year}
                       </Text>
-                      <Text style={[styles.dropdownSub, { color: theme.textSec }]}>
-                        ${Math.round(m.spent).toLocaleString()} of ${m.budget.toLocaleString()}
-                        {over ? '  ·  Over budget' : ''}
-                      </Text>
+                      
                     </View>
                     {selected && (
                       <View style={[styles.dropdownDot, { backgroundColor: theme.accent.dot }]} />
                     )}
                   </TouchableOpacity>
+
                 );
               })
-            )}
+            )}F
           </ScrollView>
         </View>
       </Modal>

@@ -9,16 +9,10 @@ import { Icon } from './Icon';
 import { Money } from './shared';
 import { getCardStyle } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useVoiceRecognition } from '../voice/useVoiceRecognition';
+import { parseVoiceExpense } from '../voice/parseVoiceExpense';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-
-const VOICE_SCRIPT = [
-  { t: 280,  text: 'Coffee' },
-  { t: 680,  text: 'Coffee at' },
-  { t: 1100, text: 'Coffee at Blue Bottle' },
-  { t: 2050, text: 'Coffee at Blue Bottle six' },
-  { t: 2400, text: 'Coffee at Blue Bottle six fifty' },
-];
 
 type Mode = 'idle' | 'listening' | 'parsed' | 'manual';
 
@@ -34,13 +28,16 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
   const [mode, setMode] = useState<Mode>('idle');
-  const [transcript, setTranscript] = useState('');
   const [parsed, setParsed] = useState({ amount: 0, cat: 'coffee', merchant: '' });
   const [manualAmt, setManualAmt] = useState('0');
   const [manualCat, setManualCat] = useState('groceries');
   const [manualMerchant, setManualMerchant] = useState('');
 
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const voice = useVoiceRecognition();
+  // Mirror the transcript in a ref so the listening effect can read the final
+  // value without re-running on every interim word.
+  const transcriptRef = useRef('');
+  useEffect(() => { transcriptRef.current = voice.transcript; }, [voice.transcript]);
 
   // Waveform animations
   const barAnims = useRef(Array.from({ length: 24 }, () => new Animated.Value(0))).current;
@@ -67,60 +64,44 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
 
   useEffect(() => {
     if (visible) {
-      setTranscript('');
+      setMode('idle');
       setManualAmt('0');
       setManualCat('groceries');
       setManualMerchant('');
+      voice.reset();
       Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, damping: 22, stiffness: 200, useNativeDriver: true }),
         Animated.timing(backdropAnim, { toValue: 1, duration: 280, useNativeDriver: true }),
       ]).start();
-      // Auto-begin voice transcription
-      setMode('listening');
-      startWave();
-      timers.current = VOICE_SCRIPT.map(s =>
-        setTimeout(() => setTranscript(s.text), s.t)
-      );
-      timers.current.push(setTimeout(() => {
-        stopWave();
-        setParsed({ amount: 6.50, cat: 'coffee', merchant: 'Blue Bottle' });
-        setMode('parsed');
-      }, 2900));
+      // Auto-begin voice transcription (prompts for permission on first use)
+      voice.start();
     } else {
+      voice.abort();
       stopWave();
-      timers.current.forEach(clearTimeout);
       Animated.parallel([
         Animated.timing(slideAnim, { toValue: SCREEN_H, duration: 300, useNativeDriver: true }),
         Animated.timing(backdropAnim, { toValue: 0, duration: 280, useNativeDriver: true }),
       ]).start();
     }
-    return () => { timers.current.forEach(clearTimeout); stopWave(); };
+    return () => { stopWave(); };
   }, [visible]);
 
-  const startListen = () => {
-    setMode('listening');
-    setTranscript('');
-    startWave();
-    timers.current = VOICE_SCRIPT.map(s =>
-      setTimeout(() => setTranscript(s.text), s.t)
-    );
-    timers.current.push(setTimeout(() => {
-      stopWave();
-      setParsed({ amount: 6.50, cat: 'coffee', merchant: 'Blue Bottle' });
-      setMode('parsed');
-    }, 2900));
-  };
-
-  const stopListen = () => {
-    timers.current.forEach(clearTimeout);
-    stopWave();
-    if (transcript) {
-      setParsed({ amount: 6.50, cat: 'coffee', merchant: 'Blue Bottle' });
-      setMode('parsed');
-    } else {
-      setMode('idle');
+  // Drive the UI mode + waveform from the recognizer's listening state.
+  // When a session ends, parse the final transcript into budget fields.
+  useEffect(() => {
+    if (voice.listening) {
+      setMode('listening');
+      startWave();
+      return;
     }
-  };
+    stopWave();
+    const finalText = transcriptRef.current.trim();
+    setMode(m => (m === 'listening' ? (finalText ? 'parsed' : 'idle') : m));
+    if (finalText) setParsed(parseVoiceExpense(finalText));
+  }, [voice.listening]);
+
+  const startListen = () => { voice.start(); };
+  const stopListen = () => { voice.stop(); };
 
   const press = (k: string) => {
     setManualAmt(a => {
@@ -186,13 +167,17 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
               {/* Transcript area */}
               <View style={styles.transcriptArea}>
                 {mode === 'listening' ? (
-                  transcript ? (
+                  voice.transcript ? (
                     <Text style={{ fontSize: 22, fontWeight: '600', letterSpacing: -0.5, color: theme.text, textAlign: 'center' }}>
-                      {transcript}
+                      {voice.transcript}
                     </Text>
                   ) : (
                     <Text style={{ fontSize: 15, color: theme.textTer }}>I'm listening…</Text>
                   )
+                ) : voice.error ? (
+                  <Text style={{ fontSize: 13, color: theme.textSec, lineHeight: 20, textAlign: 'center' }}>
+                    {voice.error}
+                  </Text>
                 ) : (
                   <Text style={{ fontSize: 13, color: theme.textSec, lineHeight: 20, textAlign: 'center' }}>
                     Try <Text style={{ color: theme.text, fontWeight: '600' }}>"Coffee at Blue Bottle, six fifty"</Text>
@@ -260,8 +245,8 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
               {/* Transcript chip */}
               <View style={[styles.transcriptChip, { backgroundColor: theme.chipBg }]}>
                 <Icon name="mic" size={14} color={theme.textSec} />
-                <Text style={{ flex: 1, fontSize: 13, color: theme.textSec, marginLeft: 8 }}>"{transcript}"</Text>
-                <TouchableOpacity onPress={() => { setMode('idle'); setTranscript(''); }}>
+                <Text style={{ flex: 1, fontSize: 13, color: theme.textSec, marginLeft: 8 }}>"{voice.transcript}"</Text>
+                <TouchableOpacity onPress={() => voice.start()}>
                   <Text style={{ color: theme.text, fontSize: 12, fontWeight: '600' }}>Redo</Text>
                 </TouchableOpacity>
               </View>
