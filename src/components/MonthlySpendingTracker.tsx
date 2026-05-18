@@ -159,19 +159,8 @@ const styles = StyleSheet.create({
     padding: 22,
     marginBottom: 14,
   },
-  title: {
-    fontSize: 17,
-    fontWeight: '600',
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    fontSize: 12.5,
-    fontWeight: '500',
-    marginTop: 6,
-    lineHeight: 17,
-  },
   barWrap: {
-    marginTop: 24,
+    marginTop: 16,
     marginBottom: 22,
     position: 'relative',
     height: 26,

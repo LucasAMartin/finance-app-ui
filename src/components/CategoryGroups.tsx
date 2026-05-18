@@ -9,12 +9,16 @@ interface Props {
   theme: Theme;
   groups: SpendGroup[];
   income: number;
+  naked?: boolean;
 }
 
-export function CategoryGroups({ theme, groups, income }: Props) {
+export function CategoryGroups({ theme, groups, income, naked }: Props) {
   const card = getCardStyle(theme);
+  const containerStyle = naked
+    ? { paddingVertical: 4 }
+    : [card, { paddingVertical: 4, marginBottom: 14 }];
   return (
-    <View style={[card, { paddingVertical: 4, marginBottom: 14 }]}>
+    <View style={containerStyle}>
       {groups.map((g, i) => (
         <GroupRow
           key={g.key}
@@ -22,6 +26,7 @@ export function CategoryGroups({ theme, groups, income }: Props) {
           group={g}
           income={income}
           last={i === groups.length - 1}
+          naked={naked}
         />
       ))}
     </View>
@@ -33,11 +38,13 @@ function GroupRow({
   group,
   income,
   last,
+  naked,
 }: {
   theme: Theme;
   group: SpendGroup;
   income: number;
   last: boolean;
+  naked?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rot = useRef(new Animated.Value(0)).current;
@@ -68,7 +75,7 @@ function GroupRow({
   const fill = Math.min(actualPct / group.targetPct, 1);
 
   return (
-    <View style={[styles.group, { borderBottomColor: theme.sep, borderBottomWidth: last ? 0 : 1 }]}>
+    <View style={[styles.group, { borderBottomColor: theme.sep, borderBottomWidth: last ? 0 : 1, paddingHorizontal: naked ? 0 : 18 }]}>
       <TouchableOpacity
         onPress={() => setOpen(o => !o)}
         activeOpacity={0.6}
@@ -140,9 +147,7 @@ function GroupRow({
 }
 
 const styles = StyleSheet.create({
-  group: {
-    paddingHorizontal: 18,
-  },
+  group: {},
   groupHead: {
     flexDirection: 'row',
     alignItems: 'center',

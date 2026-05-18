@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, getCardStyle, catGroupColor, OVER_DOT } from '../theme';
+import { Theme, catGroupColor, OVER_DOT, OVER_BG, OVER_TEXT } from '../theme';
 import { Skeleton } from '../components/Skeleton';
 import {
   CATS,
@@ -24,9 +24,73 @@ import {
 } from '../data';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
-import { MonthlySpendingTracker } from '../components/MonthlySpendingTracker';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { CategoryGroups } from '../components/CategoryGroups';
+import { ThemeToggle } from '../components/ThemeToggle';
+
+// ── Tick bar gradient ────────────────────────────────────────────
+const TICK_COUNT = 30;
+const STOPS_LIGHT = ['#7A9D85', '#C5A946', '#C25A2E'];
+const STOPS_DARK  = ['#6FAF8A', '#D5B958', '#E36A3A'];
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+function rgbToHex(r: number, g: number, b: number) {
+  return '#' + [r, g, b].map(v =>
+    Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')
+  ).join('');
+}
+function gradientAt(t: number, dark: boolean): string {
+  const stops = dark ? STOPS_DARK : STOPS_LIGHT;
+  const [c1, c2, c3] = stops.map(hexToRgb);
+  if (t < 0.5) {
+    const u = t / 0.5;
+    return rgbToHex(lerp(c1[0],c2[0],u), lerp(c1[1],c2[1],u), lerp(c1[2],c2[2],u));
+  }
+  const u = (t - 0.5) / 0.5;
+  return rgbToHex(lerp(c2[0],c3[0],u), lerp(c2[1],c3[1],u), lerp(c2[2],c3[2],u));
+}
+
+// ── Date greeting ────────────────────────────────────────────────
+const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function getDateGreeting(): string {
+  const d = new Date();
+  return `${WEEKDAYS[d.getDay()]}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
+}
+
+// ── Month donut (picker) ─────────────────────────────────────────
+function MonthDonut({ spent, budget, dark }: { spent: number; budget: number; dark: boolean }) {
+  const SIZE = 38, STROKE = 3.5;
+  const R = (SIZE - STROKE) / 2;
+  const CIRC = 2 * Math.PI * R;
+  const fill = budget > 0 ? Math.min(spent / budget, 1) : 0;
+  const over = spent > budget;
+  const dashOffset = CIRC * (1 - fill);
+  const trackColor = dark ? 'rgba(173,189,222,0.14)' : 'rgba(14,14,16,0.08)';
+  const fillColor = over ? OVER_DOT : '#6E9B82';
+  return (
+    <Svg width={SIZE} height={SIZE} style={{ transform: [{ rotate: '-90deg' }] }}>
+      <Circle cx={SIZE/2} cy={SIZE/2} r={R} stroke={trackColor} strokeWidth={STROKE} fill="none" />
+      {fill > 0 && (
+        <Circle cx={SIZE/2} cy={SIZE/2} r={R} stroke={fillColor} strokeWidth={STROKE} fill="none"
+          strokeDasharray={`${CIRC} ${CIRC}`} strokeDashoffset={dashOffset} strokeLinecap="round" />
+      )}
+    </Svg>
+  );
+}
+
+function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.5} delayPressIn={0}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      style={[styles.iconBtn, { width: size, height: size }]}>
+      {children}
+    </TouchableOpacity>
+  );
+}
 
 interface Props {
   theme: Theme;
@@ -36,82 +100,8 @@ interface Props {
   onOpenDrawer: () => void;
 }
 
-function IconBtn({
-  onPress,
-  children,
-  size = 40,
-}: {
-  onPress?: () => void;
-  children: React.ReactNode;
-  size?: number;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.5}
-      delayPressIn={0}
-      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-      style={[styles.iconBtn, { width: size, height: size }]}
-    >
-      {children}
-    </TouchableOpacity>
-  );
-}
-
-// Donut progress ring for the month picker
-function MonthDonut({
-  spent,
-  budget,
-  dark,
-}: {
-  spent: number;
-  budget: number;
-  dark: boolean;
-}) {
-  const SIZE = 38;
-  const STROKE = 3.5;
-  const R = (SIZE - STROKE) / 2;
-  const CIRC = 2 * Math.PI * R;
-  const fill = budget > 0 ? Math.min(spent / budget, 1) : 0;
-  const over = spent > budget;
-  const dashOffset = CIRC * (1 - fill);
-  const trackColor = dark ? 'rgba(173,189,222,0.14)' : 'rgba(14,14,16,0.08)';
-  const fillColor = over ? OVER_DOT : '#6E9B82';
-
-  return (
-    <Svg
-      width={SIZE}
-      height={SIZE}
-      style={{ transform: [{ rotate: '-90deg' }] }}
-    >
-      <Circle
-        cx={SIZE / 2}
-        cy={SIZE / 2}
-        r={R}
-        stroke={trackColor}
-        strokeWidth={STROKE}
-        fill="none"
-      />
-      {fill > 0 && (
-        <Circle
-          cx={SIZE / 2}
-          cy={SIZE / 2}
-          r={R}
-          stroke={fillColor}
-          strokeWidth={STROKE}
-          fill="none"
-          strokeDasharray={`${CIRC} ${CIRC}`}
-          strokeDashoffset={dashOffset}
-          strokeLinecap="round"
-        />
-      )}
-    </Svg>
-  );
-}
-
 export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, onOpenDrawer }: Props) {
   const insets = useSafeAreaInsets();
-  const card = getCardStyle(theme);
 
   const groups = useMemo(() => {
     const g: Record<string, Transaction[]> = { today: [], yesterday: [], earlier: [] };
@@ -138,10 +128,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
   const onRefresh = () => {
     setRefreshing(true);
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setRefreshing(false);
-    }, 1100);
+    setTimeout(() => { setLoading(false); setRefreshing(false); }, 1100);
   };
 
   const openMonthPicker = () => {
@@ -151,10 +138,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
     });
   };
 
-  const closeDropdown = () => {
-    setMonthDropdownOpen(false);
-    setFilterText('');
-  };
+  const closeDropdown = () => { setMonthDropdownOpen(false); setFilterText(''); };
 
   const filteredMonths = MONTH_BUDGETS.map((m, idx) => ({ m, idx })).filter(({ m }) => {
     const q = filterText.toLowerCase().trim();
@@ -163,6 +147,21 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
     return m.month.toLowerCase().includes(q) || year.includes(q);
   });
 
+  // Budget computations
+  const BAR_MAX = 1.2;
+  const rawPct = mb.budget > 0 ? mb.spent / mb.budget : 0;
+  const barPct = Math.min(Math.max(rawPct, 0), BAR_MAX) / BAR_MAX;
+  const available = Math.max(mb.budget - mb.spent, 0);
+  const overage = mb.spent - mb.budget;
+  const over = mb.spent > mb.budget;
+  const onTarget = !over && rawPct <= mb.expectedPct * 1.05;
+  const statusText = over ? 'Over budget' : onTarget ? 'On target' : 'Off target';
+  const statusChipBg = onTarget ? theme.accent.fill : OVER_BG;
+  const statusChipFg = onTarget ? theme.accent.ink : OVER_TEXT;
+  const todayTickIndex = Math.round((mb.expectedPct / BAR_MAX) * (TICK_COUNT - 1));
+
+  const dateGreeting = getDateGreeting();
+
   return (
     <>
       <ScrollView
@@ -170,256 +169,224 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={theme.textSec}
-            colors={[theme.accent.dot]}
-            progressBackgroundColor={theme.surface}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
+            tintColor={theme.textSec} colors={[theme.accent.dot]}
+            progressBackgroundColor={theme.surface} />
         }
       >
-        {/* ─── Header ─────────────────────────────────────── */}
-        <View style={[styles.headerChrome, { paddingTop: insets.top + 8 }]}>
-          <IconBtn onPress={onOpenDrawer}>
-            <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
-          </IconBtn>
-          <View style={{ flexDirection: 'row', gap: 4 }}>
-            <IconBtn>
-              <View>
-                <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
-                <View
-                  style={[
-                    styles.bellDot,
-                    { backgroundColor: theme.accent.dot, borderColor: theme.bg },
-                  ]}
-                />
-              </View>
-            </IconBtn>
-            <ThemeToggle />
-          </View>
-        </View>
 
-        {/* ─── 1. {Month} Budget ──────────────────────────── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <View ref={triggerRef} collapsable={false}>
-              <TouchableOpacity
-                onPress={openMonthPicker}
-                activeOpacity={0.7}
-                delayPressIn={0}
-                style={styles.monthTrigger}
-              >
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                  {mb.month} Budget
-                </Text>
-                <View style={{ marginLeft: 6, marginTop: 1 }}>
-                  <Icon name="chevDown" size={14} color={theme.textSec} stroke={1.9} />
+        {/* ─── Header ─────────────────────────────────────── */}
+        <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+          <View style={styles.headerRow}>
+            <IconBtn onPress={onOpenDrawer}>
+              <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
+            </IconBtn>
+            <View style={{ flexDirection: 'row', gap: 4 }}>
+              <IconBtn>
+                <View>
+                  <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
+                  <View style={[styles.bellDot, { backgroundColor: theme.accent.dot, borderColor: theme.bg }]} />
                 </View>
-              </TouchableOpacity>
+              </IconBtn>
+              <ThemeToggle />
             </View>
           </View>
+          <Text style={[styles.dateGreeting, { color: theme.textTer }]}>{dateGreeting}</Text>
+        </View>
+
+        {/* ─── Budget hero ────────────────────────────────── */}
+        <View style={styles.budgetHero}>
+          <View ref={triggerRef} collapsable={false}>
+            <TouchableOpacity onPress={openMonthPicker} activeOpacity={0.7} delayPressIn={0}
+              hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+              style={styles.monthTrigger}>
+              <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>
+                {mb.month} budget
+              </Text>
+              <Icon name="chevDown" size={11} color={theme.textTer} stroke={2} />
+              {!loading && (
+                <View style={[styles.statusChip, { backgroundColor: statusChipBg }]}>
+                  <Text style={[styles.statusChipText, { color: statusChipFg }]}>{statusText}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
           {loading ? (
-            <TrackerSkeleton theme={theme} />
+            <>
+              <Skeleton width={190} height={50} radius={8} style={{ marginBottom: 5 }} />
+              <Skeleton width={130} height={13} radius={4} style={{ marginBottom: 18 }} />
+              <Skeleton width="100%" height={22} radius={4} style={{ marginBottom: 12 }} />
+              <Skeleton width="60%" height={13} radius={4} />
+            </>
           ) : (
-            <MonthlySpendingTracker
-              theme={theme}
-              spent={mb.spent}
-              budget={mb.budget}
-              remainingLabel={mb.remainingLabel}
-              expectedPct={mb.expectedPct}
-            />
+            <>
+              {over ? (
+                <>
+                  <Money value={overage} size={48} weight="700" prefix="-$" theme={theme} color={OVER_DOT} />
+                  <Text style={[styles.availableLabel, { color: theme.textSec }]}>over budget this month</Text>
+                </>
+              ) : (
+                <>
+                  <Money value={available} size={48} weight="700" prefix="$" theme={theme} color={theme.accent.dot} />
+                  <Text style={[styles.availableLabel, { color: theme.textSec }]}>available this month</Text>
+                </>
+              )}
+
+              <View style={styles.tickBar}>
+                {Array.from({ length: TICK_COUNT }).map((_, i) => {
+                  const t = i / (TICK_COUNT - 1);
+                  const passed = t <= barPct + 0.5 / TICK_COUNT;
+                  const isToday = i === todayTickIndex;
+                  return (
+                    <View key={i} style={[
+                      styles.tick,
+                      {
+                        backgroundColor: isToday ? theme.text : gradientAt(t, theme.dark),
+                        opacity: isToday ? 1 : passed ? 1 : theme.dark ? 0.28 : 0.22,
+                      },
+                      isToday && styles.todayTick,
+                    ]} />
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.budgetMeta, { color: theme.textTer }]}>
+                {'of $'}{mb.budget.toLocaleString()}
+                {'  ·  '}{mb.remainingLabel}
+              </Text>
+            </>
           )}
         </View>
 
-        {/* ─── 2. Spending by category ─────────────────────── */}
+        <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+
+        {/* ─── Spending by category ─────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Spending by category</Text>
+            <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>Spending</Text>
             <TouchableOpacity onPress={onViewSpending} activeOpacity={0.6} delayPressIn={0}>
-              <Text style={[styles.sectionAction, { color: theme.textSec }]}>View all</Text>
+              <Text style={[styles.ledgerAction, { color: theme.textSec }]}>See all</Text>
             </TouchableOpacity>
           </View>
           {loading ? (
             <CategorySkeleton theme={theme} />
           ) : (
-            <CategoryGroups theme={theme} groups={SPEND_GROUPS} income={MONTHLY_INCOME} />
+            <CategoryGroups theme={theme} groups={SPEND_GROUPS} income={MONTHLY_INCOME} naked />
           )}
         </View>
 
-        {/* ─── 3. Upcoming bills ───────────────────────────── */}
+        <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+
+        {/* ─── Upcoming bills ───────────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Upcoming</Text>
-            <TouchableOpacity activeOpacity={0.6} delayPressIn={0}>
-              <Text style={[styles.sectionAction, { color: theme.textSec }]}>See all</Text>
-            </TouchableOpacity>
+            <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>Upcoming</Text>
           </View>
           {loading ? (
-            <RowsSkeleton theme={theme} count={3} />
+            <BillsSkeleton theme={theme} />
           ) : (
-            <View style={[card, { overflow: 'hidden', marginBottom: 14 }]}>
-              {UPCOMING_BILLS.map((b, i) => (
-                <View
-                  key={b.id}
-                  style={[
-                    styles.billRow,
-                    {
-                      borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0,
-                      borderBottomColor: theme.sep,
-                    },
-                  ]}
-                >
-                  <View style={[styles.txIcon, { backgroundColor: catGroupColor(b.cat, theme.dark) }]}>
-                    <Icon name={b.icon} size={16} color="#fff" stroke={1.6} />
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text
-                      style={{
-                        fontSize: 14,
-                        fontWeight: '600',
-                        letterSpacing: -0.2,
-                        color: theme.text,
-                      }}
-                    >
-                      {b.name}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 1 }}>
-                      {b.dueDate} · in {b.daysUntil} days
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
+            UPCOMING_BILLS.map((b, i) => (
+              <View key={b.id} style={[
+                styles.billRow,
+                { borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
+              ]}>
+                <View style={[styles.rowIcon, { backgroundColor: catGroupColor(b.cat, theme.dark) }]}>
+                  <Icon name={b.icon} size={16} color="#fff" stroke={1.6} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.rowTitle, { color: theme.text }]}>{b.name}</Text>
+                  <Text style={[styles.rowSub, { color: theme.textSec }]}>{b.dueDate}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 3 }}>
+                  <Text style={[styles.rowAmt, { color: theme.text }]}>
                     {b.estimate ? '~' : ''}${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}
                   </Text>
+                  <View style={[styles.daysChip, { backgroundColor: theme.accent.fill }]}>
+                    <Text style={[styles.daysChipText, { color: theme.accent.ink }]}>
+                      {b.daysUntil}d
+                    </Text>
+                  </View>
                 </View>
-              ))}
-            </View>
+              </View>
+            ))
           )}
         </View>
 
-        {/* ─── 4. Activity ─────────────────────────────────── */}
+        <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+
+        {/* ─── Activity ─────────────────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Activity</Text>
+            <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>Activity</Text>
             <TouchableOpacity onPress={onViewActivity} activeOpacity={0.6} delayPressIn={0}>
-              <Text style={[styles.sectionAction, { color: theme.textSec }]}>See all</Text>
+              <Text style={[styles.ledgerAction, { color: theme.textSec }]}>See all</Text>
             </TouchableOpacity>
           </View>
           {loading ? (
             <ActivitySkeleton theme={theme} />
           ) : (
-            <View>
-              {(['today', 'yesterday', 'earlier'] as const).map(
-                key =>
-                  groups[key].length > 0 && (
-                    <View key={key} style={{ marginBottom: 14 }}>
-                      <Text style={[styles.dayLabel, { color: theme.textTer }]}>
-                        {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
-                      </Text>
-                      <View style={[card, { overflow: 'hidden' }]}>
-                        {groups[key].map((tx, i, arr) => (
-                          <TxRow
-                            key={tx.id}
-                            tx={tx}
-                            theme={theme}
-                            onPress={() => onOpenTx(tx)}
-                            last={i === arr.length - 1}
-                          />
-                        ))}
-                      </View>
-                    </View>
-                  )
-              )}
-            </View>
+            (['today', 'yesterday', 'earlier'] as const).map(key =>
+              groups[key].length > 0 && (
+                <View key={key} style={{ marginBottom: 14 }}>
+                  <Text style={[styles.dayLabel, { color: theme.textTer }]}>
+                    {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
+                  </Text>
+                  {groups[key].map((tx, i, arr) => (
+                    <TxRow key={tx.id} tx={tx} theme={theme}
+                      onPress={() => onOpenTx(tx)} last={i === arr.length - 1} />
+                  ))}
+                </View>
+              )
+            )
           )}
         </View>
+
       </ScrollView>
 
-      {/* ─── Month picker modal ─────────────────────────────── */}
-      <Modal
-        visible={monthDropdownOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={closeDropdown}
-        statusBarTranslucent
-      >
-        <TouchableOpacity
-          style={StyleSheet.absoluteFillObject}
-          activeOpacity={1}
-          onPress={closeDropdown}
-        />
-        <View
-          style={[
-            styles.dropdown,
-            {
-              top: dropdownY,
-              backgroundColor: theme.surface,
-              borderColor: theme.hairline,
-              shadowColor: '#000',
-            },
-          ]}
-        >
-          {/* Search bar */}
+      {/* ─── Month picker modal ──────────────────────────── */}
+      <Modal visible={monthDropdownOpen} transparent animationType="fade"
+        onRequestClose={closeDropdown} statusBarTranslucent>
+        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={closeDropdown} />
+        <View style={[styles.dropdown, {
+          top: dropdownY,
+          backgroundColor: theme.surface,
+          borderColor: theme.hairline,
+          shadowColor: '#000',
+        }]}>
           <View style={[styles.dropdownSearchRow, { borderBottomColor: theme.sep }]}>
             <Icon name="search" size={15} color={theme.textTer} stroke={1.7} />
-            <TextInput
-              value={filterText}
-              onChangeText={setFilterText}
-              placeholder="Search months..."
-              placeholderTextColor={theme.textTer}
+            <TextInput value={filterText} onChangeText={setFilterText}
+              placeholder="Search months..." placeholderTextColor={theme.textTer}
               style={[styles.dropdownSearchInput, { color: theme.text }]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+              autoCapitalize="none" autoCorrect={false} />
           </View>
-
-          {/* Month list */}
           <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight: 280 }}>
             {filteredMonths.length === 0 ? (
               <Text style={[styles.dropdownEmpty, { color: theme.textTer }]}>No months found</Text>
             ) : (
-              filteredMonths.map(({ m, idx }) => {
+              filteredMonths.map(({ m, idx }, fi) => {
                 const year = m.key.split('-')[0];
                 const selected = idx === monthIdx;
-                const over = m.spent > m.budget;
                 return (
-                  <TouchableOpacity
-                    key={m.key}
-                    activeOpacity={0.7}
-                    delayPressIn={0}
-                    onPress={() => {
-                      setMonthIdx(idx);
-                      closeDropdown();
-                    }}
-                    style={[
-                      styles.dropdownRow,
-                      {
-                        borderBottomColor: theme.sep,
-                        borderBottomWidth: idx < MONTH_BUDGETS.length - 1 ? 1 : 0,
-                        backgroundColor: selected ? theme.chipBg : 'transparent',
-                      },
-                    ]}
-                  >
+                  <TouchableOpacity key={m.key} activeOpacity={0.7} delayPressIn={0}
+                    onPress={() => { setMonthIdx(idx); closeDropdown(); }}
+                    style={[styles.dropdownRow, {
+                      borderBottomColor: theme.sep,
+                      borderBottomWidth: fi < filteredMonths.length - 1 ? 1 : 0,
+                      backgroundColor: selected ? theme.chipBg : 'transparent',
+                    }]}>
                     <MonthDonut spent={m.spent} budget={m.budget} dark={theme.dark} />
                     <View style={{ flex: 1, marginLeft: 14 }}>
-                      <Text
-                        style={[
-                          styles.dropdownLabel,
-                          { color: selected ? theme.accent.dot : theme.text },
-                        ]}
-                      >
+                      <Text style={[styles.dropdownLabel, { color: selected ? theme.accent.dot : theme.text }]}>
                         {m.month} {year}
                       </Text>
-                      
                     </View>
-                    {selected && (
-                      <View style={[styles.dropdownDot, { backgroundColor: theme.accent.dot }]} />
-                    )}
+                    {selected && <View style={[styles.dropdownDot, { backgroundColor: theme.accent.dot }]} />}
                   </TouchableOpacity>
-
                 );
               })
-            )}F
+            )}
           </ScrollView>
         </View>
       </Modal>
@@ -427,48 +394,15 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
   );
 }
 
-// ── Skeleton loaders ────────────────────────────────────────────
-function TrackerSkeleton({ theme }: { theme: Theme }) {
-  const card = getCardStyle(theme);
-  return (
-    <View style={[card, { padding: 22, marginBottom: 14 }]}>
-      <Skeleton width="100%" height={22} radius={5} style={{ marginBottom: 22 }} />
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <View>
-          <Skeleton width={120} height={11} radius={4} style={{ marginBottom: 8 }} />
-          <Skeleton width={96} height={24} radius={6} />
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Skeleton width={84} height={11} radius={4} style={{ marginBottom: 8 }} />
-          <Skeleton width={96} height={24} radius={6} />
-        </View>
-      </View>
-      <View style={{ height: 1, marginTop: 16, marginBottom: 12, backgroundColor: theme.sep }} />
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Skeleton width={64} height={11} radius={4} />
-        <Skeleton width={96} height={11} radius={4} />
-      </View>
-    </View>
-  );
-}
-
+// ── Skeleton loaders ─────────────────────────────────────────────
 function CategorySkeleton({ theme }: { theme: Theme }) {
-  const card = getCardStyle(theme);
   return (
-    <View style={[card, { paddingVertical: 4, marginBottom: 14 }]}>
+    <View>
       {[0, 1, 2].map(i => (
-        <View
-          key={i}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 10,
-            paddingVertical: 16,
-            paddingHorizontal: 18,
-            borderBottomWidth: i < 2 ? 1 : 0,
-            borderBottomColor: theme.sep,
-          }}
-        >
+        <View key={i} style={{
+          flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 16,
+          borderBottomWidth: i < 2 ? 1 : 0, borderBottomColor: theme.sep,
+        }}>
           <Skeleton width={13} height={13} radius={4} />
           <View style={{ flex: 1, gap: 9 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -483,32 +417,22 @@ function CategorySkeleton({ theme }: { theme: Theme }) {
   );
 }
 
-function RowsSkeleton({
-  theme,
-  count,
-  marginBottom = 14,
-}: {
-  theme: Theme;
-  count: number;
-  marginBottom?: number;
-}) {
-  const card = getCardStyle(theme);
+function BillsSkeleton({ theme }: { theme: Theme }) {
   return (
-    <View style={[card, { overflow: 'hidden', marginBottom }]}>
-      {Array.from({ length: count }).map((_, i) => (
-        <View
-          key={i}
-          style={[
-            styles.billRow,
-            { borderBottomWidth: i < count - 1 ? 1 : 0, borderBottomColor: theme.sep },
-          ]}
-        >
+    <View>
+      {Array.from({ length: 3 }).map((_, i) => (
+        <View key={i} style={[styles.billRow, {
+          borderBottomWidth: i < 2 ? 1 : 0, borderBottomColor: theme.sep,
+        }]}>
           <Skeleton width={36} height={36} radius={18} />
           <View style={{ flex: 1, gap: 6 }}>
             <Skeleton width="48%" height={13} radius={4} />
-            <Skeleton width="32%" height={11} radius={4} />
+            <Skeleton width="28%" height={11} radius={4} />
           </View>
-          <Skeleton width={54} height={14} radius={4} />
+          <View style={{ alignItems: 'flex-end', gap: 4 }}>
+            <Skeleton width={54} height={14} radius={4} />
+            <Skeleton width={28} height={18} radius={4} />
+          </View>
         </View>
       ))}
     </View>
@@ -521,44 +445,36 @@ function ActivitySkeleton({ theme }: { theme: Theme }) {
       {[2, 3].map((rowCount, g) => (
         <View key={g} style={{ marginBottom: 14 }}>
           <Skeleton width={70} height={11} radius={4} style={{ marginBottom: 8, marginLeft: 2 }} />
-          <RowsSkeleton theme={theme} count={rowCount} marginBottom={0} />
+          {Array.from({ length: rowCount }).map((_, i) => (
+            <View key={i} style={[styles.txRow, {
+              borderBottomWidth: i < rowCount - 1 ? 1 : 0, borderBottomColor: theme.sep,
+            }]}>
+              <Skeleton width={36} height={36} radius={18} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Skeleton width="48%" height={13} radius={4} />
+                <Skeleton width="32%" height={11} radius={4} />
+              </View>
+              <Skeleton width={54} height={14} radius={4} />
+            </View>
+          ))}
         </View>
       ))}
     </View>
   );
 }
 
-// ── TxRow ───────────────────────────────────────────────────────
-function TxRow({
-  tx,
-  theme,
-  onPress,
-  last,
-}: {
-  tx: Transaction;
-  theme: Theme;
-  onPress: () => void;
-  last: boolean;
-}) {
+// ── TxRow ────────────────────────────────────────────────────────
+function TxRow({ tx, theme, onPress, last }: { tx: Transaction; theme: Theme; onPress: () => void; last: boolean }) {
   const cat = CATS[tx.cat];
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[styles.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: theme.sep }]}
-    >
-      <View style={[styles.txIcon, { backgroundColor: catGroupColor(tx.cat, theme.dark) }]}>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.6} delayPressIn={0}
+      style={[styles.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: theme.sep }]}>
+      <View style={[styles.rowIcon, { backgroundColor: catGroupColor(tx.cat, theme.dark) }]}>
         <Icon name={cat?.icon} size={16} color="#fff" stroke={1.6} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text
-          style={{ fontSize: 14, fontWeight: '600', letterSpacing: -0.2, color: theme.text }}
-          numberOfLines={1}
-        >
-          {tx.merchant}
-        </Text>
-        <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 1 }}>
-          {cat?.label} · {tx.time}
-        </Text>
+        <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>{tx.merchant}</Text>
+        <Text style={[styles.rowSub, { color: theme.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
       <Money value={tx.amount} size={14} weight="600" theme={theme} />
     </TouchableOpacity>
@@ -566,11 +482,15 @@ function TxRow({
 }
 
 const styles = StyleSheet.create({
-  headerChrome: {
+  // Header
+  headerWrap: {
+    marginBottom: 28,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 8,
+    paddingBottom: 10,
   },
   iconBtn: {
     alignItems: 'center',
@@ -585,62 +505,149 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     borderWidth: 1.5,
   },
-
-  section: {
-    marginBottom: 8,
-  },
-  sectionHead: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 2,
-    minHeight: 30,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  sectionAction: {
-    fontSize: 13,
+  dateGreeting: {
+    fontSize: 12,
     fontWeight: '500',
+    letterSpacing: 0.1,
+    paddingLeft: 2,
+  },
+
+  // Budget hero
+  budgetHero: {
+    marginBottom: 24,
   },
   monthTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+    paddingVertical: 8,
+  },
+  statusChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 100,
+    marginLeft: 4,
+  },
+  statusChipText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  availableLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 3,
+    marginBottom: 18,
+    letterSpacing: -0.1,
+  },
+  tickBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 22,
+    gap: 3,
+    marginBottom: 10,
+  },
+  tick: {
+    flex: 1,
+    height: 22,
+    borderRadius: 2,
+  },
+  todayTick: {
+    height: 28,
+    borderRadius: 3,
+  },
+  budgetMeta: {
+    fontSize: 11.5,
+    fontWeight: '500',
+    letterSpacing: -0.1,
   },
 
+  // Ledger section structure
+  divider: {
+    height: 1,
+    marginHorizontal: -20,
+    marginVertical: 22,
+  },
+  section: {},
+  sectionHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 2,
+  },
+  ledgerLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  ledgerAction: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+  },
+
+  // Day label in activity
   dayLabel: {
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
     paddingHorizontal: 2,
-    marginBottom: 8,
+    marginBottom: 6,
   },
 
-  billRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  txRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-  },
-  txIcon: {
+  // Shared row pieces
+  rowIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+  rowTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  rowSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  rowAmt: {
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+
+  // Bill row
+  billRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+  },
+  daysChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  daysChipText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+
+  // Transaction row
+  txRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
   },
 
   // Month picker dropdown
@@ -680,11 +687,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     letterSpacing: -0.2,
-    marginBottom: 3,
-  },
-  dropdownSub: {
-    fontSize: 12,
-    fontWeight: '500',
   },
   dropdownDot: {
     width: 8,
