@@ -19,7 +19,7 @@ export function Money({ value, size = 16, weight = '600', color, prefix = '−$'
   const col = color ?? theme.text;
   return (
     <Text style={{ fontSize: size, fontWeight: weight, color: col, letterSpacing: size > 30 ? -1.2 : -0.2 }}>
-      {prefix}{whole}<Text style={{ opacity: 0.45 }}>.{frac}</Text>
+      {prefix}{whole}.{frac}
     </Text>
   );
 }

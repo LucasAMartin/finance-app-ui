@@ -71,6 +71,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
             style={styles.tabBtn}
             activeOpacity={0.7}
             delayPressIn={0}
+            hitSlop={{ top: 12, bottom: 40, left: 8, right: 8 }}
           >
             <Icon
               name={t.icon}
@@ -89,6 +90,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
         style={[styles.tabBtn, { backgroundColor: theme.accent.fill }]}
         activeOpacity={0.7}
         delayPressIn={0}
+        hitSlop={{ top: 12, bottom: 40, left: 8, right: 8 }}
       >
         <Icon name="mic" size={20} color={theme.accent.ink} stroke={1.6} />
       </TouchableOpacity>

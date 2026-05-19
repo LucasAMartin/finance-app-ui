@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, catGroupColor, OVER_DOT, OVER_BG, OVER_TEXT } from '../theme';
+import { Theme, catGroupColor, OVER_DOT, cautionText } from '../theme';
 import { Skeleton } from '../components/Skeleton';
 import {
   CATS,
@@ -53,14 +53,6 @@ function gradientAt(t: number, dark: boolean): string {
   return rgbToHex(lerp(c2[0],c3[0],u), lerp(c2[1],c3[1],u), lerp(c2[2],c3[2],u));
 }
 
-// ── Date greeting ────────────────────────────────────────────────
-const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-function getDateGreeting(): string {
-  const d = new Date();
-  return `${WEEKDAYS[d.getDay()]}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
-}
-
 // ── Month donut (picker) ─────────────────────────────────────────
 function MonthDonut({ spent, budget, dark }: { spent: number; budget: number; dark: boolean }) {
   const SIZE = 38, STROKE = 3.5;
@@ -85,7 +77,7 @@ function MonthDonut({ spent, budget, dark }: { spent: number; budget: number; da
 function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.5} delayPressIn={0}
-      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
       style={[styles.iconBtn, { width: size, height: size }]}>
       {children}
     </TouchableOpacity>
@@ -154,18 +146,32 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
   const available = Math.max(mb.budget - mb.spent, 0);
   const overage = mb.spent - mb.budget;
   const over = mb.spent > mb.budget;
-  const onTarget = !over && rawPct <= mb.expectedPct * 1.05;
-  const statusText = over ? 'Over budget' : onTarget ? 'On target' : 'Off target';
-  const statusChipBg = onTarget ? theme.accent.fill : OVER_BG;
-  const statusChipFg = onTarget ? theme.accent.ink : OVER_TEXT;
   const todayTickIndex = Math.round((mb.expectedPct / BAR_MAX) * (TICK_COUNT - 1));
-
-  const dateGreeting = getDateGreeting();
+  const year = mb.key.split('-')[0];
+  const afterBudget = MONTHLY_INCOME - mb.budget;
 
   return (
-    <>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* ─── Header — outside ScrollView so gestures are never stolen ── */}
+      <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+        <View style={styles.headerRow}>
+          <IconBtn onPress={onOpenDrawer}>
+            <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
+          </IconBtn>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
+            <IconBtn>
+              <View>
+                <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
+                <View style={[styles.bellDot, { backgroundColor: theme.accent.dot, borderColor: theme.bg }]} />
+              </View>
+            </IconBtn>
+            <ThemeToggle />
+          </View>
+        </View>
+      </View>
+
       <ScrollView
-        style={{ flex: 1, backgroundColor: theme.bg }}
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -175,64 +181,40 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
         }
       >
 
-        {/* ─── Header ─────────────────────────────────────── */}
-        <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
-          <View style={styles.headerRow}>
-            <IconBtn onPress={onOpenDrawer}>
-              <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
-            </IconBtn>
-            <View style={{ flexDirection: 'row', gap: 4 }}>
-              <IconBtn>
-                <View>
-                  <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
-                  <View style={[styles.bellDot, { backgroundColor: theme.accent.dot, borderColor: theme.bg }]} />
-                </View>
-              </IconBtn>
-              <ThemeToggle />
-            </View>
-          </View>
-          <Text style={[styles.dateGreeting, { color: theme.textTer }]}>{dateGreeting}</Text>
-        </View>
-
         {/* ─── Budget hero ────────────────────────────────── */}
         <View style={styles.budgetHero}>
           <View ref={triggerRef} collapsable={false}>
             <TouchableOpacity onPress={openMonthPicker} activeOpacity={0.7} delayPressIn={0}
               hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
               style={styles.monthTrigger}>
-              <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>
-                {mb.month} budget
+              <Text style={[styles.monthLabel, { color: theme.textSec }]}>
+                {mb.month} {year}
               </Text>
-              <Icon name="chevDown" size={11} color={theme.textTer} stroke={2} />
+              <Icon name="chevDown" size={12} color={theme.textSec} stroke={2} />
               {!loading && (
-                <View style={[styles.statusChip, { backgroundColor: statusChipBg }]}>
-                  <Text style={[styles.statusChipText, { color: statusChipFg }]}>{statusText}</Text>
-                </View>
+                <Text style={[styles.monthLabel, { color: theme.textTer }]}>
+                  {'  ·  '}{mb.remainingLabel}
+                </Text>
               )}
             </TouchableOpacity>
           </View>
 
           {loading ? (
             <>
-              <Skeleton width={190} height={50} radius={8} style={{ marginBottom: 5 }} />
-              <Skeleton width={130} height={13} radius={4} style={{ marginBottom: 18 }} />
-              <Skeleton width="100%" height={22} radius={4} style={{ marginBottom: 12 }} />
-              <Skeleton width="60%" height={13} radius={4} />
+              <Skeleton width={200} height={38} radius={6} style={{ marginBottom: 18 }} />
+              <Skeleton width="100%" height={26} radius={4} />
+              <Skeleton width="100%" height={40} radius={6} style={{ marginTop: 20 }} />
             </>
           ) : (
             <>
-              {over ? (
-                <>
-                  <Money value={overage} size={48} weight="700" prefix="-$" theme={theme} color={OVER_DOT} />
-                  <Text style={[styles.availableLabel, { color: theme.textSec }]}>over budget this month</Text>
-                </>
-              ) : (
-                <>
-                  <Money value={available} size={48} weight="700" prefix="$" theme={theme} color={theme.accent.dot} />
-                  <Text style={[styles.availableLabel, { color: theme.textSec }]}>available this month</Text>
-                </>
-              )}
-
+              <View style={styles.heroAmountRow}>
+                <Text style={[styles.heroMainLabel, { color: theme.textSec }]}>
+                  {over ? 'over budget' : 'available'}
+                </Text>
+                <Money value={over ? overage : available} size={30} weight="700"
+                  prefix={over ? '-$' : '$'} theme={theme}
+                  color={over ? OVER_DOT : theme.text} />
+              </View>
               <View style={styles.tickBar}>
                 {Array.from({ length: TICK_COUNT }).map((_, i) => {
                   const t = i / (TICK_COUNT - 1);
@@ -251,10 +233,29 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
                 })}
               </View>
 
-              <Text style={[styles.budgetMeta, { color: theme.textTer }]}>
-                {'of $'}{mb.budget.toLocaleString()}
-                {'  ·  '}{mb.remainingLabel}
-              </Text>
+              {/* ─── Income / Budget / After-budget strip ── */}
+              <View style={[styles.incomeStrip, { borderTopColor: theme.sep }]}>
+                <View style={styles.incomeStat}>
+                  <Text style={[styles.incomeLabel, { color: theme.textTer }]}>Income</Text>
+                  <Text style={[styles.incomeValue, { color: theme.text }]}>
+                    ${MONTHLY_INCOME.toLocaleString()}
+                  </Text>
+                </View>
+                <View style={[styles.incomeDiv, { backgroundColor: theme.hairline }]} />
+                <View style={styles.incomeStat}>
+                  <Text style={[styles.incomeLabel, { color: theme.textTer }]}>Budget</Text>
+                  <Text style={[styles.incomeValue, { color: theme.text }]}>
+                    ${mb.budget.toLocaleString()}
+                  </Text>
+                </View>
+                <View style={[styles.incomeDiv, { backgroundColor: theme.hairline }]} />
+                <View style={styles.incomeStat}>
+                  <Text style={[styles.incomeLabel, { color: theme.textTer }]}>After budget</Text>
+                  <Text style={[styles.incomeValue, { color: afterBudget >= 0 ? theme.accent.dot : OVER_DOT }]}>
+                    ${afterBudget.toLocaleString()}
+                  </Text>
+                </View>
+              </View>
             </>
           )}
         </View>
@@ -264,7 +265,14 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
         {/* ─── Spending by category ─────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>Spending</Text>
+            <View>
+              <Text style={[styles.ledgerLabel, { color: theme.text }]}>Spending</Text>
+              {!loading && (
+                <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 2 }}>
+                  ${Math.round(mb.spent).toLocaleString()} of ${mb.budget.toLocaleString()} this month
+                </Text>
+              )}
+            </View>
             <TouchableOpacity onPress={onViewSpending} activeOpacity={0.6} delayPressIn={0}>
               <Text style={[styles.ledgerAction, { color: theme.textSec }]}>See all</Text>
             </TouchableOpacity>
@@ -281,7 +289,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
         {/* ─── Upcoming bills ───────────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>Upcoming</Text>
+            <Text style={[styles.ledgerLabel, { color: theme.text }]}>Upcoming</Text>
           </View>
           {loading ? (
             <BillsSkeleton theme={theme} />
@@ -296,18 +304,17 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={[styles.rowTitle, { color: theme.text }]}>{b.name}</Text>
-                  <Text style={[styles.rowSub, { color: theme.textSec }]}>{b.dueDate}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 3 }}>
-                  <Text style={[styles.rowAmt, { color: theme.text }]}>
-                    {b.estimate ? '~' : ''}${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}
-                  </Text>
-                  <View style={[styles.daysChip, { backgroundColor: theme.accent.fill }]}>
-                    <Text style={[styles.daysChipText, { color: theme.accent.ink }]}>
+                  <Text style={[styles.rowSub, { color: theme.textSec }]}>
+                    {b.dueDate}
+                    {'  ·  '}
+                    <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : theme.textSec }}>
                       {b.daysUntil}d
                     </Text>
-                  </View>
+                  </Text>
                 </View>
+                <Text style={[styles.rowAmt, { color: theme.textSec }]}>
+                  {b.estimate ? '~' : ''}${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}
+                </Text>
               </View>
             ))
           )}
@@ -318,7 +325,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
         {/* ─── Activity ─────────────────────────────────── */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.ledgerLabel, { color: theme.textTer }]}>Activity</Text>
+            <Text style={[styles.ledgerLabel, { color: theme.text }]}>Activity</Text>
             <TouchableOpacity onPress={onViewActivity} activeOpacity={0.6} delayPressIn={0}>
               <Text style={[styles.ledgerAction, { color: theme.textSec }]}>See all</Text>
             </TouchableOpacity>
@@ -390,7 +397,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
           </ScrollView>
         </View>
       </Modal>
-    </>
+    </View>
   );
 }
 
@@ -427,12 +434,9 @@ function BillsSkeleton({ theme }: { theme: Theme }) {
           <Skeleton width={36} height={36} radius={18} />
           <View style={{ flex: 1, gap: 6 }}>
             <Skeleton width="48%" height={13} radius={4} />
-            <Skeleton width="28%" height={11} radius={4} />
+            <Skeleton width="42%" height={11} radius={4} />
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-            <Skeleton width={54} height={14} radius={4} />
-            <Skeleton width={28} height={18} radius={4} />
-          </View>
+          <Skeleton width={54} height={14} radius={4} />
         </View>
       ))}
     </View>
@@ -476,7 +480,7 @@ function TxRow({ tx, theme, onPress, last }: { tx: Transaction; theme: Theme; on
         <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>{tx.merchant}</Text>
         <Text style={[styles.rowSub, { color: theme.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Money value={tx.amount} size={14} weight="600" theme={theme} />
+      <Money value={tx.amount} size={13} weight="500" theme={theme} color={theme.textSec} />
     </TouchableOpacity>
   );
 }
@@ -484,7 +488,8 @@ function TxRow({ tx, theme, onPress, last }: { tx: Transaction; theme: Theme; on
 const styles = StyleSheet.create({
   // Header
   headerWrap: {
-    marginBottom: 28,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
   headerRow: {
     flexDirection: 'row',
@@ -505,63 +510,76 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     borderWidth: 1.5,
   },
-  dateGreeting: {
-    fontSize: 12,
-    fontWeight: '500',
-    letterSpacing: 0.1,
-    paddingLeft: 2,
-  },
-
   // Budget hero
   budgetHero: {
-    marginBottom: 24,
+    marginBottom: 8,
+  },
+  monthLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   monthTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     alignSelf: 'flex-start',
-    marginBottom: 12,
     paddingVertical: 8,
+    marginBottom: 14,
   },
-  statusChip: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 100,
-    marginLeft: 4,
-  },
-  statusChipText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  availableLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    marginTop: 3,
+  heroAmountRow: {
     marginBottom: 18,
-    letterSpacing: -0.1,
+  },
+  heroMainLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    marginBottom: 5,
   },
   tickBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 22,
+    height: 26,
     gap: 3,
-    marginBottom: 10,
   },
   tick: {
     flex: 1,
-    height: 22,
+    height: 26,
     borderRadius: 2,
   },
   todayTick: {
-    height: 28,
+    height: 32,
     borderRadius: 3,
   },
-  budgetMeta: {
-    fontSize: 11.5,
-    fontWeight: '500',
-    letterSpacing: -0.1,
+
+  // Income / Budget / After-budget strip
+  incomeStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 22,
+    paddingTop: 18,
+    borderTopWidth: 1,
+  },
+  incomeStat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  incomeLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  incomeValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+  },
+  incomeDiv: {
+    width: 1,
+    height: 28,
   },
 
   // Ledger section structure
@@ -574,30 +592,30 @@ const styles = StyleSheet.create({
   sectionHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+    alignItems: 'flex-start',
+    marginBottom: 12,
     paddingHorizontal: 2,
   },
   ledgerLabel: {
-    fontSize: 11,
+    fontSize: 16,
     fontWeight: '600',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
+    letterSpacing: -0.3,
   },
   ledgerAction: {
     fontSize: 11,
     fontWeight: '500',
     letterSpacing: 0.2,
+    paddingTop: 3,
   },
 
   // Day label in activity
   dayLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.4,
+    fontSize: 10,
+    fontWeight: '500',
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
     paddingHorizontal: 2,
-    marginBottom: 6,
+    marginBottom: 8,
   },
 
   // Shared row pieces
@@ -619,8 +637,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   rowAmt: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
     letterSpacing: -0.2,
   },
 
@@ -630,16 +648,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 14,
-  },
-  daysChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  daysChipText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 0.1,
   },
 
   // Transaction row

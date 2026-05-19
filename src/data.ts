@@ -78,6 +78,8 @@ export interface PeriodData {
   expectedPct: number;    // 0–1, where we should be by now
   remainingLabel: string; // "4 days left in week" etc.
   byCat: { cat: string; value: number }[];
+  prevTotal: number;
+  prevByCat: { cat: string; value: number }[];
 }
 
 export const PERIOD_DATA: Record<string, PeriodData> = {
@@ -94,6 +96,13 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
       { cat: 'dining',    value: 62.40 },
       { cat: 'transport', value: 14.80 },
       { cat: 'coffee',    value: 6.50  },
+    ],
+    prevTotal: 212.50,
+    prevByCat: [
+      { cat: 'groceries', value: 120.50 },
+      { cat: 'dining',    value: 45.20  },
+      { cat: 'transport', value: 12.60  },
+      { cat: 'coffee',    value: 8.00   },
     ],
   },
   Month: {
@@ -113,6 +122,16 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
       { cat: 'entertainment', value: 10.99  },
       { cat: 'coffee',        value: 6.50   },
     ],
+    prevTotal: 485.20,
+    prevByCat: [
+      { cat: 'shopping',      value: 79.20  },
+      { cat: 'bills',         value: 92.18  },
+      { cat: 'groceries',     value: 94.30  },
+      { cat: 'dining',        value: 88.50  },
+      { cat: 'transport',     value: 12.00  },
+      { cat: 'entertainment', value: 13.99  },
+      { cat: 'coffee',        value: 5.80   },
+    ],
   },
   Year: {
     label: 'this year',
@@ -130,6 +149,16 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
       { cat: 'transport',     value: 980  },
       { cat: 'entertainment', value: 720  },
       { cat: 'coffee',        value: 500  },
+    ],
+    prevTotal: 11500,
+    prevByCat: [
+      { cat: 'bills',         value: 3900 },
+      { cat: 'groceries',     value: 2600 },
+      { cat: 'dining',        value: 2200 },
+      { cat: 'shopping',      value: 1200 },
+      { cat: 'transport',     value: 1100 },
+      { cat: 'entertainment', value: 820  },
+      { cat: 'coffee',        value: 480  },
     ],
   },
 };

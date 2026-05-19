@@ -30,7 +30,7 @@ export function ThemeToggle({ size = 40, iconSize = 22 }: Props) {
       onPress={toggleDark}
       activeOpacity={0.6}
       delayPressIn={0}
-      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
       accessibilityLabel={dark ? 'Switch to light mode' : 'Switch to dark mode'}
       style={[styles.btn, { width: size, height: size }]}
     >

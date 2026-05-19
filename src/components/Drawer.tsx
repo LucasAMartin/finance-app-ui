@@ -93,7 +93,7 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
           onPress={onClose}
           activeOpacity={0.5}
           delayPressIn={0}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
           style={styles.closeBtn}
         >
           <Icon name="close" size={22} color={theme.text} stroke={1.9} />

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Theme, getCardStyle, OVER_DOT, OVER_BG, OVER_TEXT } from '../theme';
+import { Theme, getCardStyle, OVER_DOT, overBg, overText } from '../theme';
 import { Money } from './shared';
 
 interface Props {
@@ -74,8 +74,8 @@ export function MonthlySpendingTracker({
   // On target: not over budget AND spending is within expected pace (±5% tolerance)
   const onTarget = !over && (!hasExpected || rawPct <= (expectedPct as number) * 1.05);
   const statusText = over ? 'Over budget' : onTarget ? 'On target' : 'Off target';
-  const statusBg = onTarget ? theme.accent.fill : OVER_BG;
-  const statusFg = onTarget ? theme.accent.ink : OVER_TEXT;
+  const statusBg = onTarget ? theme.accent.fill : overBg(theme.dark);
+  const statusFg = onTarget ? theme.accent.ink : overText(theme.dark);
 
   // Position the today-marker tick relative to the extended bar (÷ BAR_MAX).
   const todayBarFraction = hasExpected ? (expectedPct as number) / BAR_MAX : -1;

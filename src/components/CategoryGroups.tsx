@@ -87,13 +87,9 @@ function GroupRow({
         </Animated.View>
         <View style={{ flex: 1 }}>
           <View style={styles.groupTopRow}>
-            <Text style={[styles.groupName, { color: theme.text }]}>{group.label}</Text>
-            <Text style={[styles.groupPct, { color: theme.text }]}>
-              {Math.round(actualPct * 100)}%
-              <Text style={{ color: theme.textSec, fontWeight: '500' }}>
-                {'  /  '}
-                {Math.round(group.targetPct * 100)}% target
-              </Text>
+            <Text style={[styles.groupName, { color }]}>{group.label}</Text>
+            <Text style={[styles.groupAmt, { color: theme.text }]}>
+              ${groupTotal.toLocaleString()}
             </Text>
           </View>
           <View style={[styles.track, { backgroundColor: theme.hairline }]}>
@@ -101,6 +97,9 @@ function GroupRow({
               style={[styles.fill, { width: `${fill * 100}%`, backgroundColor: barColor }]}
             />
           </View>
+          <Text style={[styles.groupMeta, { color: theme.textTer }]}>
+            {Math.round(actualPct * 100)}% of {Math.round(group.targetPct * 100)}% target
+          </Text>
         </View>
       </TouchableOpacity>
 
@@ -111,8 +110,8 @@ function GroupRow({
             const subOver = sub.spent > sub.budget;
             return (
               <View key={sub.label} style={styles.subRow}>
-                <View style={[styles.subIcon, { backgroundColor: theme.chipBg }]}>
-                  <Icon name={sub.icon} size={15} color={theme.text} stroke={1.5} />
+                <View style={[styles.subIcon, { backgroundColor: `${color}1A` }]}>
+                  <Icon name={sub.icon} size={15} color={color} stroke={1.5} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <View style={styles.subTopRow}>
@@ -160,17 +159,24 @@ const styles = StyleSheet.create({
     marginBottom: 9,
   },
   groupName: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
-  groupPct: {
-    fontSize: 12.5,
-    fontWeight: '700',
+  groupAmt: {
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.2,
+  },
+  groupMeta: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: -0.1,
+    marginTop: 6,
   },
   track: {
-    height: 7,
-    borderRadius: 4,
+    height: 10,
+    borderRadius: 5,
     overflow: 'hidden',
   },
   fill: {

@@ -50,16 +50,13 @@ export function ActivityScreen({ theme, onBack, onOpenTx }: Props) {
   const dayKeys = Object.keys(grouped);
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: theme.bg }}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 50 }}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
-      {/* Header */}
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      {/* Header — outside ScrollView */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
           onPress={onBack}
+          delayPressIn={0}
+          hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
           style={[styles.circleBtn, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
         >
           <Icon name="chevL" size={18} color={theme.text} />
@@ -67,6 +64,13 @@ export function ActivityScreen({ theme, onBack, onOpenTx }: Props) {
         <Text style={{ fontSize: 20, fontWeight: '600', letterSpacing: -0.5, color: theme.text }}>All activity</Text>
         <View style={{ width: 38 }} />
       </View>
+
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 50 }}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
 
       {/* Search */}
       <View style={[styles.searchBar, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
@@ -160,6 +164,7 @@ export function ActivityScreen({ theme, onBack, onOpenTx }: Props) {
         ))
       )}
     </ScrollView>
+    </View>
   );
 }
 
@@ -190,6 +195,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 20,
     paddingBottom: 16,
   },
   circleBtn: {
