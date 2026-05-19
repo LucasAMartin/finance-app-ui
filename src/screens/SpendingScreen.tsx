@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, OVER_DOT, overBg, overText, catGroupColor } from '../theme';
 import { CATS, TRANSACTIONS, TREND, PERIOD_DATA } from '../data';
@@ -20,15 +20,14 @@ interface Props {
 
 function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.5}
-      delayPressIn={0}
-      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
-      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+      pointerEvents="box-only"
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}
     >
       {children}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 

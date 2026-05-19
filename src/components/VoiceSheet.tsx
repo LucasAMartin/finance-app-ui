@@ -567,7 +567,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 22,
-    padding: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    minHeight: 44,
   },
   transcriptChip: {
     flexDirection: 'row',

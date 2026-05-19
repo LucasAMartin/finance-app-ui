@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
 import { Theme } from '../theme';
 
 // ── Money display ──────────────────────────────────────────────
@@ -138,8 +138,10 @@ interface CircleBtnProps {
 
 export function CircleBtn({ children, theme, dot = false, onPress, size = 38 }: CircleBtnProps) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
+      pointerEvents="box-only"
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
       style={[
         styles.circleBtn,
         {
@@ -155,7 +157,7 @@ export function CircleBtn({ children, theme, dot = false, onPress, size = 38 }: 
       {dot && (
         <View style={[styles.circleDot, { backgroundColor: theme.accent.dot }]} />
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -167,8 +169,10 @@ interface BackBtnProps {
 
 export function BackBtn({ theme, onBack }: BackBtnProps) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onBack}
+      pointerEvents="box-only"
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       style={[
         styles.circleBtn,
         {
@@ -182,7 +186,7 @@ export function BackBtn({ theme, onBack }: BackBtnProps) {
     >
       {/* chevron left inline to avoid Icon import cycle */}
       <Text style={{ color: theme.text, fontSize: 18, marginLeft: -2 }}>‹</Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -215,9 +219,13 @@ export function SectionHeader({ title, actionLabel, onAction, theme }: SectionHe
     <View style={styles.sectionHeader}>
       <Text style={{ fontSize: 17, fontWeight: '600', letterSpacing: -0.4, color: theme.text }}>{title}</Text>
       {actionLabel && (
-        <TouchableOpacity onPress={onAction}>
+        <Pressable
+          onPress={onAction}
+          pointerEvents="box-only"
+          hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+        >
           <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec }}>{actionLabel}</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
     </View>
   );

@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { TouchableOpacity, Animated, StyleSheet } from 'react-native';
+import React, { useRef, useLayoutEffect } from 'react';
+import { Pressable, Animated, StyleSheet } from 'react-native';
 import { useTheme } from '../ThemeProvider';
 import { Icon } from './Icon';
 
@@ -8,12 +8,11 @@ interface Props {
   iconSize?: number;
 }
 
-// Naked toggle — no background, no border. Sun rotates / scales into a moon and back.
 export function ThemeToggle({ size = 40, iconSize = 22 }: Props) {
   const { theme, dark, toggleDark } = useTheme();
   const t = useRef(new Animated.Value(dark ? 1 : 0)).current;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     Animated.spring(t, {
       toValue: dark ? 1 : 0,
       useNativeDriver: true,
@@ -22,22 +21,48 @@ export function ThemeToggle({ size = 40, iconSize = 22 }: Props) {
     }).start();
   }, [dark]);
 
-  const rotate = t.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  const scale = t.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.82, 1] });
+  const rotate = t.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  const scale = t.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 0.82, 1],
+  });
 
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={toggleDark}
-      activeOpacity={0.6}
-      delayPressIn={0}
-      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
+      pointerEvents="box-only"
+      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+      style={[
+        styles.btn,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+        },
+      ]}
       accessibilityLabel={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-      style={[styles.btn, { width: size, height: size }]}
     >
-      <Animated.View style={{ transform: [{ rotate }, { scale }] }}>
-        <Icon name={dark ? 'moon' : 'sun'} size={iconSize} color={theme.text} stroke={1.7} />
+      <Animated.View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+          transform: [{ rotate }, { scale }],
+        }}
+      >
+        <Icon
+          name={dark ? 'moon' : 'sun'}
+          size={iconSize}
+          color={theme.text}
+          stroke={1.7}
+        />
       </Animated.View>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -45,5 +70,7 @@ const styles = StyleSheet.create({
   btn: {
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
 });

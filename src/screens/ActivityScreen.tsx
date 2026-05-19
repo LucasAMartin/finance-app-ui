@@ -23,7 +23,7 @@ import { Money, Segmented } from '../components/shared';
 import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
-import { Theme, catGroupColor, GROUP_COLORS, getCardStyle, cautionBg, cautionText } from '../theme';
+import { Theme, catGroupColor, GROUP_COLORS, cautionBg, cautionText } from '../theme';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const FILTER_SHEET_H = Math.round(SCREEN_H * 0.82);
@@ -98,8 +98,10 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
   const [sortBy, setSortBy]                 = useState<'date' | 'amount'>('date');
   const [sheetTx, setSheetTx]               = useState<Transaction | null>(null);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  const [viewMode, setViewMode]             = useState<'list' | 'calendar'>('list');
+  const [calendarOpen, setCalendarOpen]     = useState(true);
   const [selectedDay, setSelectedDay]       = useState<number | null>(TODAY_DOM);
+  const [calViewYear, setCalViewYear]       = useState(CALENDAR_YEAR);
+  const [calViewMonth, setCalViewMonth]     = useState(CALENDAR_MONTH);
 
   const activeCount = (catFilter ? 1 : 0) + (dateFilter ? 1 : 0) + (sortBy !== 'date' ? 1 : 0);
 
@@ -172,45 +174,41 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     };
     calSource.forEach(t => {
       const pd = parseMonthDay(t.fullDate);
-      if (pd && pd.month === CALENDAR_MONTH) ensure(pd.day).txCats.push(t.cat);
+      if (pd && pd.month === calViewMonth) ensure(pd.day).txCats.push(t.cat);
     });
     calBills.forEach(b => {
       const pd = parseMonthDay(b.dueDate);
-      if (pd && pd.month === CALENDAR_MONTH) ensure(pd.day).billCats.push(b.cat);
+      if (pd && pd.month === calViewMonth) ensure(pd.day).billCats.push(b.cat);
     });
     return m;
-  }, [calSource, calBills]);
+  }, [calSource, calBills, calViewMonth]);
 
   const dayDetail = useMemo(() => {
-    const onDay = (s: string) => {
-      const pd = parseMonthDay(s);
-      return pd != null && pd.month === CALENDAR_MONTH && pd.day === selectedDay;
-    };
-    const txs   = selectedDay == null ? [] : calSource.filter(t => onDay(t.fullDate));
-    const bills = selectedDay == null ? [] : calBills.filter(b => onDay(b.dueDate));
+    if (selectedDay == null) return { txs: [], bills: [], total: 0 };
+    const txs   = calSource.filter(t => {
+      const pd = parseMonthDay(t.fullDate);
+      return pd?.month === calViewMonth && pd.day === selectedDay;
+    });
+    const bills = calBills.filter(b => {
+      const pd = parseMonthDay(b.dueDate);
+      return pd?.month === calViewMonth && pd.day === selectedDay;
+    });
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
-  }, [selectedDay, calSource, calBills]);
-
-  const handleViewChange = (v: string) => {
-    const mode = v === 'Calendar' ? 'calendar' : 'list';
-    setViewMode(mode);
-    if (mode === 'calendar' && selectedDay == null) setSelectedDay(TODAY_DOM ?? 1);
-  };
+  }, [selectedDay, calViewMonth, calSource, calBills]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
 
       {/* ── Header ──────────────────────────────────────────── */}
       <View style={[S.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity
+        <Pressable
           onPress={onOpenDrawer}
-          activeOpacity={0.5}
-          delayPressIn={0}
-          hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
-          style={S.iconBtn}
+          pointerEvents="box-only"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={[S.iconBtn, { backgroundColor: 'transparent' }]}
         >
           <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={[S.title, { color: theme.text }]}>History</Text>
         <ThemeToggle />
       </View>
@@ -256,16 +254,6 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* ── List / Calendar toggle ──────────────────────────── */}
-      <View style={S.toggleRow}>
-        <Segmented
-          value={viewMode === 'calendar' ? 'Calendar' : 'List'}
-          onChange={handleViewChange}
-          options={['List', 'Calendar']}
-          theme={theme}
-        />
-      </View>
-
       {/* ── Content ─────────────────────────────────────────── */}
       <ScrollView
         style={{ flex: 1 }}
@@ -273,27 +261,49 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {viewMode === 'calendar' ? (
+        {calendarOpen ? (
           <CalendarPane
             theme={theme}
             marks={calMarks}
             selectedDay={selectedDay}
+            calViewYear={calViewYear}
+            calViewMonth={calViewMonth}
             onSelectDay={setSelectedDay}
+            onViewMonthChange={(y, m) => {
+              setCalViewYear(y);
+              setCalViewMonth(m);
+              setSelectedDay(null);
+            }}
             detail={dayDetail}
             onTxPress={setSheetTx}
+            onCollapse={() => setCalendarOpen(false)}
           />
-        ) : dayKeys.length === 0 ? (
-          <EmptyState theme={theme} isFiltered={isFiltered} />
         ) : (
-          dayKeys.map(day => (
-            <DayGroup
-              key={day}
-              day={day}
-              group={grouped[day]}
-              theme={theme}
-              onPress={setSheetTx}
-            />
-          ))
+          <>
+            <Pressable
+              onPress={() => setCalendarOpen(true)}
+              pointerEvents="box-only"
+              style={[S.calExpandRow, { borderBottomColor: theme.sep }]}
+            >
+              <Icon name="cal" size={14} color={theme.textSec} stroke={1.5} />
+              <Text style={[S.calExpandText, { color: theme.textSec }]}>Show calendar</Text>
+              <View style={{ flex: 1 }} />
+              <Icon name="chevDown" size={12} color={theme.textTer} stroke={1.5} />
+            </Pressable>
+            {dayKeys.length === 0 ? (
+              <EmptyState theme={theme} isFiltered={isFiltered} />
+            ) : (
+              dayKeys.map(day => (
+                <DayGroup
+                  key={day}
+                  day={day}
+                  group={grouped[day]}
+                  theme={theme}
+                  onPress={setSheetTx}
+                />
+              ))
+            )}
+          </>
         )}
       </ScrollView>
 
@@ -652,15 +662,25 @@ function MiniCalendar({
 
       {/* Month navigation */}
       <View style={CAL.monthRow}>
-        <TouchableOpacity onPress={prevMonth} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <Pressable
+          onPress={prevMonth}
+          pointerEvents="box-only"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}
+        >
           <Icon name="chevL" size={18} color={theme.textSec} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={[CAL.monthLabel, { color: theme.text }]}>
           {MONTH_NAMES[viewMonth]} {viewYear}
         </Text>
-        <TouchableOpacity onPress={nextMonth} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <Pressable
+          onPress={nextMonth}
+          pointerEvents="box-only"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}
+        >
           <Icon name="chevR" size={18} color={theme.textSec} />
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {/* Day-of-week header */}
@@ -793,66 +813,80 @@ function DayGroup({
 // ─── CalendarPane ────────────────────────────────────────────────────────────
 
 function CalendarPane({
-  theme, marks, selectedDay, onSelectDay, detail, onTxPress,
+  theme, marks, selectedDay, calViewYear, calViewMonth,
+  onSelectDay, onViewMonthChange, detail, onTxPress, onCollapse,
 }: {
   theme: Theme;
   marks: Record<number, CalDayMark>;
   selectedDay: number | null;
-  onSelectDay: (d: number) => void;
+  calViewYear: number;
+  calViewMonth: number;
+  onSelectDay: (d: number | null) => void;
+  onViewMonthChange: (y: number, m: number) => void;
   detail: { txs: Transaction[]; bills: UpcomingBill[]; total: number };
   onTxPress: (tx: Transaction) => void;
+  onCollapse: () => void;
 }) {
-  const card = getCardStyle(theme);
-  const { txs, bills, total } = detail;
-  const empty = txs.length === 0 && bills.length === 0;
-
-  const dateLabel = selectedDay == null
-    ? ''
-    : (() => {
-        const dt = new Date(CALENDAR_YEAR, CALENDAR_MONTH, selectedDay);
-        return `${WEEKDAY_NAMES[dt.getDay()]}, ${MONTHS[CALENDAR_MONTH]} ${selectedDay}`;
-      })();
+  const { txs, bills } = detail;
 
   return (
-    <View>
-      <View style={[card, { padding: 16, marginBottom: 24 }]}>
-        <TransactionCalendar
-          theme={theme}
-          year={CALENDAR_YEAR}
-          month={CALENDAR_MONTH}
-          marks={marks}
-          selectedDay={selectedDay}
-          today={TODAY_DOM}
-          onSelectDay={onSelectDay}
-        />
-      </View>
+    <View style={{ paddingTop: 8 }}>
+      <TransactionCalendar
+        theme={theme}
+        year={calViewYear}
+        month={calViewMonth}
+        marks={marks}
+        selectedDay={selectedDay}
+        today={TODAY_DOM}
+        onSelectDay={onSelectDay}
+        onViewMonthChange={onViewMonthChange}
+        onCollapse={onCollapse}
+      />
 
-      <View style={S.dayHeader}>
-        <Text style={[S.dayLabel, { color: theme.textSec }]}>{dateLabel}</Text>
-        {txs.length > 0 && (
-          <Text style={[S.dayTotal, { color: theme.text }]}>${total.toFixed(2)}</Text>
-        )}
-      </View>
+      {selectedDay !== null && (
+        <>
+          <View style={[S.calDivider, { backgroundColor: theme.sep }]} />
 
-      {empty ? (
-        <Text style={[S.dayEmpty, { color: theme.textSec }]}>
-          Nothing scheduled or spent on this day
-        </Text>
-      ) : (
-        <View>
-          {txs.map((tx, i) => (
-            <TxRow
-              key={tx.id}
-              tx={tx}
-              theme={theme}
-              onPress={() => onTxPress(tx)}
-              last={i === txs.length - 1 && bills.length === 0}
-            />
-          ))}
-          {bills.map((bill, i) => (
-            <BillRow key={bill.id} bill={bill} theme={theme} last={i === bills.length - 1} />
-          ))}
-        </View>
+          {/* Date heading + clear button */}
+          <View style={S.detailHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={[S.detailDate, { color: theme.text }]}>
+                {MONTHS[calViewMonth]} {selectedDay}
+              </Text>
+              <Text style={[S.detailDow, { color: theme.textSec }]}>
+                {WEEKDAY_NAMES[new Date(calViewYear, calViewMonth, selectedDay).getDay()]}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => onSelectDay(null)}
+              activeOpacity={0.6}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={[S.detailClear, { backgroundColor: theme.chipBg }]}
+            >
+              <Icon name="close" size={11} color={theme.textSec} stroke={2} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Activity list */}
+          {txs.length === 0 && bills.length === 0 ? (
+            <Text style={[S.detailEmpty, { color: theme.textTer }]}>No activity this day</Text>
+          ) : (
+            <View>
+              {txs.map((tx, i) => (
+                <TxRow
+                  key={tx.id}
+                  tx={tx}
+                  theme={theme}
+                  onPress={() => onTxPress(tx)}
+                  last={i === txs.length - 1 && bills.length === 0}
+                />
+              ))}
+              {bills.map((bill, i) => (
+                <BillRow key={bill.id} bill={bill} theme={theme} last={i === bills.length - 1} />
+              ))}
+            </View>
+          )}
+        </>
       )}
     </View>
   );
@@ -1045,6 +1079,8 @@ const S = StyleSheet.create({
   filterBtn: {
     borderRadius: 16,
     paddingHorizontal: 14,
+    minWidth: 44,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1055,9 +1091,44 @@ const S = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   filterBadgeText: { fontSize: 10, fontWeight: '700' },
-  toggleRow: {
+  calExpandRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingBottom: 16,
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 2,
+    marginBottom: 14,
+    borderBottomWidth: 1,
+  },
+  calExpandText: {
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: -0.1,
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+    marginBottom: 14,
+  },
+  detailDate: {
+    fontSize: 17, fontWeight: '700', letterSpacing: -0.4,
+    marginBottom: 2,
+  },
+  detailDow: {
+    fontSize: 13, fontWeight: '400',
+  },
+  detailClear: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailEmpty: {
+    fontSize: 13, paddingHorizontal: 2, paddingBottom: 8,
+  },
+  calDivider: {
+    height: 1,
+    marginHorizontal: -20,
+    marginVertical: 14,
   },
   nameRow: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -1071,10 +1142,6 @@ const S = StyleSheet.create({
   },
   upcomingText: {
     fontSize: 9, fontWeight: '700', letterSpacing: 0.4,
-  },
-  dayEmpty: {
-    fontSize: 13, fontWeight: '500',
-    paddingVertical: 10, paddingHorizontal: 2,
   },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between',

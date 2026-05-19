@@ -116,11 +116,9 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
         >
           Alex Martin
         </Text>
-        <TouchableOpacity>
-          <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec, marginTop: 2 }}>
-            View profile
-          </Text>
-        </TouchableOpacity>
+        <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec, marginTop: 2 }}>
+          View profile
+        </Text>
       </View>
 
       <View style={[styles.divider, { backgroundColor: theme.sep }]} />

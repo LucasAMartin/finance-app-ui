@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -24,10 +25,26 @@ interface Props {
 type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
 
 const CADENCES: { value: Cadence; label: string }[] = [
-  { value: 'Mo', label: 'Monthly'   },
+  { value: 'Mo', label: 'Monthly' },
   { value: '2w', label: 'Bi-weekly' },
-  { value: 'Wk', label: 'Weekly'    },
-  { value: 'Yr', label: 'Annual'    },
+  { value: 'Wk', label: 'Weekly' },
+  { value: 'Yr', label: 'Annual' },
+];
+
+interface BudgetTemplate {
+  id: string;
+  label: string;
+  subtitle: string;
+  needs: number;
+  wants: number;
+  savings: number;
+}
+
+const BUDGET_TEMPLATES: BudgetTemplate[] = [
+  { id: '50-30-20', label: '50 / 30 / 20', subtitle: 'Classic — needs, wants, savings', needs: 0.50, wants: 0.30, savings: 0.20 },
+  { id: '70-20-10', label: '70 / 20 / 10', subtitle: 'Essential-heavy, minimal extras',  needs: 0.70, wants: 0.20, savings: 0.10 },
+  { id: '60-25-15', label: '60 / 25 / 15', subtitle: 'Balanced lifestyle',               needs: 0.60, wants: 0.25, savings: 0.15 },
+  { id: '40-30-30', label: '40 / 30 / 30', subtitle: 'Aggressive savings focus',         needs: 0.40, wants: 0.30, savings: 0.30 },
 ];
 
 const bKey = (gKey: string, label: string) => `${gKey}:${label}`;
@@ -55,17 +72,18 @@ const fromMonthly = (monthly: number, c: Cadence): number => {
   }
 };
 
+const cadenceSuffix = (c: Cadence) => ({ Mo: '/mo', '2w': '/2wk', Wk: '/wk', Yr: '/yr' }[c]);
+
 function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.5}
-      delayPressIn={0}
-      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
-      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
+      pointerEvents="box-only"
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}
     >
       {children}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -85,7 +103,7 @@ function EditableRow({
     if (raw.length > 0 && Number.isFinite(v) && v >= 0) {
       onChange(v);
       setCommitted(true);
-      setTimeout(() => setCommitted(false), 400);
+      setTimeout(() => setCommitted(false), 1200);
     }
     setEditing(false);
   };
@@ -123,7 +141,7 @@ function EditableRow({
           }]}
           activeOpacity={0.7}
         >
-          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: committed ? theme.accent.dot : theme.text }}>
             ${Math.round(amount).toLocaleString()}
           </Text>
         </TouchableOpacity>
@@ -140,8 +158,16 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const [editingIncome, setEditingIncome] = useState(false);
   const [incomeDraft, setIncomeDraft] = useState('');
   const [budgets, setBudgets] = useState<Record<string, number>>(initBudgets);
+  const [showCadence, setShowCadence] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+  const [undoVisible, setUndoVisible] = useState(false);
+
+  const prevBudgets = useRef<Record<string, number> | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayIncome = fromMonthly(income, cadence);
+  const activeCadenceLabel = CADENCES.find(c => c.value === cadence)?.label ?? 'Monthly';
 
   const commitIncome = () => {
     const v = parseFloat(incomeDraft.replace(/[^0-9.]/g, ''));
@@ -167,10 +193,27 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const remaining     = income - totalBudgeted;
   const isOver        = remaining < 0;
 
-  const applyTemplate = () => {
+  const showUndo = useCallback(() => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndoVisible(true);
+    undoTimer.current = setTimeout(() => setUndoVisible(false), 7000);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (prevBudgets.current) {
+      setBudgets(prevBudgets.current);
+      setActiveTemplate(null);
+    }
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndoVisible(false);
+  }, []);
+
+  const applyTemplate = (template: BudgetTemplate) => {
+    prevBudgets.current = budgets;
     const next: Record<string, number> = {};
     SPEND_GROUPS.forEach(g => {
-      const target = income * g.targetPct;
+      const pct = (template as any)[g.key] as number;
+      const target = income * pct;
       const subSum = g.subs.reduce((s, sub) => s + sub.budget, 0);
       g.subs.forEach(sub => {
         const ratio = subSum > 0 ? sub.budget / subSum : 1 / g.subs.length;
@@ -178,15 +221,18 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
       });
     });
     setBudgets(next);
+    setActiveTemplate(template.id);
+    setShowTemplates(false);
+    showUndo();
   };
 
-  const confirmTemplate = () =>
+  const confirmTemplate = (template: BudgetTemplate) =>
     Alert.alert(
-      'Apply 50/30/20 template',
-      'This will overwrite all your current category budgets. Your income stays the same.',
+      `Apply ${template.label}?`,
+      'This will overwrite your current category budgets. Your income stays the same.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Apply', style: 'destructive', onPress: applyTemplate },
+        { text: 'Apply', style: 'destructive', onPress: () => applyTemplate(template) },
       ],
     );
 
@@ -202,9 +248,18 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const wantsCol   = gCol('wants');
   const savingsCol = gCol('savings');
 
+  const allocatedPct   = Math.round((totalBudgeted / (income || 1)) * 100);
   const recurringTotal = UPCOMING_BILLS.reduce((s, b) => s + b.amount, 0);
   const discretionary  = Math.round(income - recurringTotal);
-  const allocatedPct   = Math.round((totalBudgeted / (income || 1)) * 100);
+
+  const activeTemplateName = BUDGET_TEMPLATES.find(t => t.id === activeTemplate)?.label;
+
+  const legendItems = [
+    { label: 'Needs',                   dotColor: needsCol,                               valueColor: theme.text,    amount: needsTotal            },
+    { label: 'Wants',                   dotColor: wantsCol,                               valueColor: theme.text,    amount: wantsTotal            },
+    { label: 'Savings',                 dotColor: savingsCol,                             valueColor: theme.text,    amount: savingsTotal          },
+    { label: isOver ? 'Over' : 'Free',  dotColor: isOver ? OVER_DOT : theme.textTer,     valueColor: isOver ? OVER_DOT : theme.textSec, amount: Math.abs(remaining) },
+  ];
 
   return (
     <KeyboardAvoidingView
@@ -224,6 +279,62 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           <ThemeToggle />
         </View>
 
+        {/* ── Sticky allocation bar (always visible) ── */}
+        <View style={[styles.stickyBar, {
+          backgroundColor: theme.bg,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.sep,
+        }]}>
+          <View style={styles.stickyBarTop}>
+            <Text style={[styles.eyebrow, { color: theme.textTer }]}>
+              {allocatedPct}% allocated
+            </Text>
+            <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSec }}>
+              ${Math.round(totalBudgeted).toLocaleString()} of ${income.toLocaleString()}
+            </Text>
+          </View>
+          <View style={[styles.allocationBar, { backgroundColor: theme.chipBg }]}>
+            {needsTotal > 0 && (
+              <View style={[styles.barSegment, { width: `${(needsFrac * 100).toFixed(2)}%` as any, backgroundColor: needsCol }]} />
+            )}
+            {wantsTotal > 0 && (
+              <View style={[styles.barSegment, { width: `${(wantsFrac * 100).toFixed(2)}%` as any, backgroundColor: wantsCol }]} />
+            )}
+            {savingsTotal > 0 && (
+              <View style={[styles.barSegment, { width: `${(savingsFrac * 100).toFixed(2)}%` as any, backgroundColor: savingsCol }]} />
+            )}
+          </View>
+          <View style={styles.legendRow}>
+            {legendItems.map(item => (
+              <View key={item.label} style={{ alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.dotColor }} />
+                  <Text style={{ fontSize: 10, fontWeight: '600', letterSpacing: 0.1, color: item.dotColor }}>
+                    {item.label}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: item.valueColor, letterSpacing: -0.4 }}>
+                  ${Math.round(item.amount).toLocaleString()}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          {/* ── Undo toast ─────────────────────────── */}
+          {undoVisible && (
+            <View style={[styles.undoRow, { backgroundColor: theme.text }]}>
+              <Text style={{ flex: 1, fontSize: 13, fontWeight: '500', color: theme.bg }}>
+                Applied {activeTemplateName}
+              </Text>
+              <TouchableOpacity onPress={handleUndo} hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.bg }}>
+                  Undo
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
@@ -231,133 +342,189 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           showsVerticalScrollIndicator={false}
         >
 
-          {/* ── Income ──────────────────────────────── */}
+          {/* ── Income (compact) ────────────────────── */}
           <View style={styles.incomeBlock}>
-            <Text style={[styles.eyebrow, { color: theme.textTer }]}>Income</Text>
-
-            {editingIncome ? (
-              <View style={styles.incomeRow}>
-                <Text style={[styles.currencySign, { color: theme.textSec }]}>$</Text>
-                <TextInput
-                  value={incomeDraft}
-                  onChangeText={setIncomeDraft}
-                  onBlur={commitIncome}
-                  onSubmitEditing={commitIncome}
-                  keyboardType="decimal-pad"
-                  autoFocus
-                  selectTextOnFocus
-                  style={[styles.incomeInput, { color: theme.text, borderColor: theme.accent.dot }]}
-                />
+            <View style={styles.incomeCompactRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.eyebrow, { color: theme.textTer }]}>Income</Text>
+                {editingIncome ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2, marginTop: 5 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSec }}>$</Text>
+                    <TextInput
+                      value={incomeDraft}
+                      onChangeText={setIncomeDraft}
+                      onBlur={commitIncome}
+                      onSubmitEditing={commitIncome}
+                      keyboardType="decimal-pad"
+                      autoFocus
+                      selectTextOnFocus
+                      style={{
+                        fontSize: 20,
+                        fontWeight: '700',
+                        letterSpacing: -0.5,
+                        color: theme.text,
+                        borderBottomWidth: 1.5,
+                        borderBottomColor: theme.accent.dot,
+                        paddingVertical: 2,
+                        minWidth: 80,
+                      }}
+                    />
+                    <Text style={{ fontSize: 12, color: theme.textTer, marginLeft: 2 }}>
+                      {cadenceSuffix(cadence)}
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => { setIncomeDraft(String(displayIncome)); setEditingIncome(true); }}
+                    activeOpacity={0.8}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSec }}>$</Text>
+                    <Text style={{ fontSize: 20, fontWeight: '700', letterSpacing: -0.5, color: theme.text }}>
+                      {displayIncome.toLocaleString()}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: theme.textTer }}>
+                      {cadenceSuffix(cadence)}
+                    </Text>
+                    <Icon name="pencil" size={13} color={theme.textTer} stroke={1.5} />
+                  </TouchableOpacity>
+                )}
               </View>
-            ) : (
+
+              {/* Pay period toggle — shows active cadence so it's self-describing */}
               <TouchableOpacity
-                onPress={() => { setIncomeDraft(String(displayIncome)); setEditingIncome(true); }}
-                activeOpacity={0.8}
-                style={styles.incomeRow}
+                onPress={() => setShowCadence(v => !v)}
+                activeOpacity={0.7}
+                style={[styles.cadenceToggleBtn, {
+                  backgroundColor: showCadence ? theme.text : theme.chipBg,
+                }]}
               >
-                <Text style={[styles.currencySign, { color: theme.textSec }]}>$</Text>
-                <Text style={[styles.incomeAmount, { color: theme.text }]}>
-                  {displayIncome.toLocaleString()}
+                <Text style={{
+                  fontSize: 11,
+                  fontWeight: '600',
+                  color: showCadence ? theme.bg : theme.textSec,
+                }}>
+                  {activeCadenceLabel}
                 </Text>
-                <Icon name="chevDown" size={18} color={theme.textTer} stroke={1.5} />
-              </TouchableOpacity>
-            )}
-
-            <View style={[styles.cadenceTrack, { backgroundColor: theme.chipBg }]}>
-              {CADENCES.map(c => (
-                <TouchableOpacity
-                  key={c.value}
-                  onPress={() => setCadence(c.value)}
-                  activeOpacity={0.7}
-                  style={[styles.cadencePill, cadence === c.value && { backgroundColor: theme.text }]}
-                >
-                  <Text style={{
-                    fontSize: 12,
-                    fontWeight: '600',
-                    color: cadence === c.value ? theme.bg : theme.textSec,
-                  }}>
-                    {c.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {cadence !== 'Mo' && (
-              <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 8 }}>
-                ≈${income.toLocaleString()}/month
-              </Text>
-            )}
-          </View>
-
-          {/* ── Allocation bar ──────────────────────── */}
-          <View style={styles.barSection}>
-            <Text style={[styles.eyebrow, { color: theme.textTer, marginBottom: 10 }]}>
-              {allocatedPct}% of income allocated
-            </Text>
-            <View style={[styles.allocationBar, { backgroundColor: theme.chipBg }]}>
-              {needsTotal > 0 && (
-                <View style={[styles.barSegment, {
-                  width: `${(needsFrac * 100).toFixed(2)}%` as any,
-                  backgroundColor: needsCol,
-                }]} />
-              )}
-              {wantsTotal > 0 && (
-                <View style={[styles.barSegment, {
-                  width: `${(wantsFrac * 100).toFixed(2)}%` as any,
-                  backgroundColor: wantsCol,
-                }]} />
-              )}
-              {savingsTotal > 0 && (
-                <View style={[styles.barSegment, {
-                  width: `${(savingsFrac * 100).toFixed(2)}%` as any,
-                  backgroundColor: savingsCol,
-                }]} />
-              )}
-            </View>
-            <View style={styles.legendRow}>
-              {([
-                { label: 'Needs',   labelColor: needsCol,   valueColor: theme.text,    amount: needsTotal   },
-                { label: 'Wants',   labelColor: wantsCol,   valueColor: theme.text,    amount: wantsTotal   },
-                { label: 'Savings', labelColor: savingsCol, valueColor: theme.text,    amount: savingsTotal  },
-                {
-                  label:      isOver ? 'Over' : 'Free',
-                  labelColor: isOver ? OVER_DOT : theme.textTer,
-                  valueColor: isOver ? OVER_DOT : theme.textSec,
-                  amount:     Math.abs(remaining),
-                },
-              ] as const).map(item => (
-                <View key={item.label} style={{ alignItems: 'center' }}>
-                  <Text style={{
-                    fontSize: 11, fontWeight: '600', letterSpacing: 0.1,
-                    color: item.labelColor, marginBottom: 3,
-                  }}>
-                    {item.label}
-                  </Text>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: item.valueColor, letterSpacing: -0.2 }}>
-                    ${Math.round(item.amount).toLocaleString()}
-                  </Text>
+                <View style={{ transform: [{ rotate: showCadence ? '180deg' : '0deg' }] }}>
+                  <Icon
+                    name="chevDown"
+                    size={11}
+                    color={showCadence ? theme.bg : theme.textTer}
+                    stroke={1.8}
+                  />
                 </View>
-              ))}
+              </TouchableOpacity>
             </View>
+
+            {showCadence && (
+              <View style={{ marginTop: 12 }}>
+                <View style={[styles.cadenceTrack, { backgroundColor: theme.chipBg }]}>
+                  {CADENCES.map(c => (
+                    <TouchableOpacity
+                      key={c.value}
+                      onPress={() => setCadence(c.value)}
+                      activeOpacity={0.7}
+                      style={[styles.cadencePill, cadence === c.value && { backgroundColor: theme.text }]}
+                    >
+                      <Text style={{
+                        fontSize: 12,
+                        fontWeight: '600',
+                        color: cadence === c.value ? theme.bg : theme.textSec,
+                      }}>
+                        {c.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {cadence !== 'Mo' && (
+                  <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 6 }}>
+                    ${income.toLocaleString()}/month
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
 
-          {/* ── 50/30/20 template CTA ───────────────── */}
+          {/* ── Template selector ───────────────────── */}
           <TouchableOpacity
-            onPress={confirmTemplate}
+            onPress={() => setShowTemplates(v => !v)}
             activeOpacity={0.7}
-            style={[styles.templateChip, { backgroundColor: theme.chipBg }]}
+            style={[styles.templateHeader, { backgroundColor: theme.chipBg }]}
           >
-            <Icon name="sparkle" size={16} color={theme.textSec} stroke={1.5} />
+            <Icon name="split" size={15} color={theme.textSec} stroke={1.5} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, letterSpacing: -0.2 }}>
-                50/30/20 rule
+                {activeTemplateName ? activeTemplateName : 'Split templates'}
               </Text>
-              <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 1 }}>
-                Auto-set budgets: 50% needs, 30% wants, 20% savings
-              </Text>
+              {activeTemplateName && (
+                <Text style={{ fontSize: 11, color: theme.accent.dot, marginTop: 1 }}>
+                  Applied
+                </Text>
+              )}
             </View>
-            <Icon name="chevR" size={14} color={theme.textTer} stroke={1.5} />
+            <View style={{ transform: [{ rotate: showTemplates ? '180deg' : '0deg' }] }}>
+              <Icon name="chevDown" size={14} color={theme.textTer} stroke={1.5} />
+            </View>
           </TouchableOpacity>
+
+          {showTemplates && (
+            <View style={[styles.templateDropdown, { borderColor: theme.sep, backgroundColor: theme.bg }]}>
+              {BUDGET_TEMPLATES.map((t, i) => {
+                const isActive = activeTemplate === t.id;
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    onPress={() => confirmTemplate(t)}
+                    activeOpacity={0.7}
+                    style={[styles.templateOption, {
+                      borderBottomWidth: i < BUDGET_TEMPLATES.length - 1 ? 1 : 0,
+                      borderBottomColor: theme.sep,
+                      backgroundColor: isActive ? theme.chipBg : 'transparent',
+                    }]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{
+                        fontSize: 14,
+                        fontWeight: '700',
+                        color: isActive ? theme.accent.dot : theme.text,
+                        letterSpacing: -0.3,
+                      }}>
+                        {t.label}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 2 }}>
+                        {t.subtitle}
+                      </Text>
+                    </View>
+                    {/* Percentage split as colored text */}
+                    <View style={styles.templateSplit}>
+                      {[
+                        { abbr: 'N', pct: t.needs, col: needsCol },
+                        { abbr: 'W', pct: t.wants, col: wantsCol },
+                        { abbr: 'S', pct: t.savings, col: savingsCol },
+                      ].map(seg => (
+                        <View key={seg.abbr} style={styles.templateSplitItem}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: seg.col }}>
+                            {seg.abbr}
+                          </Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: seg.col }}>
+                            {Math.round(seg.pct * 100)}%
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    {isActive && (
+                      <View style={[styles.appliedChip, { backgroundColor: theme.accent.fill }]}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: theme.accent.ink }}>
+                          On
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {/* ── Recurring bills ─────────────────────── */}
           <View style={[styles.divider, { backgroundColor: theme.sep }]} />
@@ -398,13 +565,17 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           {/* ── Category groups ─────────────────────── */}
           {SPEND_GROUPS.map(g => {
             const groupColor = gCol(g.key);
+            const groupTotal = Math.round(groupTotals[g.key] ?? 0);
             return (
               <React.Fragment key={g.key}>
                 <View style={[styles.divider, { backgroundColor: theme.sep }]} />
                 <View style={styles.sectionHead}>
-                  <Text style={[styles.sectionTitle, { color: groupColor }]}>{g.label}</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: groupColor, letterSpacing: -0.2 }}>
-                    ${Math.round(groupTotals[g.key] ?? 0).toLocaleString()}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: groupColor }} />
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>{g.label}</Text>
+                  </View>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: groupColor, letterSpacing: -0.4 }}>
+                    ${groupTotal.toLocaleString()}
                   </Text>
                 </View>
                 {g.subs.map((sub, si) => (
@@ -427,9 +598,9 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           <View style={[styles.divider, { backgroundColor: theme.sep }]} />
           <View style={styles.summaryStrip}>
             {([
-              { label: 'Budgeted',  value: `$${Math.round(totalBudgeted).toLocaleString()}`,                                        color: theme.text                          },
-              { label: 'Left over', value: `${isOver ? '-' : ''}$${Math.abs(Math.round(remaining)).toLocaleString()}`,              color: isOver ? OVER_DOT : theme.accent.dot },
-              { label: 'Savings',   value: `$${Math.round(savingsTotal).toLocaleString()}`,                                         color: savingsCol                          },
+              { label: 'Budgeted',  value: `$${Math.round(totalBudgeted).toLocaleString()}`,                                          color: theme.text                          },
+              { label: 'Left over', value: `${isOver ? '-' : ''}$${Math.abs(Math.round(remaining)).toLocaleString()}`,                color: isOver ? OVER_DOT : theme.accent.dot },
+              { label: 'Savings',   value: `$${Math.round(savingsTotal).toLocaleString()}`,                                           color: savingsCol                          },
             ] as const).map((stat, i, arr) => (
               <React.Fragment key={stat.label}>
                 <View style={styles.summaryStat}>
@@ -455,11 +626,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  stickyBar: {
+    paddingHorizontal: 20,
+    paddingTop: 14,
     paddingBottom: 16,
   },
-  incomeBlock: {
-    paddingTop: 20,
-    paddingBottom: 28,
+  stickyBarTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 10,
   },
   eyebrow: {
     fontSize: 11,
@@ -467,32 +645,44 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
-  incomeRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-    marginTop: 8,
-    marginBottom: 10,
-  },
-  currencySign: {
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: -0.3,
-  },
-  incomeAmount: {
-    fontSize: 30,
-    fontWeight: '700',
-    letterSpacing: -1,
-  },
-  incomeInput: {
-    fontSize: 30,
-    fontWeight: '700',
-    letterSpacing: -1,
-    borderWidth: 1.5,
+  allocationBar: {
+    height: 20,
     borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    minWidth: 120,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    marginBottom: 14,
+  },
+  barSegment: {
+    height: '100%',
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  undoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  incomeBlock: {
+    paddingTop: 20,
+    paddingBottom: 20,
+  },
+  incomeCompactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  cadenceToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
   },
   cadenceTrack: {
     flexDirection: 'row',
@@ -506,22 +696,42 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 7,
   },
-  barSection: {
-    paddingBottom: 6,
+  templateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 2,
   },
-  allocationBar: {
-    height: 14,
-    borderRadius: 7,
+  templateDropdown: {
+    borderWidth: 1,
+    borderRadius: 12,
     overflow: 'hidden',
-    flexDirection: 'row',
-    marginBottom: 14,
+    marginBottom: 2,
   },
-  barSegment: {
-    height: '100%',
-  },
-  legendRow: {
+  templateOption: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  templateSplit: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  templateSplitItem: {
+    alignItems: 'center',
+    gap: 1,
+  },
+  appliedChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginLeft: 4,
   },
   divider: {
     height: 1,
@@ -531,13 +741,13 @@ const styles = StyleSheet.create({
   sectionHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'center',
     marginBottom: 12,
     paddingHorizontal: 2,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     letterSpacing: -0.3,
   },
   row: {
@@ -595,14 +805,5 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     letterSpacing: -0.3,
-  },
-  templateChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginTop: 14,
   },
 });

@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  Pressable,
   ScrollView,
   StyleSheet,
   Modal,
@@ -78,14 +77,11 @@ function MonthDonut({ spent, budget, dark }: { spent: number; budget: number; da
 
 function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
-    <Pressable
-      onPress={onPress}
-      pointerEvents="box-only"
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      style={[styles.iconBtn, { width: size, height: size, backgroundColor: 'transparent' }]}
-    >
+    <TouchableOpacity onPress={onPress} activeOpacity={0.5} delayPressIn={0}
+      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
+      style={[styles.iconBtn, { width: size, height: size }]}>
       {children}
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -356,8 +352,6 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
       </ScrollView>
 
-      <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
-
       {/* ─── Month picker modal ──────────────────────────── */}
       <Modal visible={monthDropdownOpen} transparent animationType="fade"
         onRequestClose={closeDropdown} statusBarTranslucent>
@@ -404,6 +398,8 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
           </ScrollView>
         </View>
       </Modal>
+
+      <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
     </View>
   );
 }
@@ -716,3 +712,4 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
 });
+

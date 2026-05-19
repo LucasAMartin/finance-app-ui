@@ -162,6 +162,10 @@ export const Icon: React.FC<IconProps> = ({ name, size = 20, color = '#0E0E10', 
       <Path d="M3 8v10.5A1.5 1.5 0 0 0 4.5 20H19a2 2 0 0 0 2-2v-8a1.5 1.5 0 0 0-1.5-1.5H3z" {...p} />
       <Circle cx="16.5" cy="14" r="1.1" {...p} />
     </G>,
+    pencil: <G>
+      <Path d="M17 3a2.83 2.83 0 0 1 4 4L7 21H3v-4L17 3z" {...p} />
+      <Path d="M15 5l4 4" {...p} />
+    </G>,
   };
 
   return (

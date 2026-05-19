@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Animated,
@@ -28,9 +28,7 @@ patchTextWithInter();
 const { width: SCREEN_W } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(300, SCREEN_W * 0.82);
 
-// Left-to-right ordering. A screen with a lower order sits to the LEFT of one with a
-// higher order. Nav-bar tabs come first (home → spending → budget), then the deeper
-// push screens (activity, detail) which always live further right.
+// Left-to-right ordering. Lower order = further left.
 const SCREEN_ORDER: Record<Screen, number> = {
   home: 0,
   spending: 1,
@@ -38,90 +36,120 @@ const SCREEN_ORDER: Record<Screen, number> = {
   activity: 3,
 };
 
-// Directional slide: a screen always rests at 0 when active, off to the LEFT when the
-// active screen is to its right, off to the RIGHT when the active screen is to its left.
-// Only the two screens involved in the transition animate; the rest snap silently.
+const ALL_SCREENS = Object.keys(SCREEN_ORDER) as Screen[];
+
+// Purely presentational — translateX is owned by the parent, no internal effects.
 function AnimatedScreen({
-  screenKey,
-  activeScreen,
-  prevScreen,
+  translateX,
+  active,
   children,
 }: {
-  screenKey: Screen;
-  activeScreen: Screen;
-  prevScreen: Screen;
+  translateX: Animated.Value;
+  active: boolean;
   children: React.ReactNode;
 }) {
-  const visible = screenKey === activeScreen;
-  const target = visible
-    ? 0
-    : SCREEN_ORDER[screenKey] < SCREEN_ORDER[activeScreen]
-      ? -SCREEN_W
-      : SCREEN_W;
-  const translateX = useRef(new Animated.Value(target)).current;
-
-  useEffect(() => {
-    const involved = screenKey === activeScreen || screenKey === prevScreen;
-    if (involved) {
-      Animated.timing(translateX, {
-        toValue: target,
-        duration: 300,
-        useNativeDriver: true,
-        easing: Easing.out(Easing.cubic),
-      }).start();
-    } else {
-      translateX.setValue(target);
-    }
-  }, [activeScreen]);
-
   return (
     <Animated.View
       style={[StyleSheet.absoluteFillObject, { transform: [{ translateX }] }]}
-      pointerEvents={visible ? 'auto' : 'none'}
+      pointerEvents={active ? 'auto' : 'none'}
     >
       {children}
     </Animated.View>
   );
 }
 
+const SLIDE_DURATION = 220;
+const SLIDE_EASING   = Easing.out(Easing.cubic);
 
 function AppInner() {
   const { theme, dark } = useTheme();
+
+  // `screen` is only used for TabBar active state and pointerEvents.
+  // The actual visual positions are driven imperatively via TX refs.
   const [screen, setScreen] = useState<Screen>('home');
-  const [prevScreen, setPrevScreen] = useState<Screen>('home');
   const [adding, setAdding] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Synchronous read of current screen so navigate() never reads stale state.
+  const activeRef = useRef<Screen>('home');
+
+  // Each screen's horizontal position. Initialized to rest positions for
+  // the default screen ('home'). Driven imperatively — no useEffect cycle.
+  const TX = useRef<Record<Screen, Animated.Value>>({
+    home:     new Animated.Value(0),
+    spending: new Animated.Value(SCREEN_W),
+    budget:   new Animated.Value(SCREEN_W),
+    activity: new Animated.Value(SCREEN_W),
+  }).current;
+
   const drawerAnim = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    Animated.spring(drawerAnim, {
-      toValue: drawerOpen ? 1 : 0,
-      useNativeDriver: false,
-      friction: 11,
-      tension: 70,
+  // Start both drawer animations immediately on press — before setState.
+  const openDrawer = () => {
+    setDrawerOpen(true);
+    Animated.timing(drawerAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.exp),
     }).start();
-  }, [drawerOpen]);
+  };
 
-  // navigate records the screen we're leaving so AnimatedScreen knows which two
-  // screens to animate (everything else snaps).
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    Animated.timing(drawerAnim, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: true,
+      easing: Easing.in(Easing.cubic),
+    }).start();
+  };
+
+  // Kick off both slide animations immediately, then update state.
+  // This eliminates the useEffect render-cycle gap that caused the visual delay.
   const navigate = (s: Screen) => {
-    if (s === screen) return;
-    setPrevScreen(screen);
+    const from = activeRef.current;
+    if (s === from) return;
+
+    const fromOrd = SCREEN_ORDER[from];
+    const toOrd   = SCREEN_ORDER[s];
+
+    // Silently snap every non-involved screen to its correct off-screen position.
+    ALL_SCREENS.forEach(k => {
+      if (k !== from && k !== s) {
+        TX[k].setValue(SCREEN_ORDER[k] < toOrd ? -SCREEN_W : SCREEN_W);
+      }
+    });
+
+    // Both slides start before setState — zero perceived delay.
+    Animated.timing(TX[from], {
+      toValue: fromOrd < toOrd ? -SCREEN_W : SCREEN_W,
+      duration: SLIDE_DURATION,
+      useNativeDriver: true,
+      easing: SLIDE_EASING,
+    }).start();
+
+    Animated.timing(TX[s], {
+      toValue: 0,
+      duration: SLIDE_DURATION,
+      useNativeDriver: true,
+      easing: SLIDE_EASING,
+    }).start();
+
+    activeRef.current = s;
     setScreen(s);
   };
+
   const handleDrawerNav = (id: string) => {
-    setDrawerOpen(false);
-    // Map drawer item ids to screens
-    if (id === 'home') navigate('home');
-    else if (id === 'budget') navigate('budget');
+    closeDrawer();
+    if      (id === 'home')     navigate('home');
+    else if (id === 'budget')   navigate('budget');
     else if (id === 'spending') navigate('spending');
     else if (id === 'activity') navigate('activity');
-    // Items without a matching screen (cards, statements, settings, etc.) just close the drawer.
   };
 
   const backdropOpacity = drawerAnim.interpolate({
-    inputRange: [0, 1],
+    inputRange:  [0, 1],
     outputRange: [0, 0.5],
   });
 
@@ -129,46 +157,39 @@ function AppInner() {
     <>
       <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} backgroundColor={theme.bg} />
       <View style={[styles.root, { backgroundColor: theme.bg }]}>
-        <AnimatedScreen screenKey="home" activeScreen={screen} prevScreen={prevScreen}>
+
+        <AnimatedScreen translateX={TX.home} active={screen === 'home'}>
           <HomeScreen
             theme={theme}
             onViewSpending={() => navigate('spending')}
             onViewActivity={() => navigate('activity')}
-            onOpenDrawer={() => setDrawerOpen(true)}
+            onOpenDrawer={openDrawer}
           />
         </AnimatedScreen>
 
-        <AnimatedScreen screenKey="spending" activeScreen={screen} prevScreen={prevScreen}>
-          <SpendingScreen
-            theme={theme}
-            onOpenDrawer={() => setDrawerOpen(true)}
-          />
+        <AnimatedScreen translateX={TX.spending} active={screen === 'spending'}>
+          <SpendingScreen theme={theme} onOpenDrawer={openDrawer} />
         </AnimatedScreen>
 
-        <AnimatedScreen screenKey="activity" activeScreen={screen} prevScreen={prevScreen}>
-          <ActivityScreen theme={theme} onOpenDrawer={() => setDrawerOpen(true)} />
+        <AnimatedScreen translateX={TX.activity} active={screen === 'activity'}>
+          <ActivityScreen theme={theme} onOpenDrawer={openDrawer} />
         </AnimatedScreen>
 
-        <AnimatedScreen screenKey="budget" activeScreen={screen} prevScreen={prevScreen}>
-          <BudgetScreen
-            theme={theme}
-            onOpenDrawer={() => setDrawerOpen(true)}
-          />
+        <AnimatedScreen translateX={TX.budget} active={screen === 'budget'}>
+          <BudgetScreen theme={theme} onOpenDrawer={openDrawer} />
         </AnimatedScreen>
 
-        {(screen === 'home' || screen === 'budget' || screen === 'spending' || screen === 'activity') && (
-          <TabBar
-            theme={theme}
-            active={screen === 'activity' ? 'profile' : screen}
-            onAdd={() => setAdding(true)}
-            onTabPress={(id) => {
-              if (id === 'home')     navigate('home');
-              else if (id === 'spending') navigate('spending');
-              else if (id === 'budget')   navigate('budget');
-              else if (id === 'profile')  navigate('activity');
-            }}
-          />
-        )}
+        <TabBar
+          theme={theme}
+          active={screen === 'activity' ? 'profile' : screen}
+          onAdd={() => setAdding(true)}
+          onTabPress={(id) => {
+            if      (id === 'home')     navigate('home');
+            else if (id === 'spending') navigate('spending');
+            else if (id === 'budget')   navigate('budget');
+            else if (id === 'profile')  navigate('activity');
+          }}
+        />
 
         {/* ─── Drawer backdrop ──────────────────────────────── */}
         <Animated.View
@@ -178,7 +199,7 @@ function AppInner() {
             { backgroundColor: '#000', opacity: backdropOpacity, zIndex: 50 },
           ]}
         >
-          <Pressable style={{ flex: 1 }} onPress={() => setDrawerOpen(false)} />
+          <Pressable style={{ flex: 1 }} onPress={closeDrawer} />
         </Animated.View>
 
         {/* ─── Drawer ───────────────────────────────────────── */}
@@ -191,7 +212,7 @@ function AppInner() {
             width={DRAWER_WIDTH}
             progress={drawerAnim}
             onNavigate={handleDrawerNav}
-            onClose={() => setDrawerOpen(false)}
+            onClose={closeDrawer}
           />
         </View>
 

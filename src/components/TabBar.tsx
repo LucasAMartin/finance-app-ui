@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform, Animated } from 'react-native';
+import { View, Pressable, StyleSheet, Platform, Animated } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
@@ -65,13 +65,11 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
       {TABS.map((t, i) => {
         const isActive = t.id === active;
         return (
-          <TouchableOpacity
+          <Pressable
             key={t.id}
             onPress={() => handlePress(t.id, i)}
-            style={styles.tabBtn}
-            activeOpacity={0.7}
-            delayPressIn={0}
-            hitSlop={{ top: 12, bottom: 40, left: 8, right: 8 }}
+            pointerEvents="box-only"
+            style={[styles.tabBtn, { backgroundColor: 'transparent' }]}
           >
             <Icon
               name={t.icon}
@@ -79,21 +77,19 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
               color={isActive ? theme.bg : theme.textSec}
               stroke={isActive ? 1.7 : 1.5}
             />
-          </TouchableOpacity>
+          </Pressable>
         );
       })}
 
       <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
 
-      <TouchableOpacity
+      <Pressable
         onPress={onAdd}
+        pointerEvents="box-only"
         style={[styles.tabBtn, { backgroundColor: theme.accent.fill }]}
-        activeOpacity={0.7}
-        delayPressIn={0}
-        hitSlop={{ top: 12, bottom: 40, left: 8, right: 8 }}
       >
         <Icon name="mic" size={20} color={theme.accent.ink} stroke={1.6} />
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 
