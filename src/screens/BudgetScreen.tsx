@@ -77,10 +77,16 @@ function EditableRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(Math.round(amount)));
+  const [committed, setCommitted] = useState(false);
 
   const commit = () => {
-    const v = parseFloat(draft.replace(/[^0-9.]/g, ''));
-    onChange(Number.isFinite(v) && v >= 0 ? v : 0);
+    const raw = draft.replace(/[^0-9.]/g, '');
+    const v = parseFloat(raw);
+    if (raw.length > 0 && Number.isFinite(v) && v >= 0) {
+      onChange(v);
+      setCommitted(true);
+      setTimeout(() => setCommitted(false), 400);
+    }
     setEditing(false);
   };
 
@@ -110,7 +116,11 @@ function EditableRow({
       ) : (
         <TouchableOpacity
           onPress={() => { setDraft(String(Math.round(amount))); setEditing(true); }}
-          style={[styles.amountChip, { backgroundColor: theme.chipBg }]}
+          style={[styles.amountChip, {
+            backgroundColor: theme.chipBg,
+            borderWidth: 1.5,
+            borderColor: committed ? theme.accent.dot : 'transparent',
+          }]}
           activeOpacity={0.7}
         >
           <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
@@ -274,7 +284,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
 
             {cadence !== 'Mo' && (
               <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 8 }}>
-                ~${income.toLocaleString()}/month effective
+                ≈${income.toLocaleString()}/month
               </Text>
             )}
           </View>
@@ -331,11 +341,32 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
             </View>
           </View>
 
+          {/* ── 50/30/20 template CTA ───────────────── */}
+          <TouchableOpacity
+            onPress={confirmTemplate}
+            activeOpacity={0.7}
+            style={[styles.templateChip, { backgroundColor: theme.chipBg }]}
+          >
+            <Icon name="sparkle" size={16} color={theme.textSec} stroke={1.5} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, letterSpacing: -0.2 }}>
+                50/30/20 rule
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 1 }}>
+                Auto-set budgets: 50% needs, 30% wants, 20% savings
+              </Text>
+            </View>
+            <Icon name="chevR" size={14} color={theme.textTer} stroke={1.5} />
+          </TouchableOpacity>
+
           {/* ── Recurring bills ─────────────────────── */}
           <View style={[styles.divider, { backgroundColor: theme.sep }]} />
           <View style={styles.sectionHead}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Recurring bills</Text>
           </View>
+          <Text style={{ fontSize: 11, color: theme.textTer, marginBottom: 10, paddingHorizontal: 2 }}>
+            Tracked separately from your category budgets.
+          </Text>
           {UPCOMING_BILLS.map((bill, i) => (
             <View
               key={bill.id}
@@ -355,8 +386,8 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                   {bill.dueDate}{bill.estimate ? ' · estimated' : ''}
                 </Text>
               </View>
-              <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec, letterSpacing: -0.2 }}>
-                {bill.estimate ? '~' : ''}${bill.amount % 1 !== 0 ? bill.amount.toFixed(2) : bill.amount.toLocaleString()}
+              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSec, letterSpacing: -0.2 }}>
+                {bill.estimate ? '≈' : ''}${bill.amount % 1 !== 0 ? bill.amount.toFixed(2) : bill.amount.toLocaleString()}
               </Text>
             </View>
           ))}
@@ -397,7 +428,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           <View style={styles.summaryStrip}>
             {([
               { label: 'Budgeted',  value: `$${Math.round(totalBudgeted).toLocaleString()}`,                                        color: theme.text                          },
-              { label: 'Remaining', value: `${isOver ? '-' : ''}$${Math.abs(Math.round(remaining)).toLocaleString()}`,              color: isOver ? OVER_DOT : theme.accent.dot },
+              { label: 'Left over', value: `${isOver ? '-' : ''}$${Math.abs(Math.round(remaining)).toLocaleString()}`,              color: isOver ? OVER_DOT : theme.accent.dot },
               { label: 'Savings',   value: `$${Math.round(savingsTotal).toLocaleString()}`,                                         color: savingsCol                          },
             ] as const).map((stat, i, arr) => (
               <React.Fragment key={stat.label}>
@@ -411,17 +442,6 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
               </React.Fragment>
             ))}
           </View>
-
-          {/* ── 50/30/20 — tucked at the bottom ─────── */}
-          <TouchableOpacity
-            onPress={confirmTemplate}
-            activeOpacity={0.6}
-            style={styles.templateLink}
-          >
-            <Text style={{ fontSize: 12, color: theme.textTer, fontWeight: '500' }}>
-              Apply 50/30/20 template
-            </Text>
-          </TouchableOpacity>
 
         </ScrollView>
       </View>
@@ -444,7 +464,8 @@ const styles = StyleSheet.create({
   eyebrow: {
     fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   incomeRow: {
     flexDirection: 'row',
@@ -454,24 +475,24 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   currencySign: {
-    fontSize: 22,
-    fontWeight: '500',
-    letterSpacing: -0.5,
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   incomeAmount: {
-    fontSize: 40,
+    fontSize: 30,
     fontWeight: '700',
-    letterSpacing: -1.5,
+    letterSpacing: -1,
   },
   incomeInput: {
-    fontSize: 40,
+    fontSize: 30,
     fontWeight: '700',
-    letterSpacing: -1.5,
+    letterSpacing: -1,
     borderWidth: 1.5,
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    minWidth: 140,
+    minWidth: 120,
   },
   cadenceTrack: {
     flexDirection: 'row',
@@ -489,8 +510,8 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   allocationBar: {
-    height: 10,
-    borderRadius: 5,
+    height: 14,
+    borderRadius: 7,
     overflow: 'hidden',
     flexDirection: 'row',
     marginBottom: 14,
@@ -571,13 +592,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
   summaryValue: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
     letterSpacing: -0.3,
   },
-  templateLink: {
+  templateChip: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingBottom: 8,
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 14,
   },
 });
