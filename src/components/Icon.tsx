@@ -76,6 +76,10 @@ export const Icon: React.FC<IconProps> = ({ name, size = 20, color = '#0E0E10', 
       <Circle cx="12" cy="9" r="3.5" {...p} />
       <Path d="M5 20c1.2-3.6 4-5 7-5s5.8 1.4 7 5" {...p} />
     </G>,
+    receipt: <G>
+      <Path d="M6 3H18V18L16 20L14 18L12 20L10 18L8 20L6 18Z" {...p} />
+      <Path d="M9 7h6M9 11h6M9 15h3" {...p} />
+    </G>,
     cards: <G>
       <Rect x="2.5" y="7" width="19" height="12" rx="2.2" {...p} />
       <Path d="M2.5 11h19" {...p} />

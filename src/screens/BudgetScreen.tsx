@@ -8,10 +8,11 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, getCardStyle, OVER_DOT } from '../theme';
-import { CATS } from '../data';
+import { Theme, GROUP_COLORS, catGroupColor, OVER_DOT } from '../theme';
+import { SPEND_GROUPS, UPCOMING_BILLS, MONTHLY_INCOME } from '../data';
 import { Icon } from '../components/Icon';
 import { ThemeToggle } from '../components/ThemeToggle';
 
@@ -20,271 +21,75 @@ interface Props {
   onOpenDrawer: () => void;
 }
 
-// Naked icon button — matches the home-screen header chrome.
-function IconBtn({
-  onPress,
-  children,
-  size = 40,
-}: {
-  onPress?: () => void;
-  children: React.ReactNode;
-  size?: number;
-}) {
+type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
+
+const CADENCES: { value: Cadence; label: string }[] = [
+  { value: 'Mo', label: 'Monthly'   },
+  { value: '2w', label: 'Bi-weekly' },
+  { value: 'Wk', label: 'Weekly'    },
+  { value: 'Yr', label: 'Annual'    },
+];
+
+const bKey = (gKey: string, label: string) => `${gKey}:${label}`;
+
+const initBudgets = (): Record<string, number> => {
+  const out: Record<string, number> = {};
+  SPEND_GROUPS.forEach(g => g.subs.forEach(s => { out[bKey(g.key, s.label)] = s.budget; }));
+  return out;
+};
+
+const toMonthly = (v: number, c: Cadence): number => {
+  switch (c) {
+    case '2w': return Math.round(v * 26 / 12);
+    case 'Wk': return Math.round(v * 52 / 12);
+    case 'Yr': return Math.round(v / 12);
+    default:   return Math.round(v);
+  }
+};
+const fromMonthly = (monthly: number, c: Cadence): number => {
+  switch (c) {
+    case '2w': return Math.round(monthly * 12 / 26);
+    case 'Wk': return Math.round(monthly * 12 / 52);
+    case 'Yr': return monthly * 12;
+    default:   return monthly;
+  }
+};
+
+function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.5}
       delayPressIn={0}
-      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-      style={[styles.iconBtn, { width: size, height: size }]}
+      hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
+      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}
     >
       {children}
     </TouchableOpacity>
   );
 }
 
-interface IncomeItem {
-  id: string;
-  name: string;
-  icon: string;
-  amount: number;
-}
-
-const INITIAL_INCOME: IncomeItem[] = [
-  { id: 'i1', name: 'Paycheck',  icon: 'doc',  amount: 4200 },
-  { id: 'i2', name: 'Interest',  icon: 'tag',  amount: 10   },
-];
-
-// Seed expense budgets from CATS so the screen matches the rest of the app.
-const initialExpenseBudgets = (): Record<string, number> => {
-  const out: Record<string, number> = {};
-  Object.entries(CATS).forEach(([key, c]) => { out[key] = c.budget; });
-  return out;
-};
-
-const fmtMoney = (v: number) =>
-  `$${Math.round(v).toLocaleString()}`;
-
-export function BudgetScreen({ theme, onOpenDrawer }: Props) {
-  const insets = useSafeAreaInsets();
-  const card = getCardStyle(theme);
-
-  const [incomeItems, setIncomeItems] = useState<IncomeItem[]>(INITIAL_INCOME);
-  const [expenseBudgets, setExpenseBudgets] = useState<Record<string, number>>(initialExpenseBudgets);
-
-  const totalIncome   = useMemo(() => incomeItems.reduce((s, i) => s + i.amount, 0), [incomeItems]);
-  const totalExpenses = useMemo(() => Object.values(expenseBudgets).reduce((s, v) => s + v, 0), [expenseBudgets]);
-  const leftToBudget  = totalIncome - totalExpenses;
-  const overAllocated = leftToBudget < 0;
-
-  const expensePct = totalIncome > 0 ? Math.min(totalExpenses / totalIncome, 1) : 0;
-
-  const updateIncome = (id: string, amount: number) =>
-    setIncomeItems(items => items.map(i => (i.id === id ? { ...i, amount } : i)));
-  const updateExpense = (key: string, amount: number) =>
-    setExpenseBudgets(b => ({ ...b, [key]: amount }));
-
-  const heroColor = overAllocated ? OVER_DOT : theme.accent.dot;
-  const heroInk   = overAllocated ? '#fff' : theme.accent.ink;
-  const heroBg    = overAllocated ? OVER_DOT : theme.accent.fill;
-
-  return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: theme.bg }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 140, paddingTop: insets.top + 8 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ─── Header: home-style chrome (hamburger left, bell + theme right) ─ */}
-        <View style={styles.headerChrome}>
-          <IconBtn onPress={onOpenDrawer}>
-            <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
-          </IconBtn>
-          <View style={{ flexDirection: 'row', gap: 4 }}>
-            <IconBtn>
-              <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
-            </IconBtn>
-            <ThemeToggle />
-          </View>
-        </View>
-
-        {/* Title block — Budget + month indicator */}
-        <View style={styles.titleBlock}>
-          <Text style={{ fontSize: 13, color: theme.textSec, fontWeight: '500', marginBottom: 2 }}>
-            May 2026
-          </Text>
-          <Text style={{ fontSize: 26, fontWeight: '700', letterSpacing: -0.6, color: theme.text }}>
-            Budget
-          </Text>
-        </View>
-
-        {/* ─── Hero: Left to budget ─────────────────────────── */}
-        <View style={[styles.heroPill, { backgroundColor: heroBg }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: heroInk }}>
-              {overAllocated ? 'Over budget' : 'Left to budget'}
-            </Text>
-            <Icon name="sparkle" size={13} color={heroInk} stroke={1.5} />
-          </View>
-          <Text style={{ fontSize: 22, fontWeight: '700', color: heroInk, letterSpacing: -0.5 }}>
-            {overAllocated ? '−' : ''}{fmtMoney(Math.abs(leftToBudget))}
-          </Text>
-        </View>
-
-        {/* ─── Summary card (Income + Expenses bars) ───────── */}
-        <View style={[card, styles.summaryCard]}>
-          <SummaryRow
-            theme={theme}
-            label="Income"
-            primaryLabel={`${fmtMoney(totalIncome)} earned`}
-            secondaryLabel={`${fmtMoney(totalIncome)} budget`}
-            barColor={theme.accent.dot}
-            pct={1}
-          />
-          <View style={[styles.divider, { backgroundColor: theme.sep }]} />
-          <SummaryRow
-            theme={theme}
-            label="Expenses"
-            primaryLabel={`${fmtMoney(totalExpenses)} allocated`}
-            secondaryLabel={`${fmtMoney(totalIncome)} budget`}
-            barColor={overAllocated ? OVER_DOT : theme.accent.dot}
-            pct={expensePct}
-            warn={overAllocated}
-          />
-        </View>
-
-        {/* ─── Income section ────────────────────────────── */}
-        <SectionHeader theme={theme} title="Income" />
-        <View style={[card, styles.listCard]}>
-          {incomeItems.map((item, i) => (
-            <EditableRow
-              key={item.id}
-              theme={theme}
-              icon={item.icon}
-              name={item.name}
-              amount={item.amount}
-              onChange={(v) => updateIncome(item.id, v)}
-              last={i === incomeItems.length - 1}
-              accent={theme.accent.dot}
-            />
-          ))}
-        </View>
-
-        {/* ─── Expense categories ─────────────────────────── */}
-        <SectionHeader theme={theme} title="Expenses" />
-        <View style={[card, styles.listCard]}>
-          {Object.entries(CATS).map(([key, c], i, arr) => (
-            <EditableRow
-              key={key}
-              theme={theme}
-              icon={c.icon}
-              name={c.label}
-              amount={expenseBudgets[key] ?? 0}
-              onChange={(v) => updateExpense(key, v)}
-              last={i === arr.length - 1}
-            />
-          ))}
-        </View>
-
-        <Text style={[styles.hint, { color: theme.textTer }]}>
-          Tap any amount to edit. Totals update live.
-        </Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
-}
-
-// ── Section header ─────────────────────────────────────────────
-function SectionHeader({ theme, title }: { theme: Theme; title: string }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text style={{ fontSize: 17, fontWeight: '600', letterSpacing: -0.4, color: theme.text }}>
-        {title}
-      </Text>
-      <View style={styles.sectionHeaderCols}>
-        <Text style={[styles.colLabel, { color: theme.textTer }]}>Budget</Text>
-      </View>
-    </View>
-  );
-}
-
-// ── Summary row with progress bar ──────────────────────────────
-function SummaryRow({
-  theme,
-  label,
-  primaryLabel,
-  secondaryLabel,
-  barColor,
-  pct,
-  warn,
-}: {
-  theme: Theme;
-  label: string;
-  primaryLabel: string;
-  secondaryLabel: string;
-  barColor: string;
-  pct: number;
-  warn?: boolean;
-}) {
-  return (
-    <View>
-      <View style={styles.summaryHead}>
-        <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{label}</Text>
-        <Text style={{ fontSize: 12, fontWeight: '500', color: theme.textSec }}>{secondaryLabel}</Text>
-      </View>
-      <View style={[styles.progressTrack, { backgroundColor: theme.hairline }]}>
-        <View
-          style={[
-            styles.progressFill,
-            { width: `${Math.min(pct * 100, 100)}%`, backgroundColor: barColor },
-          ]}
-        />
-      </View>
-      <View style={styles.summaryFoot}>
-        <Text style={{ fontSize: 12, fontWeight: '600', color: warn ? OVER_DOT : theme.text }}>
-          {primaryLabel}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-// ── Editable row (icon + name + tappable amount) ───────────────
 function EditableRow({
-  theme,
-  icon,
-  name,
-  amount,
-  onChange,
-  last,
-  accent,
+  theme, icon, name, amount, onChange, last, groupColor,
 }: {
-  theme: Theme;
-  icon: string;
-  name: string;
-  amount: number;
-  onChange: (v: number) => void;
-  last: boolean;
-  accent?: string;
+  theme: Theme; icon: string; name: string; amount: number;
+  onChange: (v: number) => void; last: boolean; groupColor: string;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(amount));
+  const [draft, setDraft] = useState(String(Math.round(amount)));
 
   const commit = () => {
     const v = parseFloat(draft.replace(/[^0-9.]/g, ''));
-    onChange(Number.isFinite(v) ? v : 0);
+    onChange(Number.isFinite(v) && v >= 0 ? v : 0);
     setEditing(false);
   };
 
   return (
     <View style={[styles.row, { borderBottomWidth: last ? 0 : 1, borderBottomColor: theme.sep }]}>
-      <View style={[styles.rowIcon, { backgroundColor: theme.chipBg }]}>
-        <Icon name={icon} size={16} color={theme.text} stroke={1.5} />
+      <View style={[styles.rowIcon, { backgroundColor: groupColor }]}>
+        <Icon name={icon} size={16} color="#fff" stroke={1.6} />
       </View>
-      <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.2 }}>
+      <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.2, minWidth: 0 }}>
         {name}
       </Text>
       {editing ? (
@@ -296,14 +101,11 @@ function EditableRow({
           keyboardType="decimal-pad"
           autoFocus
           selectTextOnFocus
-          style={[
-            styles.amountInput,
-            {
-              color: accent ?? theme.text,
-              backgroundColor: theme.chipBg,
-              borderColor: theme.accent.dot,
-            },
-          ]}
+          style={[styles.amountInput, {
+            color: theme.text,
+            backgroundColor: theme.chipBg,
+            borderColor: theme.accent.dot,
+          }]}
         />
       ) : (
         <TouchableOpacity
@@ -311,8 +113,8 @@ function EditableRow({
           style={[styles.amountChip, { backgroundColor: theme.chipBg }]}
           activeOpacity={0.7}
         >
-          <Text style={{ fontSize: 14, fontWeight: '700', color: accent ?? theme.text }}>
-            {fmtMoney(amount)}
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
+            ${Math.round(amount).toLocaleString()}
           </Text>
         </TouchableOpacity>
       )}
@@ -320,94 +122,416 @@ function EditableRow({
   );
 }
 
-const styles = StyleSheet.create({
-  headerChrome: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 8,
-  },
-  titleBlock: {
-    paddingBottom: 22,
-    paddingTop: 4,
-  },
-  iconBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+export function BudgetScreen({ theme, onOpenDrawer }: Props) {
+  const insets = useSafeAreaInsets();
 
-  heroPill: {
+  const [income, setIncome] = useState(MONTHLY_INCOME);
+  const [cadence, setCadence] = useState<Cadence>('Mo');
+  const [editingIncome, setEditingIncome] = useState(false);
+  const [incomeDraft, setIncomeDraft] = useState('');
+  const [budgets, setBudgets] = useState<Record<string, number>>(initBudgets);
+
+  const displayIncome = fromMonthly(income, cadence);
+
+  const commitIncome = () => {
+    const v = parseFloat(incomeDraft.replace(/[^0-9.]/g, ''));
+    if (Number.isFinite(v) && v > 0) setIncome(toMonthly(v, cadence));
+    setEditingIncome(false);
+  };
+
+  const updateBudget = (gKey: string, label: string, v: number) =>
+    setBudgets(b => ({ ...b, [bKey(gKey, label)]: v }));
+
+  const groupTotals = useMemo(() => {
+    const t: Record<string, number> = {};
+    SPEND_GROUPS.forEach(g => {
+      t[g.key] = g.subs.reduce((s, sub) => s + (budgets[bKey(g.key, sub.label)] ?? 0), 0);
+    });
+    return t;
+  }, [budgets]);
+
+  const needsTotal    = groupTotals.needs    ?? 0;
+  const wantsTotal    = groupTotals.wants    ?? 0;
+  const savingsTotal  = groupTotals.savings  ?? 0;
+  const totalBudgeted = needsTotal + wantsTotal + savingsTotal;
+  const remaining     = income - totalBudgeted;
+  const isOver        = remaining < 0;
+
+  const applyTemplate = () => {
+    const next: Record<string, number> = {};
+    SPEND_GROUPS.forEach(g => {
+      const target = income * g.targetPct;
+      const subSum = g.subs.reduce((s, sub) => s + sub.budget, 0);
+      g.subs.forEach(sub => {
+        const ratio = subSum > 0 ? sub.budget / subSum : 1 / g.subs.length;
+        next[bKey(g.key, sub.label)] = Math.round(target * ratio);
+      });
+    });
+    setBudgets(next);
+  };
+
+  const confirmTemplate = () =>
+    Alert.alert(
+      'Apply 50/30/20 template',
+      'This will overwrite all your current category budgets. Your income stays the same.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Apply', style: 'destructive', onPress: applyTemplate },
+      ],
+    );
+
+  const barMax      = Math.max(totalBudgeted, income);
+  const needsFrac   = barMax > 0 ? needsTotal   / barMax : 0;
+  const wantsFrac   = barMax > 0 ? wantsTotal   / barMax : 0;
+  const savingsFrac = barMax > 0 ? savingsTotal / barMax : 0;
+
+  const gCol = (key: string) =>
+    (theme.dark ? GROUP_COLORS[key]?.dark : GROUP_COLORS[key]?.light) ?? '#888888';
+
+  const needsCol   = gCol('needs');
+  const wantsCol   = gCol('wants');
+  const savingsCol = gCol('savings');
+
+  const recurringTotal = UPCOMING_BILLS.reduce((s, b) => s + b.amount, 0);
+  const discretionary  = Math.round(income - recurringTotal);
+  const allocatedPct   = Math.round((totalBudgeted / (income || 1)) * 100);
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
+
+        {/* ── Header ──────────────────────────────────── */}
+        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+          <IconBtn onPress={onOpenDrawer}>
+            <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
+          </IconBtn>
+          <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.4, color: theme.text }}>
+            Budget
+          </Text>
+          <ThemeToggle />
+        </View>
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+
+          {/* ── Income ──────────────────────────────── */}
+          <View style={styles.incomeBlock}>
+            <Text style={[styles.eyebrow, { color: theme.textTer }]}>Income</Text>
+
+            {editingIncome ? (
+              <View style={styles.incomeRow}>
+                <Text style={[styles.currencySign, { color: theme.textSec }]}>$</Text>
+                <TextInput
+                  value={incomeDraft}
+                  onChangeText={setIncomeDraft}
+                  onBlur={commitIncome}
+                  onSubmitEditing={commitIncome}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  selectTextOnFocus
+                  style={[styles.incomeInput, { color: theme.text, borderColor: theme.accent.dot }]}
+                />
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => { setIncomeDraft(String(displayIncome)); setEditingIncome(true); }}
+                activeOpacity={0.8}
+                style={styles.incomeRow}
+              >
+                <Text style={[styles.currencySign, { color: theme.textSec }]}>$</Text>
+                <Text style={[styles.incomeAmount, { color: theme.text }]}>
+                  {displayIncome.toLocaleString()}
+                </Text>
+                <Icon name="chevDown" size={18} color={theme.textTer} stroke={1.5} />
+              </TouchableOpacity>
+            )}
+
+            <View style={[styles.cadenceTrack, { backgroundColor: theme.chipBg }]}>
+              {CADENCES.map(c => (
+                <TouchableOpacity
+                  key={c.value}
+                  onPress={() => setCadence(c.value)}
+                  activeOpacity={0.7}
+                  style={[styles.cadencePill, cadence === c.value && { backgroundColor: theme.text }]}
+                >
+                  <Text style={{
+                    fontSize: 12,
+                    fontWeight: '600',
+                    color: cadence === c.value ? theme.bg : theme.textSec,
+                  }}>
+                    {c.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {cadence !== 'Mo' && (
+              <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 8 }}>
+                ~${income.toLocaleString()}/month effective
+              </Text>
+            )}
+          </View>
+
+          {/* ── Allocation bar ──────────────────────── */}
+          <View style={styles.barSection}>
+            <Text style={[styles.eyebrow, { color: theme.textTer, marginBottom: 10 }]}>
+              {allocatedPct}% of income allocated
+            </Text>
+            <View style={[styles.allocationBar, { backgroundColor: theme.chipBg }]}>
+              {needsTotal > 0 && (
+                <View style={[styles.barSegment, {
+                  width: `${(needsFrac * 100).toFixed(2)}%` as any,
+                  backgroundColor: needsCol,
+                }]} />
+              )}
+              {wantsTotal > 0 && (
+                <View style={[styles.barSegment, {
+                  width: `${(wantsFrac * 100).toFixed(2)}%` as any,
+                  backgroundColor: wantsCol,
+                }]} />
+              )}
+              {savingsTotal > 0 && (
+                <View style={[styles.barSegment, {
+                  width: `${(savingsFrac * 100).toFixed(2)}%` as any,
+                  backgroundColor: savingsCol,
+                }]} />
+              )}
+            </View>
+            <View style={styles.legendRow}>
+              {([
+                { label: 'Needs',   labelColor: needsCol,   valueColor: theme.text,    amount: needsTotal   },
+                { label: 'Wants',   labelColor: wantsCol,   valueColor: theme.text,    amount: wantsTotal   },
+                { label: 'Savings', labelColor: savingsCol, valueColor: theme.text,    amount: savingsTotal  },
+                {
+                  label:      isOver ? 'Over' : 'Free',
+                  labelColor: isOver ? OVER_DOT : theme.textTer,
+                  valueColor: isOver ? OVER_DOT : theme.textSec,
+                  amount:     Math.abs(remaining),
+                },
+              ] as const).map(item => (
+                <View key={item.label} style={{ alignItems: 'center' }}>
+                  <Text style={{
+                    fontSize: 11, fontWeight: '600', letterSpacing: 0.1,
+                    color: item.labelColor, marginBottom: 3,
+                  }}>
+                    {item.label}
+                  </Text>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: item.valueColor, letterSpacing: -0.2 }}>
+                    ${Math.round(item.amount).toLocaleString()}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* ── Recurring bills ─────────────────────── */}
+          <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+          <View style={styles.sectionHead}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Recurring bills</Text>
+          </View>
+          {UPCOMING_BILLS.map((bill, i) => (
+            <View
+              key={bill.id}
+              style={[styles.row, {
+                borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0,
+                borderBottomColor: theme.sep,
+              }]}
+            >
+              <View style={[styles.rowIcon, { backgroundColor: catGroupColor(bill.cat, theme.dark) }]}>
+                <Icon name={bill.icon} size={16} color="#fff" stroke={1.6} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.2 }}>
+                  {bill.name}
+                </Text>
+                <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 2 }}>
+                  {bill.dueDate}{bill.estimate ? ' · estimated' : ''}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec, letterSpacing: -0.2 }}>
+                {bill.estimate ? '~' : ''}${bill.amount % 1 !== 0 ? bill.amount.toFixed(2) : bill.amount.toLocaleString()}
+              </Text>
+            </View>
+          ))}
+          <Text style={{ fontSize: 12, color: theme.textTer, marginTop: 10, paddingHorizontal: 2 }}>
+            ${recurringTotal.toFixed(2)} locked in · ${discretionary.toLocaleString()} discretionary
+          </Text>
+
+          {/* ── Category groups ─────────────────────── */}
+          {SPEND_GROUPS.map(g => {
+            const groupColor = gCol(g.key);
+            return (
+              <React.Fragment key={g.key}>
+                <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.sectionTitle, { color: groupColor }]}>{g.label}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: groupColor, letterSpacing: -0.2 }}>
+                    ${Math.round(groupTotals[g.key] ?? 0).toLocaleString()}
+                  </Text>
+                </View>
+                {g.subs.map((sub, si) => (
+                  <EditableRow
+                    key={sub.label}
+                    theme={theme}
+                    icon={sub.icon}
+                    name={sub.label}
+                    amount={budgets[bKey(g.key, sub.label)] ?? sub.budget}
+                    onChange={v => updateBudget(g.key, sub.label, v)}
+                    last={si === g.subs.length - 1}
+                    groupColor={groupColor}
+                  />
+                ))}
+              </React.Fragment>
+            );
+          })}
+
+          {/* ── Summary strip ──────────────────────── */}
+          <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+          <View style={styles.summaryStrip}>
+            {([
+              { label: 'Budgeted',  value: `$${Math.round(totalBudgeted).toLocaleString()}`,                                        color: theme.text                          },
+              { label: 'Remaining', value: `${isOver ? '-' : ''}$${Math.abs(Math.round(remaining)).toLocaleString()}`,              color: isOver ? OVER_DOT : theme.accent.dot },
+              { label: 'Savings',   value: `$${Math.round(savingsTotal).toLocaleString()}`,                                         color: savingsCol                          },
+            ] as const).map((stat, i, arr) => (
+              <React.Fragment key={stat.label}>
+                <View style={styles.summaryStat}>
+                  <Text style={[styles.summaryLabel, { color: theme.textTer }]}>{stat.label}</Text>
+                  <Text style={[styles.summaryValue, { color: stat.color }]}>{stat.value}</Text>
+                </View>
+                {i < arr.length - 1 && (
+                  <View style={[styles.summaryDiv, { backgroundColor: theme.hairline }]} />
+                )}
+              </React.Fragment>
+            ))}
+          </View>
+
+          {/* ── 50/30/20 — tucked at the bottom ─────── */}
+          <TouchableOpacity
+            onPress={confirmTemplate}
+            activeOpacity={0.6}
+            style={styles.templateLink}
+          >
+            <Text style={{ fontSize: 12, color: theme.textTer, fontWeight: '500' }}>
+              Apply 50/30/20 template
+            </Text>
+          </TouchableOpacity>
+
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 18,
-    borderRadius: 18,
-    marginBottom: 14,
+    paddingBottom: 16,
   },
-
-  summaryCard: {
-    padding: 18,
-    marginBottom: 22,
+  incomeBlock: {
+    paddingTop: 20,
+    paddingBottom: 28,
   },
-  summaryHead: {
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  incomeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'baseline',
+    gap: 4,
+    marginTop: 8,
     marginBottom: 10,
   },
-  summaryFoot: {
-    marginTop: 8,
+  currencySign: {
+    fontSize: 22,
+    fontWeight: '500',
+    letterSpacing: -0.5,
   },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
+  incomeAmount: {
+    fontSize: 40,
+    fontWeight: '700',
+    letterSpacing: -1.5,
+  },
+  incomeInput: {
+    fontSize: 40,
+    fontWeight: '700',
+    letterSpacing: -1.5,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    minWidth: 140,
+  },
+  cadenceTrack: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+    gap: 2,
+  },
+  cadencePill: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderRadius: 7,
+  },
+  barSection: {
+    paddingBottom: 6,
+  },
+  allocationBar: {
+    height: 10,
+    borderRadius: 5,
     overflow: 'hidden',
+    flexDirection: 'row',
+    marginBottom: 14,
   },
-  progressFill: {
+  barSegment: {
     height: '100%',
-    borderRadius: 3,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   divider: {
     height: 1,
-    marginVertical: 16,
+    marginHorizontal: -20,
+    marginVertical: 22,
   },
-
-  sectionHeader: {
+  sectionHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
+    marginBottom: 12,
     paddingHorizontal: 2,
-    marginBottom: 10,
-    marginTop: 4,
   },
-  sectionHeaderCols: {
-    flexDirection: 'row',
-  },
-  colLabel: {
-    fontSize: 11,
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-
-  listCard: {
-    overflow: 'hidden',
-    marginBottom: 22,
+    letterSpacing: -0.3,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   rowIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   amountChip: {
     paddingHorizontal: 12,
@@ -426,11 +550,34 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     borderWidth: 1.5,
   },
-
-  hint: {
+  summaryStrip: {
+    flexDirection: 'row',
+    paddingVertical: 4,
+    paddingBottom: 24,
+  },
+  summaryStat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  summaryDiv: {
+    width: 1,
+    height: 28,
+    alignSelf: 'center',
+  },
+  summaryLabel: {
     fontSize: 11,
     fontWeight: '500',
-    textAlign: 'center',
-    marginBottom: 24,
+    letterSpacing: 0.1,
+  },
+  summaryValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+  },
+  templateLink: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingBottom: 8,
   },
 });

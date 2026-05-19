@@ -7,9 +7,11 @@ import { Icon } from '../components/Icon';
 import { Segmented, SectionHeader } from '../components/shared';
 import { TrendChart } from '../components/TrendChart';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { PieChart } from '../components/PieChart';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CHART_W = SCREEN_W - 40;
+const PIE_SIZE = Math.min(SCREEN_W - 40, 280);
 
 interface Props {
   theme: Theme;
@@ -39,6 +41,7 @@ const VS_LABEL: Record<string, string> = {
 export function SpendingScreen({ theme, onOpenDrawer }: Props) {
   const insets = useSafeAreaInsets();
   const [period, setPeriod] = useState('Month');
+  const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const card = getCardStyle(theme);
 
   const pd = PERIOD_DATA[period];
@@ -95,7 +98,12 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
 
       {/* Period selector — sticky below header */}
       <View style={styles.segRow}>
-        <Segmented value={period} onChange={setPeriod} options={['Week', 'Month', 'Year']} theme={theme} />
+        <Segmented
+          value={period}
+          onChange={(p) => { setPeriod(p); setSelectedCat(null); }}
+          options={['Week', 'Month', 'Year']}
+          theme={theme}
+        />
       </View>
 
       <ScrollView
@@ -142,30 +150,39 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
           />
         </View>
 
-        {/* ── By category ────────────────────────────── */}
+        {/* ── By category (pie chart) ─────────────────── */}
         <View style={{ paddingHorizontal: 20, marginBottom: 28 }}>
           <SectionHeader title="By category" theme={theme} />
-          <View style={[card, { overflow: 'hidden' }]}>
-            {pd.byCat.map((d, i) => {
-              const cat = CATS[d.cat];
-              const pct = Math.round((d.value / (cat?.budget ?? 1)) * 100);
-              const over = d.value > (cat?.budget ?? Infinity);
-              const groupColor = catGroupColor(d.cat, theme.dark);
-              return (
-                <View
-                  key={d.cat}
-                  style={[
-                    styles.catRow,
-                    { borderBottomWidth: i < pd.byCat.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
-                  ]}
-                >
+          <PieChart
+            data={pd.byCat}
+            theme={theme}
+            size={PIE_SIZE}
+            selected={selectedCat}
+            onSelect={setSelectedCat}
+          />
+
+          {/* Expanded category detail */}
+          {selectedCat && (() => {
+            const cat = CATS[selectedCat];
+            const catData = pd.byCat.find(c => c.cat === selectedCat);
+            const value = catData?.value ?? 0;
+            const budget = cat?.budget ?? 0;
+            const pct = Math.round((value / budget) * 100);
+            const over = value > budget;
+            const groupColor = catGroupColor(selectedCat, theme.dark);
+            const catTxs = TRANSACTIONS.filter(tx => tx.cat === selectedCat);
+
+            return (
+              <View style={[card, { overflow: 'hidden', marginTop: 16 }]}>
+                {/* Category header row */}
+                <View style={[styles.catRow, { borderBottomWidth: 1, borderBottomColor: theme.sep }]}>
                   <View style={[styles.catIconWrap, { backgroundColor: groupColor + '22' }]}>
                     <Icon name={cat?.icon ?? 'tag'} size={14} color={groupColor} stroke={1.6} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={styles.catLabelRow}>
                       <Text style={[styles.catLabel, { color: theme.text }]}>{cat?.label}</Text>
-                      <Text style={[styles.catAmount, { color: theme.text }]}>${d.value.toFixed(0)}</Text>
+                      <Text style={[styles.catAmount, { color: theme.text }]}>${value.toFixed(0)}</Text>
                     </View>
                     <View style={[styles.progressTrack, { backgroundColor: theme.hairline }]}>
                       <View style={[styles.progressFill, {
@@ -180,9 +197,36 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                     </Text>
                   </View>
                 </View>
-              );
-            })}
-          </View>
+
+                {/* Transactions in this category */}
+                {catTxs.length === 0 ? (
+                  <View style={{ padding: 16 }}>
+                    <Text style={{ fontSize: 13, color: theme.textSec }}>No transactions this period</Text>
+                  </View>
+                ) : catTxs.map((tx, i) => (
+                  <View
+                    key={tx.id}
+                    style={[
+                      styles.txRow,
+                      { borderBottomWidth: i < catTxs.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
+                    ]}
+                  >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[styles.catLabel, { color: theme.text }]} numberOfLines={1}>
+                        {tx.merchant}
+                      </Text>
+                      <Text style={{ fontSize: 11.5, color: theme.textSec, marginTop: 2 }}>
+                        {tx.date} · {tx.time}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.3 }}>
+                      ${tx.amount.toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
         </View>
 
         {/* ── Biggest movers ─────────────────────────── */}

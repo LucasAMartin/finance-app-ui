@@ -6,10 +6,9 @@ export interface Category {
 
 export const CATS: Record<string, Category> = {
   groceries:     { label: 'Groceries',     icon: 'cart',    budget: 400 },
-  dining:        { label: 'Dining',        icon: 'fork',    budget: 300 },
+  dining:        { label: 'Dining',        icon: 'fork',    budget: 350 },
   transport:     { label: 'Transport',     icon: 'car',     budget: 200 },
   shopping:      { label: 'Shopping',      icon: 'bag',     budget: 250 },
-  coffee:        { label: 'Coffee',        icon: 'cup',     budget: 80  },
   bills:         { label: 'Bills',         icon: 'doc',     budget: 500 },
   entertainment: { label: 'Entertainment', icon: 'film',    budget: 150 },
 };
@@ -28,7 +27,7 @@ export interface Transaction {
 
 export const TRANSACTIONS: Transaction[] = [
   { id:'t1', merchant:'Whole Foods',  cat:'groceries',     amount:84.20,  note:'Weekly shop',        date:'Today',     time:'5:42 PM',  when:'today',     fullDate:'May 13' },
-  { id:'t2', merchant:'Blue Bottle',  cat:'coffee',        amount:6.50,   note:'Cortado',            date:'Today',     time:'8:14 AM',  when:'today',     fullDate:'May 13' },
+  { id:'t2', merchant:'Blue Bottle',  cat:'dining',        amount:6.50,   note:'Cortado',            date:'Today',     time:'8:14 AM',  when:'today',     fullDate:'May 13' },
   { id:'t3', merchant:'Lyft',         cat:'transport',     amount:14.80,  note:'Ride home',          date:'Yesterday', time:'11:02 PM', when:'yesterday', fullDate:'May 12' },
   { id:'t4', merchant:'Nopa',         cat:'dining',        amount:62.40,  note:'Dinner with M',      date:'Yesterday', time:'8:30 PM',  when:'yesterday', fullDate:'May 12' },
   { id:'t5', merchant:'Apple Store',  cat:'shopping',      amount:129.00, note:'USB-C cable + case', date:'May 9',     time:'2:18 PM',  when:'earlier',   fullDate:'May 9'  },
@@ -93,16 +92,14 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
     remainingLabel: '3 days left in week',
     byCat: [
       { cat: 'groceries', value: 84.20 },
-      { cat: 'dining',    value: 62.40 },
+      { cat: 'dining',    value: 68.90 },
       { cat: 'transport', value: 14.80 },
-      { cat: 'coffee',    value: 6.50  },
     ],
     prevTotal: 212.50,
     prevByCat: [
       { cat: 'groceries', value: 120.50 },
-      { cat: 'dining',    value: 45.20  },
+      { cat: 'dining',    value: 53.20  },
       { cat: 'transport', value: 12.60  },
-      { cat: 'coffee',    value: 8.00   },
     ],
   },
   Month: {
@@ -117,20 +114,18 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
       { cat: 'shopping',      value: 129.00 },
       { cat: 'bills',         value: 92.18  },
       { cat: 'groceries',     value: 84.20  },
-      { cat: 'dining',        value: 62.40  },
+      { cat: 'dining',        value: 68.90  },
       { cat: 'transport',     value: 14.80  },
       { cat: 'entertainment', value: 10.99  },
-      { cat: 'coffee',        value: 6.50   },
     ],
     prevTotal: 485.20,
     prevByCat: [
       { cat: 'shopping',      value: 79.20  },
       { cat: 'bills',         value: 92.18  },
       { cat: 'groceries',     value: 94.30  },
-      { cat: 'dining',        value: 88.50  },
+      { cat: 'dining',        value: 94.30  },
       { cat: 'transport',     value: 12.00  },
       { cat: 'entertainment', value: 13.99  },
-      { cat: 'coffee',        value: 5.80   },
     ],
   },
   Year: {
@@ -144,21 +139,19 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
     byCat: [
       { cat: 'bills',         value: 4200 },
       { cat: 'groceries',     value: 2800 },
-      { cat: 'dining',        value: 1800 },
+      { cat: 'dining',        value: 2300 },
       { cat: 'shopping',      value: 1450 },
       { cat: 'transport',     value: 980  },
       { cat: 'entertainment', value: 720  },
-      { cat: 'coffee',        value: 500  },
     ],
     prevTotal: 11500,
     prevByCat: [
       { cat: 'bills',         value: 3900 },
       { cat: 'groceries',     value: 2600 },
-      { cat: 'dining',        value: 2200 },
+      { cat: 'dining',        value: 2680 },
       { cat: 'shopping',      value: 1200 },
       { cat: 'transport',     value: 1100 },
       { cat: 'entertainment', value: 820  },
-      { cat: 'coffee',        value: 480  },
     ],
   },
 };
@@ -224,10 +217,9 @@ export const SPEND_GROUPS: SpendGroup[] = [
     label: 'Wants',
     targetPct: 0.3,
     subs: [
-      { label: 'Dining',        icon: 'fork', spent: 318, budget: 400 },
+      { label: 'Dining',        icon: 'fork', spent: 318, budget: 440 },
       { label: 'Shopping',      icon: 'bag',  spent: 240, budget: 300 },
       { label: 'Entertainment', icon: 'film', spent: 142, budget: 180 },
-      { label: 'Coffee',        icon: 'cup',  spent: 88,  budget: 90  },
     ],
   },
   {

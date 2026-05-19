@@ -10,12 +10,10 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { Transaction } from './src/data';
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
 import { useAppFonts, patchTextWithInter } from './src/fonts';
 
 import { HomeScreen } from './src/screens/HomeScreen';
-import { DetailScreen } from './src/screens/DetailScreen';
 import { SpendingScreen } from './src/screens/SpendingScreen';
 import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
@@ -23,7 +21,7 @@ import { TabBar } from './src/components/TabBar';
 import { VoiceSheet } from './src/components/VoiceSheet';
 import { Drawer } from './src/components/Drawer';
 
-type Screen = 'home' | 'detail' | 'spending' | 'activity' | 'budget';
+type Screen = 'home' | 'spending' | 'activity' | 'budget';
 
 patchTextWithInter();
 
@@ -38,7 +36,6 @@ const SCREEN_ORDER: Record<Screen, number> = {
   spending: 1,
   budget: 2,
   activity: 3,
-  detail: 4,
 };
 
 // Directional slide: a screen always rests at 0 when active, off to the LEFT when the
@@ -92,7 +89,6 @@ function AppInner() {
   const { theme, dark } = useTheme();
   const [screen, setScreen] = useState<Screen>('home');
   const [prevScreen, setPrevScreen] = useState<Screen>('home');
-  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [adding, setAdding] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -114,11 +110,6 @@ function AppInner() {
     setPrevScreen(screen);
     setScreen(s);
   };
-  const openTx = (tx: Transaction) => {
-    setSelectedTx(tx);
-    navigate('detail');
-  };
-
   const handleDrawerNav = (id: string) => {
     setDrawerOpen(false);
     // Map drawer item ids to screens
@@ -141,15 +132,10 @@ function AppInner() {
         <AnimatedScreen screenKey="home" activeScreen={screen} prevScreen={prevScreen}>
           <HomeScreen
             theme={theme}
-            onOpenTx={openTx}
             onViewSpending={() => navigate('spending')}
             onViewActivity={() => navigate('activity')}
             onOpenDrawer={() => setDrawerOpen(true)}
           />
-        </AnimatedScreen>
-
-        <AnimatedScreen screenKey="detail" activeScreen={screen} prevScreen={prevScreen}>
-          <DetailScreen tx={selectedTx} theme={theme} onBack={() => navigate('home')} />
         </AnimatedScreen>
 
         <AnimatedScreen screenKey="spending" activeScreen={screen} prevScreen={prevScreen}>
@@ -160,7 +146,7 @@ function AppInner() {
         </AnimatedScreen>
 
         <AnimatedScreen screenKey="activity" activeScreen={screen} prevScreen={prevScreen}>
-          <ActivityScreen theme={theme} onBack={() => navigate('home')} onOpenTx={openTx} />
+          <ActivityScreen theme={theme} onOpenDrawer={() => setDrawerOpen(true)} />
         </AnimatedScreen>
 
         <AnimatedScreen screenKey="budget" activeScreen={screen} prevScreen={prevScreen}>
@@ -170,15 +156,16 @@ function AppInner() {
           />
         </AnimatedScreen>
 
-        {(screen === 'home' || screen === 'budget' || screen === 'spending') && (
+        {(screen === 'home' || screen === 'budget' || screen === 'spending' || screen === 'activity') && (
           <TabBar
             theme={theme}
-            active={screen}
+            active={screen === 'activity' ? 'profile' : screen}
             onAdd={() => setAdding(true)}
             onTabPress={(id) => {
-              if (id === 'home') navigate('home');
+              if (id === 'home')     navigate('home');
               else if (id === 'spending') navigate('spending');
-              else if (id === 'budget') navigate('budget');
+              else if (id === 'budget')   navigate('budget');
+              else if (id === 'profile')  navigate('activity');
             }}
           />
         )}

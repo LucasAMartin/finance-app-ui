@@ -98,7 +98,6 @@ export const CAT_PASTEL: Record<string, { light: string; dark: string }> = {
   dining:        { light: '#D5BA8E', dark: '#D6A57A' },
   transport:     { light: '#93B6CA', dark: '#7CB2D1' },
   shopping:      { light: '#B5A7D6', dark: '#A296D6' },
-  coffee:        { light: '#C9C58C', dark: '#CBC57F' },
   bills:         { light: '#91C9C5', dark: '#7BC4BF' },
   entertainment: { light: '#D5A7B5', dark: '#D69BB2' },
 };
@@ -136,7 +135,6 @@ export const CAT_TO_GROUP: Record<string, 'needs' | 'wants' | 'savings'> = {
   dining:        'wants',
   shopping:      'wants',
   entertainment: 'wants',
-  coffee:        'wants',
 };
 
 export function catGroupColor(cat: string, dark: boolean): string {

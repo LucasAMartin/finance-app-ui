@@ -25,6 +25,7 @@ import {
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
 import { CategoryGroups } from '../components/CategoryGroups';
+import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 // ── Tick bar gradient ────────────────────────────────────────────
@@ -86,13 +87,12 @@ function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; child
 
 interface Props {
   theme: Theme;
-  onOpenTx: (tx: Transaction) => void;
   onViewSpending: () => void;
   onViewActivity: () => void;
   onOpenDrawer: () => void;
 }
 
-export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, onOpenDrawer }: Props) {
+export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer }: Props) {
   const insets = useSafeAreaInsets();
 
   const groups = useMemo(() => {
@@ -109,6 +109,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
   const [filterText, setFilterText] = useState('');
   const triggerRef = useRef<View>(null);
 
+  const [sheetTx, setSheetTx] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -341,7 +342,7 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
                   </Text>
                   {groups[key].map((tx, i, arr) => (
                     <TxRow key={tx.id} tx={tx} theme={theme}
-                      onPress={() => onOpenTx(tx)} last={i === arr.length - 1} />
+                      onPress={() => setSheetTx(tx)} last={i === arr.length - 1} />
                   ))}
                 </View>
               )
@@ -397,6 +398,8 @@ export function HomeScreen({ theme, onOpenTx, onViewSpending, onViewActivity, on
           </ScrollView>
         </View>
       </Modal>
+
+      <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
     </View>
   );
 }

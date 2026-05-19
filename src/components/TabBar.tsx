@@ -16,7 +16,7 @@ const TABS = [
   { id: 'home',     icon: 'home'    },
   { id: 'spending', icon: 'chart'   },
   { id: 'budget',   icon: 'wallet'  },
-  { id: 'profile',  icon: 'profile' },
+  { id: 'profile',  icon: 'receipt' },
 ];
 
 const TAB_W = 46;
