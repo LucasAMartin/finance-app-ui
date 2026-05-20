@@ -1,24 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Dimensions,
-  Easing,
-  Modal,
-  PanResponder,
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { View, Text, Pressable, TextInput, ScrollView, StyleSheet, Animated, Easing } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
+import { presentationDetents, presentationDragIndicator, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+
+const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
+const DETENT_LARGE: PresentationDetent = 'large';
+const DETENTS: PresentationDetent[] = [DETENT_DEFAULT, DETENT_LARGE];
+
 import { CATS, TRANSACTIONS, Transaction } from '../data';
 import { Icon } from './Icon';
 import { Money } from './shared';
-import { Theme, catGroupColor, catPastel } from '../theme';
+import { Theme, catGroupColor, catPastel, CAT_TO_GROUP, GROUP_COLORS } from '../theme';
 
-const { height: SCREEN_H } = Dimensions.get('window');
-const SHEET_H = Math.round(SCREEN_H * 0.66);
+const EXPENSE_GROUPS = [
+  { key: 'needs',   label: 'Needs',   icon: 'home',    cats: ['groceries', 'transport', 'bills'],     defaultCat: 'groceries' },
+  { key: 'wants',   label: 'Wants',   icon: 'sparkle', cats: ['dining', 'shopping', 'entertainment'], defaultCat: 'dining'    },
+  { key: 'savings', label: 'Savings', icon: 'wallet',  cats: [],                                      defaultCat: 'savings'   },
+];
 
 export function TxSheet({
   tx,
@@ -30,213 +29,421 @@ export function TxSheet({
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [mounted, setMounted] = useState(false);
-  const slideY = useRef(new Animated.Value(SHEET_H)).current;
-  const fade = useRef(new Animated.Value(0)).current;
   const lastTx = useRef<Transaction | null>(null);
-  const dismissing = useRef(false);
-
   if (tx) lastTx.current = tx;
+  const t = lastTx.current;
+
+  const [detent, setDetent] = useState<PresentationDetent>(DETENT_DEFAULT);
+  const [editCat, setEditCat] = useState('');
+  const [editMerchant, setEditMerchant] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [editAmt, setEditAmt] = useState('');
+  const editAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (tx) {
-      setMounted(true);
-      Animated.parallel([
-        Animated.spring(slideY, { toValue: 0, useNativeDriver: true, tension: 200, friction: 24 }),
-        Animated.timing(fade, { toValue: 1, duration: 200, useNativeDriver: true }),
-      ]).start();
-    } else if (!dismissing.current) {
-      // Normal close via button or backdrop — animate then unmount
-      Animated.parallel([
-        Animated.timing(slideY, {
-          toValue: SHEET_H, duration: 260, useNativeDriver: true,
-          easing: Easing.in(Easing.cubic),
-        }),
-        Animated.timing(fade, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
+    if (tx !== null) {
+      setDetent(DETENT_DEFAULT);
+      setEditCat(tx.cat);
+      setEditMerchant(tx.merchant);
+      setEditNote(tx.note ?? '');
+      setEditAmt(tx.amount.toFixed(2));
     }
   }, [tx]);
 
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) =>
-        gs.dy > 8 && Math.abs(gs.dy) > Math.abs(gs.dx),
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) slideY.setValue(gs.dy);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > 80 || gs.vy > 0.5) {
-          dismissing.current = true;
-          const remaining = Math.max(SHEET_H - gs.dy, 0);
-          const duration = Math.max(80, (remaining / SHEET_H) * 260);
-          Animated.parallel([
-            Animated.timing(slideY, {
-              toValue: SHEET_H,
-              duration,
-              useNativeDriver: true,
-              easing: Easing.in(Easing.cubic),
-            }),
-            Animated.timing(fade, {
-              toValue: 0,
-              duration: Math.min(duration, 200),
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            dismissing.current = false;
-            setMounted(false);
-            onClose();
-          });
-        } else {
-          Animated.spring(slideY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 200,
-            friction: 24,
-          }).start();
-        }
-      },
-    }),
-  ).current;
+  const isExpanded = detent === DETENT_LARGE;
 
-  if (!mounted) return null;
+  useEffect(() => {
+    if (isExpanded) {
+      Animated.timing(editAnim, {
+        toValue: 1,
+        duration: 250,
+        delay: 0,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    } else {
+      editAnim.setValue(0);
+    }
+  }, [isExpanded]);
 
-  const t = lastTx.current!;
-  const cat = CATS[t.cat];
-  const color = catPastel(t.cat, theme.dark);
-  const groupColor = catGroupColor(t.cat, theme.dark);
-  const catTotal = TRANSACTIONS.filter(x => x.cat === t.cat).reduce((s, x) => s + x.amount, 0);
+  return (
+    <Host style={{ width: 0, height: 0, position: 'absolute' }}>
+        <BottomSheet
+          isPresented={tx !== null}
+          onIsPresentedChange={(v) => { if (!v) onClose(); }}
+        >
+          <Group modifiers={[
+            presentationDetents(DETENTS, { selection: detent, onSelectionChange: setDetent }),
+            presentationDragIndicator('visible'),
+          ]}>
+            <RNHostView>
+              <View style={[S.content, { backgroundColor: theme.surface }]}>
+                {t && (
+                  <>
+                    {!isExpanded && (
+                      <Pressable
+                        onPress={onClose}
+                        pointerEvents="box-only"
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        style={[S.closeBtn, { backgroundColor: theme.chipBg }]}
+                      >
+                        <Icon name="close" size={15} color={theme.textSec} />
+                      </Pressable>
+                    )}
+                    <ScrollView
+                      bounces={false}
+                      showsVerticalScrollIndicator={false}
+                      scrollEnabled={false}
+                      keyboardShouldPersistTaps="handled"
+                      contentContainerStyle={{
+                        flexGrow: 1,
+                        justifyContent: isExpanded ? 'center' : 'flex-start',
+                        paddingBottom: Math.max(insets.bottom, 16) + 12,
+                      }}
+                    >
+                      <SheetBody tx={t} theme={theme} isExpanded={isExpanded} />
+                      {!isExpanded && (
+                        <Pressable
+                          onPress={() => setDetent(DETENT_LARGE)}
+                          pointerEvents="box-only"
+                          style={S.expandHint}
+                        >
+                          <Icon name="chevUp" size={13} color={theme.textTer} stroke={2} />
+                          <Text style={[S.expandHintText, { color: theme.textTer }]}>Edit</Text>
+                        </Pressable>
+                      )}
+                      {isExpanded && (
+                        <Animated.View style={{
+                          opacity: editAnim,
+                          transform: [{ translateY: editAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
+                        }}>
+                          <EditSection
+                            theme={theme}
+                            editCat={editCat}
+                            setEditCat={setEditCat}
+                            editMerchant={editMerchant}
+                            setEditMerchant={setEditMerchant}
+                            editNote={editNote}
+                            setEditNote={setEditNote}
+                            editAmt={editAmt}
+                            setEditAmt={setEditAmt}
+                            onClose={onClose}
+                          />
+                        </Animated.View>
+                      )}
+                    </ScrollView>
+                  </>
+                )}
+              </View>
+            </RNHostView>
+          </Group>
+        </BottomSheet>
+    </Host>
+  );
+}
+
+function SheetBody({ tx, theme, isExpanded }: { tx: Transaction; theme: Theme; isExpanded: boolean }) {
+  const cat = CATS[tx.cat];
+  const color = catPastel(tx.cat, theme.dark);
+  const groupColor = catGroupColor(tx.cat, theme.dark);
+  const catTotal = TRANSACTIONS.filter(x => x.cat === tx.cat).reduce((s, x) => s + x.amount, 0);
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
 
   return (
-    <Modal transparent visible={mounted} onRequestClose={onClose} statusBarTranslucent>
-      <Animated.View
-        style={[
-          StyleSheet.absoluteFillObject,
-          {
-            backgroundColor: '#000',
-            opacity: fade.interpolate({ inputRange: [0, 1], outputRange: [0, 0.46] }),
-          },
-        ]}
-      >
-        <Pressable style={{ flex: 1 }} onPress={onClose} />
-      </Animated.View>
-
-      <Animated.View
-        {...pan.panHandlers}
-        style={[
-          S.sheet,
-          {
-            backgroundColor: theme.surface,
-            borderColor: theme.hairline,
-            paddingBottom: Math.max(insets.bottom, 16) + 12,
-            transform: [{ translateY: slideY }],
-          },
-        ]}
-      >
-        <View style={[S.handle, { backgroundColor: theme.sep }]} />
-
-        <TouchableOpacity
-          onPress={onClose}
-          style={[S.sheetClose, { backgroundColor: theme.chipBg }]}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Icon name="close" size={15} color={theme.textSec} />
-        </TouchableOpacity>
-
-        <View style={S.sheetHero}>
-          <View style={[S.sheetCatCircle, { backgroundColor: color + '26' }]}>
-            <Icon name={cat?.icon ?? 'tag'} size={24} color={groupColor} stroke={1.5} />
-          </View>
-          <Text style={[S.sheetMerchant, { color: theme.text }]}>{t.merchant}</Text>
-          <Text style={[S.sheetCatName, { color: theme.textSec }]}>{cat?.label}</Text>
-          <View style={{ marginTop: 14 }}>
-            <Money value={t.amount} size={40} weight="700" prefix="−$" theme={theme} />
-          </View>
-          <Text style={[S.sheetDate, { color: theme.textTer }]}>{t.fullDate} · {t.time}</Text>
+    <>
+      <View style={[S.hero, isExpanded && S.heroCompact]}>
+        <View style={[S.catCircle, isExpanded && S.catCircleCompact, { backgroundColor: color + '26' }]}>
+          <Icon name={cat?.icon ?? 'tag'} size={isExpanded ? 18 : 24} color={groupColor} stroke={1.5} />
         </View>
+        <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
+        <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
+          {cat?.label}
+          <Text style={{ color: theme.textTer }}> · </Text>
+          {tx.fullDate}
+          <Text style={{ color: theme.textTer }}> · </Text>
+          {tx.time}
+        </Text>
+        <View style={{ marginTop: isExpanded ? 12 : 18 }}>
+          <Money value={tx.amount} size={isExpanded ? 32 : 40} weight="700" prefix="−$" theme={theme} />
+        </View>
+      </View>
 
-        <View style={{ paddingHorizontal: 20 }}>
-          {t.note ? (
-            <View style={[S.noteRow, { backgroundColor: theme.chipBg, borderRadius: 14, marginBottom: 12 }]}>
+      {!isExpanded && (
+        <>
+          {tx.note ? (
+            <View style={[S.noteRow, { backgroundColor: theme.chipBg }]}>
               <Text style={[S.noteLabel, { color: theme.textSec }]}>Note</Text>
-              <Text style={[S.noteValue, { color: theme.text }]}>{t.note}</Text>
+              <Text style={[S.noteValue, { color: theme.text }]}>{tx.note}</Text>
             </View>
           ) : null}
-
-          <View style={{ marginBottom: 16 }}>
-            <View style={S.catUsageRow}>
-              <Text style={[S.catUsageText, { color: theme.textSec }]}>{cat?.label} this month</Text>
-              <Text style={[S.catUsageText, { color: theme.textSec }]}>
+          <View style={S.budgetBlock}>
+            <View style={S.usageRow}>
+              <Text style={[S.usageLabel, { color: theme.textSec }]}>{cat?.label} this month</Text>
+              <Text style={[S.usageAmount, { color: theme.textSec }]}>
                 <Text style={{ color: theme.text, fontWeight: '600' }}>${catTotal.toFixed(0)}</Text>
-                {' / $'}{catBudget}
+                {' of $'}{catBudget}
               </Text>
             </View>
-            <View style={[S.catBar, { backgroundColor: theme.hairline }]}>
-              <View style={[S.catBarFill, { width: `${catPct}%` as any, backgroundColor: groupColor }]} />
+            <View style={[S.bar, { backgroundColor: theme.hairline }]}>
+              <View style={[S.barFill, { width: `${catPct}%` as any, backgroundColor: groupColor }]} />
             </View>
           </View>
+        </>
+      )}
+    </>
+  );
+}
 
-          <View style={[S.cardRow, { backgroundColor: theme.chipBg, borderRadius: 14 }]}>
-            <View style={[S.visaChip, { backgroundColor: theme.text }]}>
-              <Text style={{ color: theme.bg, fontSize: 9, fontWeight: '800', letterSpacing: 0.4 }}>VISA</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Chase Sapphire</Text>
-              <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 1 }}>•••• 4429</Text>
-            </View>
-            <View style={[S.postedPill, { backgroundColor: theme.surface }]}>
-              <Text style={{ fontSize: 11, color: theme.textSec, fontWeight: '500' }}>Posted</Text>
-            </View>
+function EditSection({
+  theme, editCat, setEditCat, editMerchant, setEditMerchant,
+  editNote, setEditNote, editAmt, setEditAmt, onClose,
+}: {
+  theme: Theme;
+  editCat: string; setEditCat: (v: string) => void;
+  editMerchant: string; setEditMerchant: (v: string) => void;
+  editNote: string; setEditNote: (v: string) => void;
+  editAmt: string; setEditAmt: (v: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
+      <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
+        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={{ fontSize: 15, color: theme.textSec, marginRight: 1 }}>$</Text>
+            <TextInput
+              value={editAmt}
+              onChangeText={setEditAmt}
+              keyboardType="decimal-pad"
+              selectTextOnFocus
+              style={[S.fieldInput, { color: theme.text }]}
+            />
           </View>
         </View>
-      </Animated.View>
-    </Modal>
+        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Merchant</Text>
+          <TextInput
+            value={editMerchant}
+            onChangeText={setEditMerchant}
+            placeholder="Merchant name"
+            placeholderTextColor={theme.textTer}
+            style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+          />
+        </View>
+        <View style={S.fieldRow}>
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Note</Text>
+          <TextInput
+            value={editNote}
+            onChangeText={setEditNote}
+            placeholder="Optional"
+            placeholderTextColor={theme.textTer}
+            style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+          />
+        </View>
+      </View>
+
+      {/* Category picker */}
+      <Text style={[S.editTitle, { color: theme.textTer, marginTop: 20 }]}>Category</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {EXPENSE_GROUPS.map(g => {
+          const activeGroup = CAT_TO_GROUP[editCat] ?? (editCat === 'savings' ? 'savings' : undefined);
+          const isActive = activeGroup === g.key;
+          const color = theme.dark ? GROUP_COLORS[g.key].dark : GROUP_COLORS[g.key].light;
+          return (
+            <View key={g.key} style={{ flex: 1 }}>
+              <Pressable
+                onPress={() => setEditCat(g.defaultCat)}
+                pointerEvents="box-only"
+                style={[S.groupHeader, {
+                  backgroundColor: isActive ? color + '20' : theme.surface,
+                  borderColor: isActive ? color + '80' : theme.hairline,
+                }]}
+              >
+                <View style={[S.groupHeaderIcon, {
+                  backgroundColor: isActive ? color + '30' : theme.chipBg,
+                }]}>
+                  <Icon name={g.icon} size={13} color={isActive ? color : theme.textTer} stroke={1.6} />
+                </View>
+                <Text style={{ fontSize: 12, fontWeight: isActive ? '700' : '500', color: isActive ? theme.text : theme.textSec }}>
+                  {g.label}
+                </Text>
+              </Pressable>
+              <View style={S.subcatList}>
+                {g.cats.map(catId => {
+                  const c = CATS[catId];
+                  const isActiveCat = editCat === catId;
+                  return (
+                    <Pressable
+                      key={catId}
+                      onPress={() => setEditCat(catId)}
+                      pointerEvents="box-only"
+                      style={[S.subcatRow, { backgroundColor: isActiveCat ? theme.text : 'transparent' }]}
+                    >
+                      <Icon name={c.icon} size={12} color={isActiveCat ? theme.bg : theme.textTer} stroke={1.5} />
+                      <Text style={{ fontSize: 12, fontWeight: isActiveCat ? '600' : '400', color: isActiveCat ? theme.bg : theme.textSec, marginLeft: 5 }}>
+                        {c.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* Save */}
+      <Pressable
+        onPress={onClose}
+        pointerEvents="box-only"
+        style={[S.saveBtn, { backgroundColor: theme.text }]}
+      >
+        <Text style={{ color: theme.bg, fontSize: 15, fontWeight: '700' }}>Save changes</Text>
+      </Pressable>
+    </View>
   );
 }
 
 const S = StyleSheet.create({
-  sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderBottomWidth: 0,
+  content: {
+    flex: 1,
+    paddingTop: 16,
   },
-  handle: {
-    width: 36, height: 4, borderRadius: 2,
-    alignSelf: 'center', marginTop: 12, marginBottom: 6,
+  closeBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 20,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
   },
-  sheetClose: {
-    position: 'absolute', top: 16, right: 20,
-    width: 30, height: 30, borderRadius: 15,
-    alignItems: 'center', justifyContent: 'center',
+  hero: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 18,
+    paddingHorizontal: 20,
   },
-  sheetHero: {
-    alignItems: 'center', paddingTop: 10, paddingBottom: 20, paddingHorizontal: 20,
+  heroCompact: {
+    paddingTop: 6,
+    paddingBottom: 10,
   },
-  sheetCatCircle: {
-    width: 52, height: 52, borderRadius: 26,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+  catCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
-  sheetMerchant: { fontSize: 20, fontWeight: '700', letterSpacing: -0.5, textAlign: 'center' },
-  sheetCatName:  { fontSize: 13, marginTop: 3 },
-  sheetDate:     { fontSize: 12, marginTop: 7 },
+  catCircleCompact: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginBottom: 8,
+  },
+  merchant: { fontSize: 20, fontWeight: '700', letterSpacing: -0.5, textAlign: 'center' },
+  merchantCompact: { fontSize: 17 },
+  metaLine: { fontSize: 13, marginTop: 5, textAlign: 'center' },
+  metaLineCompact: { fontSize: 12, marginTop: 3 },
   noteRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 13, paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    marginHorizontal: 20,
+    marginBottom: 16,
   },
-  noteLabel:    { fontSize: 13 },
-  noteValue:    { fontSize: 13, fontWeight: '500', flex: 1, textAlign: 'right', marginLeft: 12 },
-  catUsageRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
-  catUsageText: { fontSize: 12 },
-  catBar:       { height: 3, borderRadius: 2, overflow: 'hidden' },
-  catBarFill:   { height: '100%', borderRadius: 2 },
-  cardRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 12, paddingVertical: 13, paddingHorizontal: 16,
+  noteLabel: { fontSize: 13 },
+  noteValue: { fontSize: 13, fontWeight: '500', flex: 1, textAlign: 'right', marginLeft: 12 },
+  budgetBlock: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 16,
   },
-  visaChip: {
-    width: 38, height: 26, borderRadius: 5,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  usageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 9,
   },
-  postedPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 100 },
+  usageLabel: { fontSize: 13 },
+  usageAmount: { fontSize: 13 },
+  bar: { height: 4, borderRadius: 2, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 2 },
+  expandHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 14,
+  },
+  expandHintText: { fontSize: 12, fontWeight: '500' },
+  editSection: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 4,
+  },
+  editTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  fieldCard: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  fieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  fieldLabel: { fontSize: 14, fontWeight: '500', flexShrink: 0 },
+  fieldInput: { fontSize: 15, fontWeight: '500', textAlign: 'right', padding: 0 },
+  groupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 5,
+    marginBottom: 5,
+  },
+  groupHeaderIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  subcatList: { height: 90 },
+  subcatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 7,
+    borderRadius: 8,
+    marginBottom: 2,
+  },
+  saveBtn: {
+    marginTop: 28,
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
 });

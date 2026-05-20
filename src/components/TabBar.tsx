@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Pressable, StyleSheet, Platform, Animated } from 'react-native';
+import React, { useRef, useState, useEffect } from 'react';
+import { View, Pressable, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { Theme } from '../theme';
@@ -19,64 +20,64 @@ const TABS = [
   { id: 'profile',  icon: 'receipt' },
 ];
 
-const TAB_W = 46;
-const TAB_GAP = 4;
-const PILL_PAD = 6;
-const TAB_STEP = TAB_W + TAB_GAP;
-
-// Snappy spring — tight tension + high friction keeps the slide quick and prevents bounce.
-const SPRING_CONFIG = { tension: 220, friction: 22, useNativeDriver: true } as const;
+const TAB_W    = 52;
+const TAB_GAP  = 4;
+const PILL_PAD = 8;
+const EASE_OUT_EXPO = Easing.bezier(0.16, 1, 0.3, 1);
 
 export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
   const insets = useSafeAreaInsets();
-  const activeIndex = Math.max(0, TABS.findIndex(t => t.id === active));
-  const idx = useRef(new Animated.Value(activeIndex)).current;
+  const scales = useRef(TABS.map(() => new Animated.Value(1))).current;
+  const [localActive, setLocalActive] = useState(active);
 
-  // Sync with external active changes (e.g., from drawer navigation).
-  useEffect(() => {
-    Animated.spring(idx, { ...SPRING_CONFIG, toValue: activeIndex }).start();
-  }, [activeIndex]);
+  // Sync when parent changes active externally (e.g. drawer navigation).
+  useEffect(() => { setLocalActive(active); }, [active]);
 
-  const slideTX = idx.interpolate({
-    inputRange: TABS.map((_, i) => i),
-    outputRange: TABS.map((_, i) => i * TAB_STEP),
-  });
+  const handlePressIn = (i: number) => {
+    Animated.timing(scales[i], {
+      toValue: 0.88,
+      duration: 80,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.cubic),
+    }).start();
+  };
 
-  // Start the slide on press, before the parent state has round-tripped — kills the perceived delay.
-  const handlePress = (id: string, i: number) => {
-    Animated.spring(idx, { ...SPRING_CONFIG, toValue: i }).start();
+  const handlePressOut = (i: number) => {
+    Animated.timing(scales[i], {
+      toValue: 1,
+      duration: 280,
+      useNativeDriver: true,
+      easing: EASE_OUT_EXPO,
+    }).start();
+  };
+
+  const handlePress = (id: string) => {
+    setLocalActive(id);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onTabPress?.(id);
   };
 
   const pill = (
     <View style={styles.pillRow}>
-      {/* Sliding dark pill — single background that follows the active tab */}
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.activePill,
-          {
-            backgroundColor: theme.text,
-            transform: [{ translateX: slideTX }],
-          },
-        ]}
-      />
-
       {TABS.map((t, i) => {
-        const isActive = t.id === active;
+        const isActive = t.id === localActive;
         return (
           <Pressable
             key={t.id}
-            onPress={() => handlePress(t.id, i)}
+            onPressIn={() => handlePressIn(i)}
+            onPressOut={() => handlePressOut(i)}
+            onPress={() => handlePress(t.id)}
             pointerEvents="box-only"
-            style={[styles.tabBtn, { backgroundColor: 'transparent' }]}
+            style={styles.tabBtn}
           >
-            <Icon
-              name={t.icon}
-              size={20}
-              color={isActive ? theme.bg : theme.textSec}
-              stroke={isActive ? 1.7 : 1.5}
-            />
+            <Animated.View style={{ transform: [{ scale: scales[i] }] }}>
+              <Icon
+                name={t.icon}
+                size={22}
+                color={isActive ? theme.text : theme.textSec}
+                stroke={isActive ? 2.4 : 1.7}
+              />
+            </Animated.View>
           </Pressable>
         );
       })}
@@ -88,7 +89,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
         pointerEvents="box-only"
         style={[styles.tabBtn, { backgroundColor: theme.accent.fill }]}
       >
-        <Icon name="mic" size={20} color={theme.accent.ink} stroke={1.6} />
+        <Icon name="mic" size={22} color={theme.accent.ink} stroke={1.8} />
       </Pressable>
     </View>
   );
@@ -160,13 +161,5 @@ const styles = StyleSheet.create({
     width: 1,
     height: 24,
     marginHorizontal: 2,
-  },
-  activePill: {
-    position: 'absolute',
-    top: PILL_PAD,
-    left: PILL_PAD,
-    width: TAB_W,
-    height: TAB_W,
-    borderRadius: TAB_W / 2,
   },
 });

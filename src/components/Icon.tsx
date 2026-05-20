@@ -87,6 +87,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 20, color = '#0E0E10', 
     chevL:    <Path d="M14 5l-7 7 7 7" {...p} />,
     chevR:    <Path d="M10 5l7 7-7 7" {...p} />,
     chevDown: <Path d="M5 9l7 7 7-7" {...p} />,
+    chevUp:   <Path d="M5 15l7-7 7 7" {...p} />,
     close: <G>
       <Path d="M6 6l12 12M18 6L6 18" {...p} />
     </G>,

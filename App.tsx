@@ -28,38 +28,29 @@ patchTextWithInter();
 const { width: SCREEN_W } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(300, SCREEN_W * 0.82);
 
-// Left-to-right ordering. Lower order = further left.
-const SCREEN_ORDER: Record<Screen, number> = {
-  home: 0,
-  spending: 1,
-  budget: 2,
-  activity: 3,
-};
+const ALL_SCREENS: Screen[] = ['home', 'spending', 'budget', 'activity'];
 
-const ALL_SCREENS = Object.keys(SCREEN_ORDER) as Screen[];
+const FADE_DURATION = 180;
 
-// Purely presentational — translateX is owned by the parent, no internal effects.
+// Purely presentational — opacity is owned by the parent, no internal effects.
 function AnimatedScreen({
-  translateX,
+  opacity,
   active,
   children,
 }: {
-  translateX: Animated.Value;
+  opacity: Animated.Value;
   active: boolean;
   children: React.ReactNode;
 }) {
   return (
     <Animated.View
-      style={[StyleSheet.absoluteFillObject, { transform: [{ translateX }] }]}
+      style={[StyleSheet.absoluteFillObject, { opacity }]}
       pointerEvents={active ? 'auto' : 'none'}
     >
       {children}
     </Animated.View>
   );
 }
-
-const SLIDE_DURATION = 220;
-const SLIDE_EASING   = Easing.out(Easing.cubic);
 
 function AppInner() {
   const { theme, dark } = useTheme();
@@ -73,13 +64,13 @@ function AppInner() {
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
 
-  // Each screen's horizontal position. Initialized to rest positions for
-  // the default screen ('home'). Driven imperatively — no useEffect cycle.
-  const TX = useRef<Record<Screen, Animated.Value>>({
-    home:     new Animated.Value(0),
-    spending: new Animated.Value(SCREEN_W),
-    budget:   new Animated.Value(SCREEN_W),
-    activity: new Animated.Value(SCREEN_W),
+  // Each screen's opacity. Home starts visible, rest start hidden.
+  // Driven imperatively — no useEffect cycle.
+  const OP = useRef<Record<Screen, Animated.Value>>({
+    home:     new Animated.Value(1),
+    spending: new Animated.Value(0),
+    budget:   new Animated.Value(0),
+    activity: new Animated.Value(0),
   }).current;
 
   const drawerAnim = useRef(new Animated.Value(0)).current;
@@ -105,35 +96,28 @@ function AppInner() {
     }).start();
   };
 
-  // Kick off both slide animations immediately, then update state.
-  // This eliminates the useEffect render-cycle gap that caused the visual delay.
+  // Cross-fade between screens. Starts before setState — zero perceived delay.
   const navigate = (s: Screen) => {
     const from = activeRef.current;
     if (s === from) return;
 
-    const fromOrd = SCREEN_ORDER[from];
-    const toOrd   = SCREEN_ORDER[s];
-
-    // Silently snap every non-involved screen to its correct off-screen position.
+    // Snap all uninvolved screens to fully transparent.
     ALL_SCREENS.forEach(k => {
-      if (k !== from && k !== s) {
-        TX[k].setValue(SCREEN_ORDER[k] < toOrd ? -SCREEN_W : SCREEN_W);
-      }
+      if (k !== from && k !== s) OP[k].setValue(0);
     });
 
-    // Both slides start before setState — zero perceived delay.
-    Animated.timing(TX[from], {
-      toValue: fromOrd < toOrd ? -SCREEN_W : SCREEN_W,
-      duration: SLIDE_DURATION,
+    Animated.timing(OP[from], {
+      toValue: 0,
+      duration: FADE_DURATION,
       useNativeDriver: true,
-      easing: SLIDE_EASING,
+      easing: Easing.in(Easing.quad),
     }).start();
 
-    Animated.timing(TX[s], {
-      toValue: 0,
-      duration: SLIDE_DURATION,
+    Animated.timing(OP[s], {
+      toValue: 1,
+      duration: FADE_DURATION,
       useNativeDriver: true,
-      easing: SLIDE_EASING,
+      easing: Easing.out(Easing.quad),
     }).start();
 
     activeRef.current = s;
@@ -158,7 +142,7 @@ function AppInner() {
       <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} backgroundColor={theme.bg} />
       <View style={[styles.root, { backgroundColor: theme.bg }]}>
 
-        <AnimatedScreen translateX={TX.home} active={screen === 'home'}>
+        <AnimatedScreen opacity={OP.home} active={screen === 'home'}>
           <HomeScreen
             theme={theme}
             onViewSpending={() => navigate('spending')}
@@ -167,15 +151,15 @@ function AppInner() {
           />
         </AnimatedScreen>
 
-        <AnimatedScreen translateX={TX.spending} active={screen === 'spending'}>
+        <AnimatedScreen opacity={OP.spending} active={screen === 'spending'}>
           <SpendingScreen theme={theme} onOpenDrawer={openDrawer} />
         </AnimatedScreen>
 
-        <AnimatedScreen translateX={TX.activity} active={screen === 'activity'}>
+        <AnimatedScreen opacity={OP.activity} active={screen === 'activity'}>
           <ActivityScreen theme={theme} onOpenDrawer={openDrawer} />
         </AnimatedScreen>
 
-        <AnimatedScreen translateX={TX.budget} active={screen === 'budget'}>
+        <AnimatedScreen opacity={OP.budget} active={screen === 'budget'}>
           <BudgetScreen theme={theme} onOpenDrawer={openDrawer} />
         </AnimatedScreen>
 
