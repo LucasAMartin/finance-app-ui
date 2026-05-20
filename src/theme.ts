@@ -1,4 +1,4 @@
-export type AccentKey = 'sage' | 'butter' | 'sky' | 'rose' | 'plum' | 'ink';
+export type AccentKey = 'sage' | 'butter' | 'sky' | 'rose' | 'plum' | 'ink' | 'wine';
 export type CardStyle = 'flat' | 'shadow' | 'glass';
 
 export interface Accent {
@@ -17,8 +17,9 @@ const ACCENT_DEFS: Record<AccentKey, {
   butter: { fill: '#F1E6B7', fillDark: '#1E1A0A', ink: '#6E5A1F', inkDark: '#CCA840', dot: '#C5A946', dotDark: '#C5A946' },
   sky:    { fill: '#D5E2EE', fillDark: '#131E2E', ink: '#3D5874', inkDark: '#76AAD4', dot: '#7393B3', dotDark: '#7393B3' },
   rose:   { fill: '#EDD9D4', fillDark: '#261514', ink: '#6F4940', inkDark: '#D49080', dot: '#B47A6E', dotDark: '#B47A6E' },
-  plum:   { fill: '#DCD3E4', fillDark: '#1A1428', ink: '#4E3E66', inkDark: '#AA98D0', dot: '#8975A8', dotDark: '#8975A8' },
+  plum:   { fill: '#E8E0F4', fillDark: '#3A2860', ink: '#4A3870', inkDark: '#C8AAEE', dot: '#7C5EC8', dotDark: '#A882E0' },
   ink:    { fill: '#D9D9DC', fillDark: '#1A1A22', ink: '#0E0E10', inkDark: '#C4C4D0', dot: '#0E0E10', dotDark: '#C4C4D0' },
+  wine:   { fill: '#FAE8EC', fillDark: '#2C0F1A', ink: '#8C1530', inkDark: '#F2A0B4', dot: '#C23B58', dotDark: '#E06A7E' },
 };
 
 export interface Theme {
@@ -49,15 +50,15 @@ export function makeTheme(
     dark,
     accent,
     cardStyle,
-    bg:       dark ? '#0B1020' : '#F7F8FA',
-    surface:  dark ? '#141B2E' : '#FFFFFF',
-    surface2: dark ? '#1B2438' : '#FAFBFC',
-    text:     dark ? '#E8ECF5' : '#0E0E10',
-    textSec:  dark ? 'rgba(232,236,245,0.60)' : 'rgba(14,14,16,0.55)',
-    textTer:  dark ? 'rgba(232,236,245,0.36)' : 'rgba(14,14,16,0.32)',
-    sep:      dark ? 'rgba(173,189,222,0.10)' : 'rgba(14,14,16,0.08)',
-    hairline: dark ? 'rgba(173,189,222,0.14)' : 'rgba(14,14,16,0.10)',
-    chipBg:   dark ? 'rgba(173,189,222,0.08)' : 'rgba(14,14,16,0.04)',
+    bg:       dark ? '#100C14' : '#F7F8FA',
+    surface:  dark ? '#1E1828' : '#FFFFFF',
+    surface2: dark ? '#261E32' : '#FAFBFC',
+    text:     dark ? '#EDE8F5' : '#0E0E10',
+    textSec:  dark ? 'rgba(237,232,245,0.65)' : 'rgba(14,14,16,0.62)',
+    textTer:  dark ? 'rgba(237,232,245,0.36)' : 'rgba(14,14,16,0.32)',
+    sep:      dark ? 'rgba(200,180,220,0.10)' : 'rgba(14,14,16,0.08)',
+    hairline: dark ? 'rgba(200,180,220,0.14)' : 'rgba(14,14,16,0.10)',
+    chipBg:   dark ? 'rgba(200,180,220,0.08)' : 'rgba(14,14,16,0.04)',
   };
 }
 
@@ -117,6 +118,7 @@ export const CAUTION_BG   = '#F1E6B7';
 export const CAUTION_TEXT = '#6E5A1F';
 export function cautionBg(dark: boolean)   { return dark ? '#201A0A' : CAUTION_BG; }
 export function cautionText(dark: boolean) { return dark ? '#CCA838' : CAUTION_TEXT; }
+export function flagBg(dark: boolean):     string { return dark ? '#C8881C' : '#B87018'; }
 
 // Accent colors for the three 50/30/20 spending groups.
 // Import GROUP_COLORS in any component that needs to color by group.

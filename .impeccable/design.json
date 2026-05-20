@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-19T00:00:00Z",
+  "title": "Design System: Finance App",
+  "extensions": {
+    "colorMeta": {
+      "verdigris-dot": {
+        "role": "primary",
+        "displayName": "Still Verdigris",
+        "canonical": "oklch(65% 0.06 155)",
+        "tonalRamp": ["#0E2018", "#172D23", "#274134", "#3D5A4A", "#5E7D6E", "#7A9D85", "#A5C5B3", "#D6E4D8"]
+      },
+      "verdigris-fill": {
+        "role": "primary-fill",
+        "displayName": "Verdigris Fill",
+        "canonical": "oklch(90% 0.02 155)",
+        "tonalRamp": ["#0E2018", "#172D23", "#274134", "#3D5A4A", "#5E7D6E", "#7A9D85", "#A5C5B3", "#D6E4D8"]
+      },
+      "verdigris-ink": {
+        "role": "primary-ink",
+        "displayName": "Forest Shadow",
+        "canonical": "oklch(38% 0.06 155)",
+        "tonalRamp": ["#0E2018", "#172D23", "#274134", "#3D5A4A", "#5E7D6E", "#7A9D85", "#A5C5B3", "#D6E4D8"]
+      },
+      "page-wash": {
+        "role": "neutral",
+        "displayName": "Page Wash",
+        "canonical": "oklch(97% 0.004 255)",
+        "tonalRamp": ["#0E0E10", "#1A1A1E", "#2E2E34", "#4A4A52", "#6E6E7A", "#9A9AA6", "#C8C8D0", "#F7F8FA"]
+      },
+      "canvas-deep": {
+        "role": "neutral-dark",
+        "displayName": "Canvas Deep",
+        "canonical": "oklch(12% 0.02 255)",
+        "tonalRamp": ["#0B1020", "#121926", "#1C273A", "#28384F", "#3B5070", "#5A76A0", "#90AACB", "#D0DCEF"]
+      },
+      "near-ink": {
+        "role": "neutral",
+        "displayName": "Near Ink",
+        "canonical": "oklch(8% 0.005 280)",
+        "tonalRamp": ["#0E0E10", "#1A1A1E", "#2E2E34", "#4A4A52", "#6E6E7A", "#9A9AA6", "#C8C8D0", "#F7F8FA"]
+      },
+      "over-ember": {
+        "role": "semantic-error",
+        "displayName": "Over Ember",
+        "canonical": "oklch(55% 0.17 35)",
+        "tonalRamp": ["#200D05", "#3D1A0B", "#6A2C14", "#9A3D1C", "#D4522A", "#E87550", "#F0A080", "#F9E0DA"]
+      },
+      "needs-slate": {
+        "role": "tertiary",
+        "displayName": "Needs Slate",
+        "canonical": "oklch(55% 0.07 240)",
+        "tonalRamp": ["#0D1B2E", "#162840", "#233C5E", "#36567E", "#5E82A8", "#7CA0CB", "#A8C5E8", "#D5E5F5"]
+      },
+      "wants-amber": {
+        "role": "tertiary",
+        "displayName": "Wants Amber",
+        "canonical": "oklch(65% 0.09 80)",
+        "tonalRamp": ["#201600", "#362800", "#5A4200", "#876020", "#C19A4B", "#D3AE5C", "#E8CC8A", "#F5EAC8"]
+      },
+      "savings-moss": {
+        "role": "tertiary",
+        "displayName": "Savings Moss",
+        "canonical": "oklch(62% 0.07 155)",
+        "tonalRamp": ["#0D1E14", "#162C1E", "#22402C", "#365840", "#6E9B82", "#74B394", "#9ECFB2", "#CCEAD8"]
+      }
+    },
+    "typographyMeta": {
+      "display":  { "displayName": "Display",  "purpose": "The available or over-budget figure on the home screen. Used exactly once per screen." },
+      "headline": { "displayName": "Headline", "purpose": "Section titles: Spending, Upcoming, Activity." },
+      "title":    { "displayName": "Title",    "purpose": "Income strip values, input fields, transaction sheet secondary amounts." },
+      "body":     { "displayName": "Body",     "purpose": "Row titles, merchant names, field labels." },
+      "label":    { "displayName": "Label",    "purpose": "Uppercase metadata: group names (TODAY), strip labels (INCOME, BUDGET), category counts." }
+    },
+    "shadows": [
+      {
+        "name": "tab-bar",
+        "value": "0 10px 20px rgba(0,0,0,0.08)",
+        "purpose": "Floating tab bar pill — separates chrome from scrollable content below. Dark mode: opacity 0.5."
+      },
+      {
+        "name": "dropdown-structured",
+        "value": "0 10px 32px rgba(0,0,0,0.16)",
+        "purpose": "Month picker dropdown — must read as higher than the scroll container beneath it."
+      }
+    ],
+    "motion": [
+      {
+        "name": "spring-standard",
+        "value": "spring(tension: 220, friction: 22)",
+        "purpose": "Segmented control sliding indicator. Also used for drawer and collapsible group expansion."
+      },
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Tab icon press-out release. Duration: 280ms."
+      },
+      {
+        "name": "state-fast",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Short state transitions (opacity, background color). Duration: 150–200ms."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Tab Bar",
+      "kind": "nav",
+      "refersTo": "tab-mic-btn",
+      "description": "Floating capsule navigation with blur backdrop on iOS. Four icon-only tabs plus a mic/add button separated by a hairline divider.",
+      "html": "<div class=\"ds-tab-bar\"><button class=\"ds-tab-btn ds-tab-btn--active\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#0E0E10\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z\"/><polyline points=\"9 22 9 12 15 12 15 22\"/></svg></button><button class=\"ds-tab-btn\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"rgba(14,14,16,0.55)\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"18\" y1=\"20\" x2=\"18\" y2=\"10\"/><line x1=\"12\" y1=\"20\" x2=\"12\" y2=\"4\"/><line x1=\"6\" y1=\"20\" x2=\"6\" y2=\"14\"/></svg></button><button class=\"ds-tab-btn\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"rgba(14,14,16,0.55)\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2\"/><line x1=\"2\" y1=\"10\" x2=\"22\" y2=\"10\"/></svg></button><button class=\"ds-tab-btn\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"rgba(14,14,16,0.55)\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z\"/><polyline points=\"14 2 14 8 20 8\"/></svg></button><div class=\"ds-tab-divider\"></div><button class=\"ds-tab-btn ds-tab-btn--mic\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#3F5A48\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z\"/><path d=\"M19 10v2a7 7 0 01-14 0v-2\"/><line x1=\"12\" y1=\"19\" x2=\"12\" y2=\"23\"/><line x1=\"8\" y1=\"23\" x2=\"16\" y2=\"23\"/></svg></button></div>",
+      "css": ".ds-tab-bar { display: flex; align-items: center; background: rgba(255,255,255,0.92); border: 1px solid rgba(14,14,16,0.10); border-radius: 100px; padding: 8px; gap: 4px; box-shadow: 0 10px 20px rgba(0,0,0,0.08); width: fit-content; } .ds-tab-btn { width: 52px; height: 52px; border-radius: 50%; border: none; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.15s; } .ds-tab-btn:hover { background: rgba(14,14,16,0.04); } .ds-tab-btn--mic { background: #D6E4D8; } .ds-tab-btn--mic:hover { background: #C8DDD2; } .ds-tab-divider { width: 1px; height: 24px; background: rgba(14,14,16,0.10); margin: 0 2px; }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "chip",
+      "refersTo": "segmented-active",
+      "description": "Pill container with an animated sliding indicator. Used for period selection (Week / Month / Year).",
+      "html": "<div class=\"ds-segmented\"><div class=\"ds-seg-indicator\" style=\"width: 68px\"></div><button class=\"ds-seg-btn ds-seg-btn--active\">Week</button><button class=\"ds-seg-btn\">Month</button><button class=\"ds-seg-btn\">Year</button></div>",
+      "css": ".ds-segmented { position: relative; display: inline-flex; background: rgba(14,14,16,0.04); border-radius: 100px; padding: 3px; gap: 0; } .ds-seg-indicator { position: absolute; top: 3px; left: 3px; bottom: 3px; background: #0E0E10; border-radius: 100px; transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), width 0.2s cubic-bezier(0.16,1,0.3,1); pointer-events: none; } .ds-seg-btn { position: relative; padding: 5px 11px; border: none; background: transparent; border-radius: 100px; font-family: Inter, system-ui, sans-serif; font-size: 12px; font-weight: 500; color: rgba(14,14,16,0.55); cursor: pointer; letter-spacing: 0.2px; transition: color 0.15s; z-index: 1; } .ds-seg-btn--active { font-weight: 700; color: #F7F8FA; }"
+    },
+    {
+      "name": "Icon Circle — Needs",
+      "kind": "custom",
+      "refersTo": "icon-circle",
+      "description": "36px category icon circle. Color encodes spending group. Always perfectly round.",
+      "html": "<div class=\"ds-icon-circle ds-icon-circle--needs\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z\"/><polyline points=\"9 22 9 12 15 12 15 22\"/></svg></div><div class=\"ds-icon-circle ds-icon-circle--wants\" style=\"margin-left:8px\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 6h18l-2 13H5L3 6z\"/><path d=\"M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2\"/></svg></div><div class=\"ds-icon-circle ds-icon-circle--savings\" style=\"margin-left:8px\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2\"/><line x1=\"2\" y1=\"10\" x2=\"22\" y2=\"10\"/></svg></div>",
+      "css": ".ds-icon-circle { width: 36px; height: 36px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; } .ds-icon-circle--needs { background: #5E82A8; } .ds-icon-circle--wants { background: #C19A4B; } .ds-icon-circle--savings { background: #6E9B82; }"
+    },
+    {
+      "name": "Transaction Row",
+      "kind": "custom",
+      "refersTo": "icon-circle",
+      "description": "Standard row used in Activity and Upcoming sections. Icon circle + merchant name + category + amount.",
+      "html": "<div class=\"ds-tx-row\"><div class=\"ds-icon-circle ds-icon-circle--wants\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M18 8h1a4 4 0 010 8h-1\"/><path d=\"M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z\"/><line x1=\"6\" y1=\"1\" x2=\"6\" y2=\"4\"/><line x1=\"10\" y1=\"1\" x2=\"10\" y2=\"4\"/><line x1=\"14\" y1=\"1\" x2=\"14\" y2=\"4\"/></svg></div><div class=\"ds-tx-content\"><span class=\"ds-tx-title\">Blue Bottle Coffee</span><span class=\"ds-tx-sub\">Dining · 9:14 AM</span></div><span class=\"ds-tx-amt\">$6.50</span></div>",
+      "css": ".ds-tx-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid rgba(14,14,16,0.08); font-family: Inter, system-ui, sans-serif; } .ds-icon-circle { width: 36px; height: 36px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; } .ds-icon-circle--wants { background: #C19A4B; } .ds-tx-content { flex: 1; display: flex; flex-direction: column; gap: 2px; } .ds-tx-title { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; color: #0E0E10; } .ds-tx-sub { font-size: 12px; color: rgba(14,14,16,0.55); } .ds-tx-amt { font-size: 13px; font-weight: 500; letter-spacing: -0.2px; color: rgba(14,14,16,0.55); }"
+    },
+    {
+      "name": "Save Button",
+      "kind": "button",
+      "refersTo": "save-btn",
+      "description": "Full-width primary action. The only full-bleed button in the system. Near-ink background, page-wash text.",
+      "html": "<button class=\"ds-save-btn\">Save changes</button>",
+      "css": ".ds-save-btn { background: #0E0E10; color: #F7F8FA; padding: 16px 20px; border-radius: 16px; border: none; font-family: Inter, system-ui, sans-serif; font-size: 15px; font-weight: 700; width: 100%; cursor: pointer; transition: opacity 0.15s; } .ds-save-btn:hover { opacity: 0.82; } .ds-save-btn:active { opacity: 0.7; }"
+    },
+    {
+      "name": "Category Progress Bar",
+      "kind": "custom",
+      "refersTo": "icon-circle",
+      "description": "Two-level progress bar used in CategoryGroups. Group level: 10px height. Sub-category level: 5px. Fill color tracks spending group.",
+      "html": "<div class=\"ds-prog-group\"><div class=\"ds-prog-track\"><div class=\"ds-prog-fill ds-prog-fill--needs\" style=\"width: 68%\"></div></div><div class=\"ds-prog-track ds-prog-track--sub\" style=\"margin-top: 10px\"><div class=\"ds-prog-fill ds-prog-fill--needs\" style=\"width: 42%\"></div></div><div class=\"ds-prog-track ds-prog-track--sub\" style=\"margin-top: 6px\"><div class=\"ds-prog-fill ds-prog-fill--over\" style=\"width: 112%\"></div></div></div>",
+      "css": ".ds-prog-group { width: 240px; } .ds-prog-track { height: 10px; border-radius: 5px; background: rgba(14,14,16,0.10); overflow: hidden; } .ds-prog-track--sub { height: 5px; border-radius: 3px; } .ds-prog-fill { height: 100%; border-radius: inherit; } .ds-prog-fill--needs { background: #5E82A8; } .ds-prog-fill--wants { background: #C19A4B; } .ds-prog-fill--savings { background: #6E9B82; } .ds-prog-fill--over { background: #D4522A; }"
+    },
+    {
+      "name": "Accent Hero Zone",
+      "kind": "card",
+      "refersTo": "tab-mic-btn",
+      "description": "The budget hero card on HomeScreen. Full-width, accent-fill background, rounded bottom corners. Contains the display-size available/over-budget figure.",
+      "html": "<div class=\"ds-hero-zone\"><div class=\"ds-hero-period\">May 2026 <svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#3F5A48\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"display:inline;vertical-align:middle\"><polyline points=\"6 9 12 15 18 9\"/></svg><span class=\"ds-hero-remaining\"> · 13 days left</span></div><div class=\"ds-hero-label\">AVAILABLE</div><div class=\"ds-hero-amount\">$2,134<span class=\"ds-hero-cents\">.00</span></div><div class=\"ds-hero-strip\"><div class=\"ds-strip-item\"><span class=\"ds-strip-lbl\">INCOME</span><span class=\"ds-strip-val\">$5,200</span></div><div class=\"ds-strip-div\"></div><div class=\"ds-strip-item\"><span class=\"ds-strip-lbl\">BUDGET</span><span class=\"ds-strip-val\">$3,900</span></div><div class=\"ds-strip-div\"></div><div class=\"ds-strip-item\"><span class=\"ds-strip-lbl\">AFTER BUDGET</span><span class=\"ds-strip-val ds-strip-val--accent\">$1,300</span></div></div></div>",
+      "css": ".ds-hero-zone { background: #D6E4D8; border-radius: 0 0 28px 28px; padding: 16px 24px 28px; font-family: Inter, system-ui, sans-serif; } .ds-hero-period { font-size: 14px; font-weight: 600; color: #3F5A48; letter-spacing: -0.3px; margin-bottom: 14px; display: flex; align-items: center; gap: 4px; } .ds-hero-remaining { color: rgba(14,14,16,0.32); } .ds-hero-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #3F5A48; margin-bottom: 6px; } .ds-hero-amount { font-size: 42px; font-weight: 700; letter-spacing: -1.2px; color: #0E0E10; line-height: 1; margin-bottom: 22px; } .ds-hero-cents { font-size: 28px; } .ds-hero-strip { display: flex; align-items: center; border-top: 1px solid rgba(14,14,16,0.10); padding-top: 18px; } .ds-strip-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; } .ds-strip-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; color: rgba(14,14,16,0.55); } .ds-strip-val { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; color: #0E0E10; } .ds-strip-val--accent { color: #7A9D85; } .ds-strip-div { width: 1px; height: 28px; background: rgba(14,14,16,0.10); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Clear-Eyed Ledger",
+    "overview": "A finance tool stripped to its essential transaction: you, your spending, and clear numbers. The interface makes no attempt to impress. Typography is the primary aesthetic vehicle; color enters only to encode state (over or under budget, category groups, or a chosen accent). The surface recedes so the data can speak.\n\nThe palette is built on near-ink neutrals with one runtime-switchable accent. The default accent is Still Verdigris — dusty, muted, slightly aged, like patinated copper. It appears in three tightly bounded roles and nowhere else. The 50/30/20 budget framework is given its own color vocabulary (slate for needs, amber for wants, moss for savings) that never overlaps with the accent system.\n\nThis system explicitly rejects gamification, dark mode as an aesthetic default, and every finance-domain reflex: no navy and gold, no gradient metrics, no glowing dashboards. If something shouts or celebrates, it is wrong.",
+    "keyCharacteristics": [
+      "Single typeface (Inter) carrying all roles: 10px uppercase metadata through 42px budget display",
+      "Hairline borders define surfaces at rest; shadows appear only on chrome that physically layers above content",
+      "Six switchable accent keys (sage, butter, sky, rose, plum, ink) using fill, ink, and dot roles",
+      "50/30/20 groups encoded in a fixed three-color palette: slate (needs), amber (wants), moss (savings)",
+      "Dark mode shifts the canvas to deep navy (#0B1020), not pure black, preserving a tinted warmth"
+    ],
+    "rules": [
+      {
+        "name": "The Verdigris Economy Rule",
+        "body": "The accent appears in three roles only: the hero budget zone background (verdigris-fill), interactive action labels and dots (verdigris-dot), and text on accent surfaces (verdigris-ink). It never appears as a row border, a chart color, or a decorative fill.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Chart-Accent Rule",
+        "body": "Charts, donut segments, and progress bars always use the group palette (slate, amber, moss) or category pastels. The accent color is forbidden in data visualization.",
+        "section": "colors"
+      },
+      {
+        "name": "The Silent Scale Rule",
+        "body": "Type size changes signal function. The 42px display belongs to one metric: the available or over-budget figure. The 18px headline belongs to section titles. Emphasis within a tier uses weight (500→700), not size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Content Rule",
+        "body": "Transaction rows, category group lists, budget progress bars, and any data surface are always flat at rest. No data surface ever casts a shadow. If a surface can be scrolled past, it cannot cast a shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use 1px hairline borders to define surfaces at rest.",
+      "Do encode the three budget groups with their fixed colors: slate for needs, amber for wants, moss for savings.",
+      "Do reserve the accent color for the hero zone, action links, and the mic button only.",
+      "Do use over-ember (#D4522A) consistently for all over-budget signals.",
+      "Do let Inter carry the full visual hierarchy without a second typeface.",
+      "Do treat the 42px display as singular: exactly one per screen, for the primary budget figure.",
+      "Do apply the flat-first rule: data surfaces never cast shadows at rest."
+    ],
+    "donts": [
+      "Don't add gamification: no badges, achievement notifications, points, streaks, or celebratory animations.",
+      "Don't use navy and gold, neon on black, or any finance-domain reflex palette.",
+      "Don't use gradient text (background-clip: text).",
+      "Don't add side-stripe borders (border-left or border-right over 1px) to rows, cards, or callouts.",
+      "Don't apply glassmorphism decoratively.",
+      "Don't use the accent color in charts or data visualization.",
+      "Don't shadow data rows, category cards, or list items.",
+      "Don't build complex navigation hierarchies or hide features behind nested menus."
+    ]
+  }
+}

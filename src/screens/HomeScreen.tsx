@@ -29,31 +29,6 @@ import { CategoryGroups } from '../components/CategoryGroups';
 import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 
-// ── Tick bar gradient ────────────────────────────────────────────
-const TICK_COUNT = 30;
-const STOPS_LIGHT = ['#7A9D85', '#C5A946', '#C25A2E'];
-const STOPS_DARK  = ['#6FAF8A', '#D5B958', '#E36A3A'];
-
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
-}
-function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
-function rgbToHex(r: number, g: number, b: number) {
-  return '#' + [r, g, b].map(v =>
-    Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')
-  ).join('');
-}
-function gradientAt(t: number, dark: boolean): string {
-  const stops = dark ? STOPS_DARK : STOPS_LIGHT;
-  const [c1, c2, c3] = stops.map(hexToRgb);
-  if (t < 0.5) {
-    const u = t / 0.5;
-    return rgbToHex(lerp(c1[0],c2[0],u), lerp(c1[1],c2[1],u), lerp(c1[2],c2[2],u));
-  }
-  const u = (t - 0.5) / 0.5;
-  return rgbToHex(lerp(c2[0],c3[0],u), lerp(c2[1],c3[1],u), lerp(c2[2],c3[2],u));
-}
 
 // ── Month donut (picker) ─────────────────────────────────────────
 function MonthDonut({ spent, budget, dark }: { spent: number; budget: number; dark: boolean }) {
@@ -151,23 +126,31 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
   const available = Math.max(mb.budget - mb.spent, 0);
   const overage = mb.spent - mb.budget;
   const over = mb.spent > mb.budget;
-  const todayTickIndex = Math.round((mb.expectedPct / BAR_MAX) * (TICK_COUNT - 1));
   const year = mb.key.split('-')[0];
   const afterBudget = MONTHLY_INCOME - mb.budget;
 
+  // Hero is always dark plum regardless of theme mode.
+  const HERO_BG   = '#3A2860';
+  const H_TEXT    = '#EDE8F5';
+  const H_SEC     = 'rgba(237,232,245,0.60)';
+  const H_INK     = theme.dark ? theme.accent.ink : 'rgba(237,232,245,0.85)';
+  const H_DOT_BG  = theme.dark ? theme.accent.dot : 'rgba(237,232,245,0.85)';
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      {/* ─── Header — outside ScrollView so gestures are never stolen ── */}
-      <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+    <View style={{ flex: 1, backgroundColor: HERO_BG }}>
+      {/* White backdrop covers bottom half — absorbs bounce without affecting scroll */}
+      <View style={{ position: 'absolute', top: '50%', left: 0, right: 0, bottom: 0, backgroundColor: theme.surface }} pointerEvents="none" />
+      {/* ─── Header — pinned ─────────────────────────────── */}
+      <View style={[styles.headerWrap, { paddingTop: insets.top + 8, backgroundColor: HERO_BG }]}>
         <View style={styles.headerRow}>
           <IconBtn onPress={onOpenDrawer}>
-            <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
+            <Icon name="menu" size={22} color={H_TEXT} stroke={1.7} />
           </IconBtn>
           <View style={{ flexDirection: 'row', gap: 4 }}>
             <IconBtn>
               <View>
-                <Icon name="bell" size={22} color={theme.text} stroke={1.7} />
-                <View style={[styles.bellDot, { backgroundColor: theme.accent.dot, borderColor: theme.bg }]} />
+                <Icon name="bell" size={22} color={H_TEXT} stroke={1.7} />
+                <View style={[styles.bellDot, { backgroundColor: H_DOT_BG, borderColor: HERO_BG }]} />
               </View>
             </IconBtn>
             <ThemeToggle />
@@ -177,181 +160,190 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 140 }}
+        contentContainerStyle={{ paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
-            tintColor={theme.textSec} colors={[theme.accent.dot]}
+            tintColor={H_SEC} colors={[theme.accent.dot]}
             progressBackgroundColor={theme.surface} />
         }
       >
+      {/* ─── Budget hero ─────────────────────────────────── */}
+      <View style={[styles.budgetHero, {
+        backgroundColor: HERO_BG,
+        paddingHorizontal: 24,
+        paddingTop: 20,
+        paddingBottom: 52,
+      }]}>
 
-        {/* ─── Budget hero ────────────────────────────────── */}
-        <View style={styles.budgetHero}>
+        {/* Top row: status labels left, month trigger right — always rendered for picker ref */}
+        <View style={styles.heroTopRow}>
+          <View style={styles.heroStatusGroup}>
+            {loading ? (
+              <Skeleton width={130} height={12} radius={4} />
+            ) : (
+              <>
+                <Text style={[styles.heroStatusLabel, { color: over ? OVER_DOT : H_INK }]}>
+                  {over ? 'Over budget' : 'Available'}
+                </Text>
+                <View style={[styles.heroStatusDiv, { backgroundColor: over ? OVER_DOT : H_INK }]} />
+                <Text style={[styles.heroStatusSub, { color: H_SEC }]}>
+                  {mb.remainingLabel}
+                </Text>
+              </>
+            )}
+          </View>
           <View ref={triggerRef} collapsable={false}>
             <TouchableOpacity onPress={openMonthPicker} activeOpacity={0.7} delayPressIn={0}
               hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
               style={styles.monthTrigger}>
-              <Text style={[styles.monthLabel, { color: theme.textSec }]}>
+              <Text style={[styles.monthLabel, { color: H_INK }]}>
                 {mb.month} {year}
               </Text>
-              <Icon name="chevDown" size={12} color={theme.textSec} stroke={2} />
-              {!loading && (
-                <Text style={[styles.monthLabel, { color: theme.textTer }]}>
-                  {'  ·  '}{mb.remainingLabel}
-                </Text>
-              )}
+              <Icon name="chevDown" size={11} color={H_INK} stroke={2} />
             </TouchableOpacity>
           </View>
-
-          {loading ? (
-            <>
-              <Skeleton width={200} height={38} radius={6} style={{ marginBottom: 18 }} />
-              <Skeleton width="100%" height={26} radius={4} />
-              <Skeleton width="100%" height={40} radius={6} style={{ marginTop: 20 }} />
-            </>
-          ) : (
-            <>
-              <View style={styles.heroAmountRow}>
-                <Text style={[styles.heroMainLabel, { color: theme.textSec }]}>
-                  {over ? 'over budget' : 'available'}
-                </Text>
-                <Money value={over ? overage : available} size={30} weight="700"
-                  prefix={over ? '-$' : '$'} theme={theme}
-                  color={over ? OVER_DOT : theme.text} />
-              </View>
-              <View style={styles.tickBar}>
-                {Array.from({ length: TICK_COUNT }).map((_, i) => {
-                  const t = i / (TICK_COUNT - 1);
-                  const passed = t <= barPct + 0.5 / TICK_COUNT;
-                  const isToday = i === todayTickIndex;
-                  return (
-                    <View key={i} style={[
-                      styles.tick,
-                      {
-                        backgroundColor: isToday ? theme.text : gradientAt(t, theme.dark),
-                        opacity: isToday ? 1 : passed ? 1 : theme.dark ? 0.28 : 0.22,
-                      },
-                      isToday && styles.todayTick,
-                    ]} />
-                  );
-                })}
-              </View>
-
-              {/* ─── Income / Budget / After-budget strip ── */}
-              <View style={[styles.incomeStrip, { borderTopColor: theme.sep }]}>
-                <View style={styles.incomeStat}>
-                  <Text style={[styles.incomeLabel, { color: theme.textTer }]}>Income</Text>
-                  <Text style={[styles.incomeValue, { color: theme.text }]}>
-                    ${MONTHLY_INCOME.toLocaleString()}
-                  </Text>
-                </View>
-                <View style={[styles.incomeDiv, { backgroundColor: theme.hairline }]} />
-                <View style={styles.incomeStat}>
-                  <Text style={[styles.incomeLabel, { color: theme.textTer }]}>Budget</Text>
-                  <Text style={[styles.incomeValue, { color: theme.text }]}>
-                    ${mb.budget.toLocaleString()}
-                  </Text>
-                </View>
-                <View style={[styles.incomeDiv, { backgroundColor: theme.hairline }]} />
-                <View style={styles.incomeStat}>
-                  <Text style={[styles.incomeLabel, { color: theme.textTer }]}>After budget</Text>
-                  <Text style={[styles.incomeValue, { color: afterBudget >= 0 ? theme.accent.dot : OVER_DOT }]}>
-                    ${afterBudget.toLocaleString()}
-                  </Text>
-                </View>
-              </View>
-            </>
-          )}
         </View>
 
-        <View style={[styles.divider, { backgroundColor: theme.sep }]} />
-
-        {/* ─── Spending by category ─────────────────────── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <View>
-              <Text style={[styles.ledgerLabel, { color: theme.text }]}>Spending</Text>
-              {!loading && (
-                <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 2 }}>
-                  ${Math.round(mb.spent).toLocaleString()} of ${mb.budget.toLocaleString()} this month
-                </Text>
-              )}
+        {loading ? (
+          <>
+            <Skeleton width={180} height={28} radius={6} style={{ marginBottom: 20 }} />
+            <Skeleton width="100%" height={5} radius={3} />
+            <Skeleton width="100%" height={40} radius={6} style={{ marginTop: 22 }} />
+          </>
+        ) : (
+          <>
+            <View style={styles.heroAmountRow}>
+              <Money value={over ? overage : available} size={32} weight="700"
+                prefix={over ? '-$' : '$'} theme={theme}
+                color={over ? OVER_DOT : H_TEXT} />
             </View>
-            <TouchableOpacity onPress={onViewSpending} activeOpacity={0.6} delayPressIn={0}>
-              <Text style={[styles.ledgerAction, { color: theme.textSec }]}>See all</Text>
-            </TouchableOpacity>
-          </View>
-          {loading ? (
-            <CategorySkeleton theme={theme} />
-          ) : (
-            <CategoryGroups theme={theme} groups={SPEND_GROUPS} income={MONTHLY_INCOME} naked />
-          )}
-        </View>
 
-        <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+            {/* Simple progress bar */}
+            <View style={[styles.progressTrack, { backgroundColor: 'rgba(255,255,255,0.13)' }]}>
+              <View style={[styles.progressFill, {
+                width: `${Math.round(Math.min(rawPct, 1) * 100)}%`,
+                backgroundColor: over ? OVER_DOT : H_INK,
+              }]} />
+            </View>
 
-        {/* ─── Upcoming bills ───────────────────────────── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <Text style={[styles.ledgerLabel, { color: theme.text }]}>Upcoming</Text>
-          </View>
-          {loading ? (
-            <BillsSkeleton theme={theme} />
-          ) : (
-            UPCOMING_BILLS.map((b, i) => (
-              <View key={b.id} style={[
-                styles.billRow,
-                { borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
-              ]}>
-                <View style={[styles.rowIcon, { backgroundColor: catGroupColor(b.cat, theme.dark) }]}>
-                  <Icon name={b.icon} size={16} color="#fff" stroke={1.6} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.rowTitle, { color: theme.text }]}>{b.name}</Text>
-                  <Text style={[styles.rowSub, { color: theme.textSec }]}>
-                    {b.dueDate}
-                    {'  ·  '}
-                    <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : theme.textSec }}>
-                      {b.daysUntil}d
-                    </Text>
-                  </Text>
-                </View>
-                <Text style={[styles.rowAmt, { color: theme.textSec }]}>
-                  {b.estimate ? '~' : ''}${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}
+            {/* Income / Budget / After-budget strip */}
+            <View style={[styles.incomeStrip, { borderTopColor: 'rgba(255,255,255,0.12)' }]}>
+              <View style={styles.incomeStat}>
+                <Text style={[styles.incomeLabel, { color: H_SEC }]}>Income</Text>
+                <Text style={[styles.incomeValue, { color: H_TEXT }]}>
+                  ${MONTHLY_INCOME.toLocaleString()}
                 </Text>
               </View>
-            ))
-          )}
-        </View>
+              <View style={[styles.incomeDiv, { backgroundColor: 'rgba(255,255,255,0.15)' }]} />
+              <View style={styles.incomeStat}>
+                <Text style={[styles.incomeLabel, { color: H_SEC }]}>Budget</Text>
+                <Text style={[styles.incomeValue, { color: H_TEXT }]}>
+                  ${mb.budget.toLocaleString()}
+                </Text>
+              </View>
+              <View style={[styles.incomeDiv, { backgroundColor: 'rgba(255,255,255,0.15)' }]} />
+              <View style={styles.incomeStat}>
+                <Text style={[styles.incomeLabel, { color: H_SEC }]}>After budget</Text>
+                <Text style={[styles.incomeValue, { color: afterBudget >= 0 ? H_INK : OVER_DOT }]}>
+                  ${afterBudget.toLocaleString()}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
+      </View>
 
-        <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+        {/* ─── Card — same ScrollView, always on top of hero ── */}
+        <View style={[styles.contentPanel, { backgroundColor: theme.surface, marginTop: -28 }]}>
 
-        {/* ─── Activity ─────────────────────────────────── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <Text style={[styles.ledgerLabel, { color: theme.text }]}>Activity</Text>
-            <TouchableOpacity onPress={onViewActivity} activeOpacity={0.6} delayPressIn={0}>
-              <Text style={[styles.ledgerAction, { color: theme.textSec }]}>See all</Text>
-            </TouchableOpacity>
-          </View>
-          {loading ? (
-            <ActivitySkeleton theme={theme} />
-          ) : (
-            (['today', 'yesterday', 'earlier'] as const).map(key =>
-              groups[key].length > 0 && (
-                <View key={key} style={{ marginBottom: 14 }}>
-                  <Text style={[styles.dayLabel, { color: theme.textTer }]}>
-                    {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
+          {/* ─── Spending by category ─────────────────────── */}
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
+              <View>
+                <Text style={[styles.ledgerLabel, { color: theme.text }]}>Spending</Text>
+                {!loading && (
+                  <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 2 }}>
+                    ${Math.round(mb.spent).toLocaleString()} of ${mb.budget.toLocaleString()} this month
                   </Text>
-                  {groups[key].map((tx, i, arr) => (
-                    <TxRow key={tx.id} tx={tx} theme={theme}
-                      onPress={() => setSheetTx(tx)} last={i === arr.length - 1} />
-                  ))}
+                )}
+              </View>
+              <TouchableOpacity onPress={onViewSpending} activeOpacity={0.6} delayPressIn={0}>
+                <Text style={[styles.ledgerAction, { color: theme.accent.dot }]}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            {loading ? (
+              <CategorySkeleton theme={theme} />
+            ) : (
+              <CategoryGroups theme={theme} groups={SPEND_GROUPS} income={MONTHLY_INCOME} naked />
+            )}
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+
+          {/* ─── Upcoming bills ───────────────────────────── */}
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
+              <Text style={[styles.ledgerLabel, { color: theme.text }]}>Upcoming</Text>
+            </View>
+            {loading ? (
+              <BillsSkeleton theme={theme} />
+            ) : (
+              UPCOMING_BILLS.map((b, i) => (
+                <View key={b.id} style={[
+                  styles.billRow,
+                  { borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
+                ]}>
+                  <View style={[styles.rowIcon, { backgroundColor: catGroupColor(b.cat, theme.dark) }]}>
+                    <Icon name={b.icon} size={16} color="#fff" stroke={1.6} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.rowTitle, { color: theme.text }]}>{b.name}</Text>
+                    <Text style={[styles.rowSub, { color: theme.textSec }]}>
+                      {b.dueDate}
+                      {'  ·  '}
+                      <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : theme.textSec }}>
+                        {b.daysUntil}d
+                      </Text>
+                    </Text>
+                  </View>
+                  <Text style={[styles.rowAmt, { color: theme.textSec }]}>
+                    {b.estimate ? '~' : ''}${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}
+                  </Text>
                 </View>
+              ))
+            )}
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: theme.sep }]} />
+
+          {/* ─── Activity ─────────────────────────────────── */}
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
+              <Text style={[styles.ledgerLabel, { color: theme.text }]}>Activity</Text>
+              <TouchableOpacity onPress={onViewActivity} activeOpacity={0.6} delayPressIn={0}>
+                <Text style={[styles.ledgerAction, { color: theme.accent.dot }]}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            {loading ? (
+              <ActivitySkeleton theme={theme} />
+            ) : (
+              (['today', 'yesterday', 'earlier'] as const).map(key =>
+                groups[key].length > 0 && (
+                  <View key={key} style={{ marginBottom: 14 }}>
+                    <Text style={[styles.dayLabel, { color: theme.textTer }]}>
+                      {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
+                    </Text>
+                    {groups[key].map((tx, i, arr) => (
+                      <TxRow key={tx.id} tx={tx} theme={theme}
+                        onPress={() => setSheetTx(tx)} last={i === arr.length - 1} />
+                    ))}
+                  </View>
+                )
               )
-            )
-          )}
+            )}
+          </View>
+
         </View>
 
       </ScrollView>
@@ -519,44 +511,56 @@ const styles = StyleSheet.create({
   },
   // Budget hero
   budgetHero: {
-    marginBottom: 8,
+    marginBottom: 0,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  heroStatusGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroStatusLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  heroStatusDiv: {
+    width: 1,
+    height: 11,
+    opacity: 0.4,
+  },
+  heroStatusSub: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: -0.1,
   },
   monthLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   monthTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    marginBottom: 14,
+    gap: 4,
   },
   heroAmountRow: {
     marginBottom: 18,
   },
-  heroMainLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-    marginBottom: 5,
+  progressTrack: {
+    height: 5,
+    borderRadius: 3,
+    marginBottom: 0,
+    overflow: 'hidden',
   },
-  tickBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 26,
-    gap: 3,
-  },
-  tick: {
-    flex: 1,
-    height: 26,
-    borderRadius: 2,
-  },
-  todayTick: {
-    height: 32,
+  progressFill: {
+    height: 5,
     borderRadius: 3,
   },
 
@@ -589,6 +593,14 @@ const styles = StyleSheet.create({
     height: 28,
   },
 
+  // Content panel — slides over pinned hero on scroll
+  contentPanel: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 28,
+  },
+
   // Ledger section structure
   divider: {
     height: 1,
@@ -604,14 +616,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   ledgerLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: -0.3,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.4,
   },
   ledgerAction: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 0.2,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: -0.1,
     paddingTop: 3,
   },
 

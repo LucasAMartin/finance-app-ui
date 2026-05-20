@@ -6,9 +6,10 @@ import { Icon } from './Icon';
 interface Props {
   size?: number;
   iconSize?: number;
+  tintColor?: string;
 }
 
-export function ThemeToggle({ size = 40, iconSize = 22 }: Props) {
+export function ThemeToggle({ size = 40, iconSize = 22, tintColor }: Props) {
   const { theme, dark, toggleDark } = useTheme();
   const t = useRef(new Animated.Value(dark ? 1 : 0)).current;
 
@@ -58,7 +59,7 @@ export function ThemeToggle({ size = 40, iconSize = 22 }: Props) {
         <Icon
           name={dark ? 'moon' : 'sun'}
           size={iconSize}
-          color={theme.text}
+          color={tintColor ?? theme.text}
           stroke={1.7}
         />
       </Animated.View>

@@ -17,6 +17,17 @@ export interface CalDayMark {
   billCats: string[];
 }
 
+export interface CalOverrideColors {
+  text: string;
+  textSec: string;
+  textTer: string;
+  selectedBg: string;
+  selectedText: string;
+  todayBorder: string;
+  dotFill: string;
+  billDotBorder: string;
+}
+
 interface Props {
   theme: Theme;
   year: number;
@@ -27,24 +38,25 @@ interface Props {
   onSelectDay: (day: number | null) => void;
   onViewMonthChange?: (year: number, month: number) => void;
   onCollapse?: () => void;
+  overrideColors?: CalOverrideColors;
 }
 
 // ── Month picker ──────────────────────────────────────────────────────────────
 
 function MonthPicker({
-  viewYear, viewMonth, onSelect, theme,
+  viewYear, viewMonth, onSelect, clr,
 }: {
   viewYear: number;
   viewMonth: number;
   onSelect: (year: number, month: number) => void;
-  theme: Theme;
+  clr: ReturnType<typeof resolveColors>;
 }) {
   const years = [viewYear, viewYear - 1, viewYear - 2];
   return (
     <View style={P.container}>
       {years.map(y => (
         <View key={y} style={P.section}>
-          <Text style={[P.yearLabel, { color: theme.textTer }]}>{y}</Text>
+          <Text style={[P.yearLabel, { color: clr.textTer }]}>{y}</Text>
           <View style={P.monthGrid}>
             {MONTH_ABBR.map((abbr, m) => {
               const active = y === viewYear && m === viewMonth;
@@ -54,9 +66,12 @@ function MonthPicker({
                   onPress={() => onSelect(y, m)}
                   pointerEvents="box-only"
                   style={P.monthCell}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${abbr} ${y}`}
+                  accessibilityState={{ selected: active }}
                 >
-                  <View style={[P.monthPill, active && { backgroundColor: theme.text }]}>
-                    <Text style={[P.monthText, { color: active ? theme.bg : theme.textSec }]}>
+                  <View style={[P.monthPill, active && { backgroundColor: clr.selectedBg }]}>
+                    <Text style={[P.monthText, { color: active ? clr.selectedText : clr.textSec }]}>
                       {abbr}
                     </Text>
                   </View>
@@ -70,12 +85,28 @@ function MonthPicker({
   );
 }
 
+// ── Color resolver ─────────────────────────────────────────────────────────────
+
+function resolveColors(theme: Theme, override?: CalOverrideColors) {
+  return {
+    text:         override?.text         ?? theme.text,
+    textSec:      override?.textSec      ?? theme.textSec,
+    textTer:      override?.textTer      ?? theme.textTer,
+    selectedBg:   override?.selectedBg   ?? theme.text,
+    selectedText: override?.selectedText ?? theme.bg,
+    todayBorder:  override?.todayBorder  ?? theme.accent.dot,
+    dotFill:      override?.dotFill      ?? theme.accent.dot,
+    billDotBorder: override?.billDotBorder ?? theme.textSec,
+  };
+}
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
 export function TransactionCalendar({
   theme, year, month, marks, selectedDay, today,
-  onSelectDay, onViewMonthChange, onCollapse,
+  onSelectDay, onViewMonthChange, overrideColors,
 }: Props) {
+  const clr = resolveColors(theme, overrideColors);
   const [viewYear, setViewYear]     = useState(year);
   const [viewMonth, setViewMonth]   = useState(month);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -107,7 +138,6 @@ export function TransactionCalendar({
     else navigateToMonth(viewYear, viewMonth + 1);
   };
 
-  // Skip firing onViewMonthChange on initial mount — only fire on navigation.
   useEffect(() => {
     if (!didMountRef.current) {
       didMountRef.current = true;
@@ -116,7 +146,6 @@ export function TransactionCalendar({
     onViewMonthChange?.(viewYear, viewMonth);
   }, [viewYear, viewMonth]);
 
-  // Tap to select; tap same day again to deselect.
   const handleDayPress = (day: number) => {
     onSelectDay(day === selectedDay ? null : day);
   };
@@ -130,20 +159,25 @@ export function TransactionCalendar({
           pointerEvents="box-only"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           style={[styles.navBtn, { backgroundColor: 'transparent' }]}
+          accessibilityRole="button"
+          accessibilityLabel="Previous month"
         >
-          <Icon name="chevL" size={18} color={theme.textSec} stroke={1.6} />
+          <Icon name="chevL" size={18} color={clr.textSec} stroke={1.6} />
         </Pressable>
 
         <Pressable
           onPress={() => setPickerOpen(o => !o)}
           pointerEvents="box-only"
           style={styles.titleBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`${MONTH_NAMES[viewMonth]} ${viewYear}, change month`}
+          accessibilityState={{ expanded: pickerOpen }}
         >
-          <Text style={[styles.monthTitle, { color: theme.text }]}>
+          <Text style={[styles.monthTitle, { color: clr.text }]}>
             {MONTH_NAMES[viewMonth]} {viewYear}
           </Text>
           <View style={{ transform: [{ rotate: pickerOpen ? '180deg' : '0deg' }] }}>
-            <Icon name="chevDown" size={12} color={theme.textSec} stroke={1.8} />
+            <Icon name="chevDown" size={12} color={clr.textSec} stroke={1.8} />
           </View>
         </Pressable>
 
@@ -152,8 +186,10 @@ export function TransactionCalendar({
           pointerEvents="box-only"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           style={[styles.navBtn, { backgroundColor: 'transparent' }]}
+          accessibilityRole="button"
+          accessibilityLabel="Next month"
         >
-          <Icon name="chevR" size={18} color={theme.textSec} stroke={1.6} />
+          <Icon name="chevR" size={18} color={clr.textSec} stroke={1.6} />
         </Pressable>
       </View>
 
@@ -162,7 +198,7 @@ export function TransactionCalendar({
           viewYear={viewYear}
           viewMonth={viewMonth}
           onSelect={navigateToMonth}
-          theme={theme}
+          clr={clr}
         />
       ) : (
         <>
@@ -170,7 +206,7 @@ export function TransactionCalendar({
           <View style={styles.row}>
             {WEEKDAYS.map((w, i) => (
               <View key={i} style={styles.cell}>
-                <Text style={[styles.weekday, { color: theme.textTer }]}>{w}</Text>
+                <Text style={[styles.weekday, { color: clr.textSec }]}>{w}</Text>
               </View>
             ))}
           </View>
@@ -194,15 +230,18 @@ export function TransactionCalendar({
                     onPress={() => handleDayPress(day)}
                     pointerEvents="box-only"
                     style={[styles.cell, { backgroundColor: 'transparent' }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${MONTH_NAMES[viewMonth]} ${day}`}
+                    accessibilityState={{ selected: isSelected }}
                   >
                     <View style={[
                       styles.dayCircle,
-                      isSelected && { backgroundColor: theme.text },
-                      !isSelected && isToday && { borderWidth: 1.5, borderColor: theme.accent.dot },
+                      isSelected && { backgroundColor: clr.selectedBg },
+                      !isSelected && isToday && { borderWidth: 1.5, borderColor: clr.todayBorder },
                     ]}>
                       <Text style={[
                         styles.dayNum,
-                        { color: isSelected ? theme.bg : theme.text },
+                        { color: isSelected ? clr.selectedText : clr.text },
                         isToday && !isSelected && { fontWeight: '700' },
                       ]}>
                         {day}
@@ -210,10 +249,10 @@ export function TransactionCalendar({
                     </View>
                     <View style={styles.dotRow}>
                       {Array.from({ length: txCount }).map((_, i) => (
-                        <View key={`tx${i}`} style={[styles.dot, { backgroundColor: theme.accent.dot }]} />
+                        <View key={`tx${i}`} style={[styles.dot, { backgroundColor: clr.dotFill }]} />
                       ))}
                       {Array.from({ length: billCount }).map((_, i) => (
-                        <View key={`b${i}`} style={[styles.dot, { borderWidth: 1.5, borderColor: theme.textSec }]} />
+                        <View key={`b${i}`} style={[styles.dot, { borderWidth: 1.5, borderColor: clr.billDotBorder }]} />
                       ))}
                     </View>
                   </Pressable>
@@ -221,31 +260,6 @@ export function TransactionCalendar({
               })}
             </View>
           ))}
-
-          {/* Legend + Hide */}
-          <View style={[styles.legendRow, { borderTopColor: theme.sep }]}>
-            <View style={styles.legendItem}>
-              <View style={[styles.dot, { backgroundColor: theme.accent.dot }]} />
-              <Text style={[styles.legendText, { color: theme.textTer }]}>Transaction</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.dot, { borderWidth: 1.5, borderColor: theme.textSec }]} />
-              <Text style={[styles.legendText, { color: theme.textTer }]}>Upcoming bill</Text>
-            </View>
-            <View style={{ flex: 1 }} />
-            {onCollapse && (
-              <Pressable
-                onPress={onCollapse}
-                pointerEvents="box-only"
-                style={[styles.hideBtn, { backgroundColor: theme.chipBg }]}
-              >
-                <View style={{ transform: [{ rotate: '180deg' }] }}>
-                  <Icon name="chevDown" size={10} color={theme.textSec} stroke={2} />
-                </View>
-                <Text style={[styles.hideBtnText, { color: theme.textSec }]}>Hide</Text>
-              </Pressable>
-            )}
-          </View>
         </>
       )}
     </View>
@@ -296,29 +310,6 @@ const styles = StyleSheet.create({
   },
   dot: {
     width: 7, height: 7, borderRadius: 3.5,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginTop: 14, paddingTop: 12,
-    borderTopWidth: 1,
-  },
-  legendItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-  },
-  legendText: {
-    fontSize: 11, fontWeight: '500',
-  },
-  hideBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6, paddingHorizontal: 10,
-    borderRadius: 100,
-  },
-  hideBtnText: {
-    fontSize: 12, fontWeight: '600', letterSpacing: 0.1,
   },
 });
 

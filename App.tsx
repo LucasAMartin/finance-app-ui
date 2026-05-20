@@ -211,7 +211,7 @@ export default function App() {
   if (!fontsLoaded) return null;
 
   return (
-    <ThemeProvider defaultDark={false} defaultAccent="sage" defaultCardStyle="flat">
+    <ThemeProvider defaultDark={true} defaultAccent="plum" defaultCardStyle="flat">
       <SafeAreaProvider>
         <AppInner />
       </SafeAreaProvider>

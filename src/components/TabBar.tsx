@@ -29,11 +29,17 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const scales = useRef(TABS.map(() => new Animated.Value(1))).current;
   const [localActive, setLocalActive] = useState(active);
+  const activeRef = useRef(active);
+  const pressCommitted = useRef(false);
 
-  // Sync when parent changes active externally (e.g. drawer navigation).
-  useEffect(() => { setLocalActive(active); }, [active]);
+  useEffect(() => {
+    activeRef.current = active;
+    setLocalActive(active);
+  }, [active]);
 
-  const handlePressIn = (i: number) => {
+  const handlePressIn = (id: string, i: number) => {
+    pressCommitted.current = false;
+    setLocalActive(id);
     Animated.timing(scales[i], {
       toValue: 0.88,
       duration: 80,
@@ -49,10 +55,13 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
       useNativeDriver: true,
       easing: EASE_OUT_EXPO,
     }).start();
+    setTimeout(() => {
+      if (!pressCommitted.current) setLocalActive(activeRef.current);
+    }, 50);
   };
 
   const handlePress = (id: string) => {
-    setLocalActive(id);
+    pressCommitted.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onTabPress?.(id);
   };
@@ -64,7 +73,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
         return (
           <Pressable
             key={t.id}
-            onPressIn={() => handlePressIn(i)}
+            onPressIn={() => handlePressIn(t.id, i)}
             onPressOut={() => handlePressOut(i)}
             onPress={() => handlePress(t.id)}
             pointerEvents="box-only"
@@ -75,7 +84,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
                 name={t.icon}
                 size={22}
                 color={isActive ? theme.text : theme.textSec}
-                stroke={isActive ? 2.4 : 1.7}
+                solid={isActive}
               />
             </Animated.View>
           </Pressable>
