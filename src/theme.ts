@@ -17,7 +17,7 @@ const ACCENT_DEFS: Record<AccentKey, {
   butter: { fill: '#F1E6B7', fillDark: '#1E1A0A', ink: '#6E5A1F', inkDark: '#CCA840', dot: '#C5A946', dotDark: '#C5A946' },
   sky:    { fill: '#D5E2EE', fillDark: '#131E2E', ink: '#3D5874', inkDark: '#76AAD4', dot: '#7393B3', dotDark: '#7393B3' },
   rose:   { fill: '#EDD9D4', fillDark: '#261514', ink: '#6F4940', inkDark: '#D49080', dot: '#B47A6E', dotDark: '#B47A6E' },
-  plum:   { fill: '#E8E0F4', fillDark: '#3A2860', ink: '#4A3870', inkDark: '#C8AAEE', dot: '#7C5EC8', dotDark: '#A882E0' },
+  plum:   { fill: '#EBE7FF', fillDark: '#1C1444', ink: '#3D28A0', inkDark: '#B09AE8', dot: '#7B5CE0', dotDark: '#A08AEA' },
   ink:    { fill: '#D9D9DC', fillDark: '#1A1A22', ink: '#0E0E10', inkDark: '#C4C4D0', dot: '#0E0E10', dotDark: '#C4C4D0' },
   wine:   { fill: '#FAE8EC', fillDark: '#2C0F1A', ink: '#8C1530', inkDark: '#F2A0B4', dot: '#C23B58', dotDark: '#E06A7E' },
 };
@@ -39,7 +39,7 @@ export interface Theme {
 
 export function makeTheme(
   dark: boolean,
-  accentKey: AccentKey = 'sage',
+  accentKey: AccentKey = 'plum',
   cardStyle: CardStyle = 'flat'
 ): Theme {
   const def = ACCENT_DEFS[accentKey];
@@ -50,15 +50,15 @@ export function makeTheme(
     dark,
     accent,
     cardStyle,
-    bg:       dark ? '#100C14' : '#F7F8FA',
-    surface:  dark ? '#1E1828' : '#FFFFFF',
-    surface2: dark ? '#261E32' : '#FAFBFC',
-    text:     dark ? '#EDE8F5' : '#0E0E10',
-    textSec:  dark ? 'rgba(237,232,245,0.65)' : 'rgba(14,14,16,0.62)',
-    textTer:  dark ? 'rgba(237,232,245,0.36)' : 'rgba(14,14,16,0.32)',
-    sep:      dark ? 'rgba(200,180,220,0.10)' : 'rgba(14,14,16,0.08)',
-    hairline: dark ? 'rgba(200,180,220,0.14)' : 'rgba(14,14,16,0.10)',
-    chipBg:   dark ? 'rgba(200,180,220,0.08)' : 'rgba(14,14,16,0.04)',
+    bg:       dark ? '#0F0B1C' : '#F5F4F8',
+    surface:  dark ? '#1A1530' : '#FFFFFF',
+    surface2: dark ? '#221D3C' : '#FAFAFC',
+    text:     dark ? '#EDE9FF' : '#0E0C18',
+    textSec:  dark ? 'rgba(237,233,255,0.65)' : 'rgba(14,12,24,0.62)',
+    textTer:  dark ? 'rgba(237,233,255,0.36)' : 'rgba(14,12,24,0.32)',
+    sep:      dark ? 'rgba(180,160,240,0.10)' : 'rgba(14,12,24,0.08)',
+    hairline: dark ? 'rgba(180,160,240,0.14)' : 'rgba(14,12,24,0.10)',
+    chipBg:   dark ? 'rgba(180,160,240,0.08)' : 'rgba(14,12,24,0.04)',
   };
 }
 
@@ -95,12 +95,12 @@ export function getCardStyle(theme: Theme) {
 // Dark variants tuned to read against the navy-blue dark background — bumped luminance
 // and cooled hues slightly so they sit naturally on #0B1020.
 export const CAT_PASTEL: Record<string, { light: string; dark: string }> = {
-  groceries:     { light: '#A3CCA8', dark: '#7CC499' },
-  dining:        { light: '#D5BA8E', dark: '#D6A57A' },
-  transport:     { light: '#93B6CA', dark: '#7CB2D1' },
-  shopping:      { light: '#B5A7D6', dark: '#A296D6' },
-  bills:         { light: '#91C9C5', dark: '#7BC4BF' },
-  entertainment: { light: '#D5A7B5', dark: '#D69BB2' },
+  groceries:     { light: '#8EC49A', dark: '#76B888' },
+  dining:        { light: '#D4A48A', dark: '#C89070' },
+  transport:     { light: '#8AAACE', dark: '#7AAAD4' },
+  shopping:      { light: '#B09AE0', dark: '#A08CD4' },
+  bills:         { light: '#88BEB8', dark: '#78B0AA' },
+  entertainment: { light: '#C498B4', dark: '#BC88A8' },
 };
 
 export const catPastel = (cat: string, dark: boolean) =>
@@ -123,9 +123,9 @@ export function flagBg(dark: boolean):     string { return dark ? '#C8881C' : '#
 // Accent colors for the three 50/30/20 spending groups.
 // Import GROUP_COLORS in any component that needs to color by group.
 export const GROUP_COLORS: Record<string, { light: string; dark: string }> = {
-  needs:   { light: '#5E82A8', dark: '#7CA0CB' },
-  wants:   { light: '#C19A4B', dark: '#D3AE5C' },
-  savings: { light: '#6E9B82', dark: '#74B394' },
+  needs:   { light: '#5B7FBB', dark: '#7A9ED8' },
+  wants:   { light: '#B86C60', dark: '#D08878' },
+  savings: { light: '#4AA8A0', dark: '#5CC4BA' },
 };
 
 // Maps every transaction category key to its spending group.

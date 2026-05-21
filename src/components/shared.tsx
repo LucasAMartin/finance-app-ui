@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, Pressable, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
 import { Theme } from '../theme';
+import { TYPE } from '../typography';
 
 // ── Money display ──────────────────────────────────────────────
 interface MoneyProps {
@@ -17,8 +18,15 @@ export function Money({ value, size = 16, weight = '600', color, prefix = '−$'
   const whole = Math.floor(abs).toLocaleString();
   const frac = Math.round((abs - Math.floor(abs)) * 100).toString().padStart(2, '0');
   const col = color ?? theme.text;
+  const tracking = size >= 28 ? -1.2 : size >= 18 ? -0.5 : -0.2;
   return (
-    <Text style={{ fontSize: size, fontWeight: weight, color: col, letterSpacing: size > 30 ? -1.2 : -0.2 }}>
+    <Text style={{
+      fontSize: size,
+      fontWeight: weight,
+      color: col,
+      letterSpacing: tracking,
+      lineHeight: Math.round(size * 1.1),
+    }}>
       {prefix}{whole}.{frac}
     </Text>
   );
@@ -111,12 +119,13 @@ export function Segmented({ value, onChange, options, theme }: SegmentedProps) {
             style={styles.segBtn}
           >
             <Text
-              style={{
-                fontSize: 12,
-                fontWeight: active ? '700' : '500',
-                color: active ? theme.bg : theme.textSec,
-                letterSpacing: 0.2,
-              }}
+              style={[
+                active ? TYPE.captionEm : TYPE.caption,
+                {
+                  color: active ? theme.bg : theme.textSec,
+                  letterSpacing: 0.2,
+                },
+              ]}
             >
               {o.label}
             </Text>
@@ -217,14 +226,14 @@ interface SectionHeaderProps {
 export function SectionHeader({ title, actionLabel, onAction, theme }: SectionHeaderProps) {
   return (
     <View style={styles.sectionHeader}>
-      <Text style={{ fontSize: 17, fontWeight: '600', letterSpacing: -0.4, color: theme.text }}>{title}</Text>
+      <Text style={[TYPE.pageTitle, { color: theme.text }]}>{title}</Text>
       {actionLabel && (
         <Pressable
           onPress={onAction}
           pointerEvents="box-only"
           hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
         >
-          <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec }}>{actionLabel}</Text>
+          <Text style={[TYPE.bodySm, { color: theme.textSec }]}>{actionLabel}</Text>
         </Pressable>
       )}
     </View>

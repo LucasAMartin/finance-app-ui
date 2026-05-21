@@ -12,6 +12,7 @@ import { CATS, TRANSACTIONS, Transaction } from '../data';
 import { Icon } from './Icon';
 import { Money } from './shared';
 import { Theme, catGroupColor, catPastel, CAT_TO_GROUP, GROUP_COLORS } from '../theme';
+import { TYPE } from '../typography';
 
 const EXPENSE_GROUPS = [
   { key: 'needs',   label: 'Needs',   icon: 'home',    cats: ['groceries', 'transport', 'bills'],     defaultCat: 'groceries' },
@@ -165,7 +166,7 @@ function SheetBody({ tx, theme, isExpanded }: { tx: Transaction; theme: Theme; i
           {tx.time}
         </Text>
         <View style={{ marginTop: isExpanded ? 12 : 18 }}>
-          <Money value={tx.amount} size={isExpanded ? 32 : 40} weight="700" prefix="−$" theme={theme} />
+          <Money value={tx.amount} size={isExpanded ? 28 : 32} weight="600" prefix="−$" theme={theme} />
         </View>
       </View>
 
@@ -181,7 +182,7 @@ function SheetBody({ tx, theme, isExpanded }: { tx: Transaction; theme: Theme; i
             <View style={S.usageRow}>
               <Text style={[S.usageLabel, { color: theme.textSec }]}>{cat?.label} this month</Text>
               <Text style={[S.usageAmount, { color: theme.textSec }]}>
-                <Text style={{ color: theme.text, fontWeight: '600' }}>${catTotal.toFixed(0)}</Text>
+                <Text style={[TYPE.bodySmEm, { color: theme.text }]}>${catTotal.toFixed(0)}</Text>
                 {' of $'}{catBudget}
               </Text>
             </View>
@@ -212,7 +213,7 @@ function EditSection({
         <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ fontSize: 15, color: theme.textSec, marginRight: 1 }}>$</Text>
+            <Text style={[TYPE.subsectionTitle, { fontWeight: '500', color: theme.textSec, marginRight: 1 }]}>$</Text>
             <TextInput
               value={editAmt}
               onChangeText={setEditAmt}
@@ -266,7 +267,10 @@ function EditSection({
                 }]}>
                   <Icon name={g.icon} size={13} color={isActive ? color : theme.textTer} stroke={1.6} />
                 </View>
-                <Text style={{ fontSize: 12, fontWeight: isActive ? '700' : '500', color: isActive ? theme.text : theme.textSec }}>
+                <Text style={[
+                  isActive ? TYPE.captionEm : TYPE.caption,
+                  { color: isActive ? theme.text : theme.textSec },
+                ]}>
                   {g.label}
                 </Text>
               </Pressable>
@@ -282,7 +286,10 @@ function EditSection({
                       style={[S.subcatRow, { backgroundColor: isActiveCat ? theme.text : 'transparent' }]}
                     >
                       <Icon name={c.icon} size={12} color={isActiveCat ? theme.bg : theme.textTer} stroke={1.5} />
-                      <Text style={{ fontSize: 12, fontWeight: isActiveCat ? '600' : '400', color: isActiveCat ? theme.bg : theme.textSec, marginLeft: 5 }}>
+                      <Text style={[
+                        isActiveCat ? TYPE.captionEm : TYPE.caption,
+                        { color: isActiveCat ? theme.bg : theme.textSec, marginLeft: 5 },
+                      ]}>
                         {c.label}
                       </Text>
                     </Pressable>
@@ -300,7 +307,7 @@ function EditSection({
         pointerEvents="box-only"
         style={[S.saveBtn, { backgroundColor: theme.text }]}
       >
-        <Text style={{ color: theme.bg, fontSize: 15, fontWeight: '700' }}>Save changes</Text>
+        <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save changes</Text>
       </Pressable>
     </View>
   );
@@ -346,10 +353,10 @@ const S = StyleSheet.create({
     borderRadius: 20,
     marginBottom: 8,
   },
-  merchant: { fontSize: 20, fontWeight: '700', letterSpacing: -0.5, textAlign: 'center' },
-  merchantCompact: { fontSize: 17 },
-  metaLine: { fontSize: 13, marginTop: 5, textAlign: 'center' },
-  metaLineCompact: { fontSize: 12, marginTop: 3 },
+  merchant: { ...TYPE.headline, textAlign: 'center' },
+  merchantCompact: { ...TYPE.pageTitle, textAlign: 'center' },
+  metaLine: { ...TYPE.bodySm, marginTop: 5, textAlign: 'center' },
+  metaLineCompact: { ...TYPE.caption, marginTop: 3, textAlign: 'center' },
   noteRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -360,8 +367,8 @@ const S = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 16,
   },
-  noteLabel: { fontSize: 13 },
-  noteValue: { fontSize: 13, fontWeight: '500', flex: 1, textAlign: 'right', marginLeft: 12 },
+  noteLabel: { ...TYPE.bodySm },
+  noteValue: { ...TYPE.bodySmEm, flex: 1, textAlign: 'right', marginLeft: 12 },
   budgetBlock: {
     paddingHorizontal: 20,
     paddingTop: 4,
@@ -373,8 +380,8 @@ const S = StyleSheet.create({
     alignItems: 'baseline',
     marginBottom: 9,
   },
-  usageLabel: { fontSize: 13 },
-  usageAmount: { fontSize: 13 },
+  usageLabel: { ...TYPE.bodySm },
+  usageAmount: { ...TYPE.bodySm },
   bar: { height: 4, borderRadius: 2, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 2 },
   expandHint: {
@@ -384,7 +391,7 @@ const S = StyleSheet.create({
     gap: 5,
     paddingVertical: 14,
   },
-  expandHintText: { fontSize: 12, fontWeight: '500' },
+  expandHintText: { ...TYPE.captionEm },
   editSection: {
     paddingHorizontal: 20,
     paddingTop: 16,
@@ -393,10 +400,8 @@ const S = StyleSheet.create({
     marginTop: 4,
   },
   editTitle: {
-    fontSize: 11,
+    ...TYPE.labelLg,
     fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
     marginBottom: 10,
   },
   fieldCard: {
@@ -411,8 +416,8 @@ const S = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
-  fieldLabel: { fontSize: 14, fontWeight: '500', flexShrink: 0 },
-  fieldInput: { fontSize: 15, fontWeight: '500', textAlign: 'right', padding: 0 },
+  fieldLabel: { ...TYPE.body, flexShrink: 0 },
+  fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',

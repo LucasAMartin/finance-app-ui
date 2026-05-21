@@ -27,6 +27,7 @@ import { Money } from '../components/shared';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TYPE } from '../typography';
 
 
 // ── Budget progress bar — color encodes spending state ───────────
@@ -35,8 +36,8 @@ function BudgetBar({ pct }: { pct: number }) {
   const H = 5, R = 3;
   const color = pct >= 1.0 ? '#D4522A'
     : pct >= 0.9  ? '#C5A946'
-    : pct >= 0.75 ? '#C19A4B'
-    : '#6E9B82';
+    : pct >= 0.75 ? '#B86C60'
+    : '#5CC4BA';
   return (
     <View
       style={{ height: H, borderRadius: R, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.13)' }}
@@ -108,12 +109,12 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
   const afterBudget = MONTHLY_INCOME - mb.budget;
 
   // Hero is always dark plum regardless of theme mode.
-  const HERO_BG   = '#3A2860';
-  const H_TEXT    = '#EDE8F5';
-  const H_SEC     = 'rgba(237,232,245,0.60)';
-  const H_INK     = theme.dark ? theme.accent.ink : 'rgba(237,232,245,0.85)';
-  const H_AVAIL   = '#7A9D85';
-  const H_BUDG    = 'rgba(110,155,130,0.92)';
+  const HERO_BG   = '#1E1050';
+  const H_TEXT    = '#EDE9FF';
+  const H_SEC     = 'rgba(237,233,255,0.55)';
+  const H_INK     = theme.dark ? theme.accent.ink : 'rgba(237,233,255,0.88)';
+  const H_AVAIL   = '#5CC4BA';
+  const H_BUDG    = 'rgba(92,196,186,0.72)';
 
   return (
     <View style={{ flex: 1, backgroundColor: HERO_BG }}>
@@ -200,7 +201,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
         ) : (
           <>
             <View style={styles.heroAmountRow}>
-              <Money value={over ? overage : available} size={32} weight="700"
+              <Money value={over ? overage : available} size={32} weight="600"
                 prefix={over ? '-$' : '$'} theme={theme}
                 color={over ? OVER_DOT : H_TEXT} />
             </View>
@@ -479,20 +480,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroStatusLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    ...TYPE.labelLg,
+    textTransform: 'none',
+    letterSpacing: 0,
+    fontSize: 13,
+    lineHeight: 18,
   },
   heroStatusDiv: {
     width: 1,
-    height: 11,
+    height: 13,
     opacity: 0.4,
   },
   heroStatusSub: {
-    fontSize: 11,
-    fontWeight: '500',
+    ...TYPE.labelLg,
+    textTransform: 'none',
     letterSpacing: -0.1,
+    fontSize: 13,
+    lineHeight: 18,
   },
   heroAmountRow: {
     marginBottom: 16,
@@ -522,15 +526,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   incomeLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
+    ...TYPE.label,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   incomeValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: -0.3,
+    ...TYPE.subsectionTitle,
   },
   incomeDiv: {
     width: 1,
@@ -559,23 +560,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   ledgerLabel: {
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: -0.4,
+    ...TYPE.sectionTitle,
   },
   ledgerAction: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: -0.1,
+    ...TYPE.captionEm,
     paddingTop: 3,
   },
 
   // Day label in activity
   dayLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    ...TYPE.txDateLabel,
     marginBottom: 8,
   },
 
@@ -589,18 +583,14 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   rowTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    ...TYPE.body,
   },
   rowSub: {
-    fontSize: 12,
+    ...TYPE.caption,
     marginTop: 2,
   },
   rowAmt: {
-    fontSize: 13,
-    fontWeight: '500',
-    letterSpacing: -0.2,
+    ...TYPE.bodySm,
   },
 
   // Bill row

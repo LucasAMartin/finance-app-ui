@@ -16,6 +16,7 @@ import { Theme, GROUP_COLORS, catGroupColor, OVER_DOT } from '../theme';
 import { SPEND_GROUPS, UPCOMING_BILLS, MONTHLY_INCOME } from '../data';
 import { Icon } from '../components/Icon';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TYPE } from '../typography';
 
 interface Props {
   theme: Theme;
@@ -113,7 +114,7 @@ function EditableRow({
       <View style={[styles.rowIcon, { backgroundColor: groupColor }]}>
         <Icon name={icon} size={16} color="#fff" stroke={1.6} />
       </View>
-      <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.2, minWidth: 0 }}>
+      <Text style={[TYPE.body, { flex: 1, color: theme.text, minWidth: 0 }]}>
         {name}
       </Text>
       {editing ? (
@@ -141,7 +142,7 @@ function EditableRow({
           }]}
           activeOpacity={0.7}
         >
-          <Text style={{ fontSize: 14, fontWeight: '600', color: committed ? theme.accent.dot : theme.text }}>
+          <Text style={[TYPE.body, { color: committed ? theme.accent.dot : theme.text }]}>
             ${Math.round(amount).toLocaleString()}
           </Text>
         </TouchableOpacity>
@@ -273,7 +274,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           <IconBtn onPress={onOpenDrawer}>
             <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
           </IconBtn>
-          <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.4, color: theme.text }}>
+          <Text style={[TYPE.pageTitle, { color: theme.text }]}>
             Budget
           </Text>
           <ThemeToggle />
@@ -289,7 +290,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
             <Text style={[styles.eyebrow, { color: theme.textTer }]}>
               {allocatedPct}% allocated
             </Text>
-            <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSec }}>
+            <Text style={[TYPE.labelLg, { textTransform: 'none', letterSpacing: 0, color: theme.textSec }]}>
               ${Math.round(totalBudgeted).toLocaleString()} of ${income.toLocaleString()}
             </Text>
           </View>
@@ -309,11 +310,11 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
               <View key={item.label} style={{ alignItems: 'center' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.dotColor }} />
-                  <Text style={{ fontSize: 10, fontWeight: '600', letterSpacing: 0.1, color: item.dotColor }}>
+                  <Text style={[TYPE.label, { textTransform: 'none', letterSpacing: 0, color: item.dotColor }]}>
                     {item.label}
                   </Text>
                 </View>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: item.valueColor, letterSpacing: -0.4 }}>
+                <Text style={[TYPE.subsectionTitle, { color: item.valueColor }]}>
                   ${Math.round(item.amount).toLocaleString()}
                 </Text>
               </View>
@@ -323,11 +324,11 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           {/* ── Undo toast ─────────────────────────── */}
           {undoVisible && (
             <View style={[styles.undoRow, { backgroundColor: theme.text }]}>
-              <Text style={{ flex: 1, fontSize: 13, fontWeight: '500', color: theme.bg }}>
+              <Text style={[TYPE.bodySm, { flex: 1, color: theme.bg }]}>
                 Applied {activeTemplateName}
               </Text>
               <TouchableOpacity onPress={handleUndo} hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.bg }}>
+                <Text style={[TYPE.bodySm, { fontWeight: '600', color: theme.bg }]}>
                   Undo
                 </Text>
               </TouchableOpacity>
@@ -349,7 +350,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                 <Text style={[styles.eyebrow, { color: theme.textTer }]}>Income</Text>
                 {editingIncome ? (
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2, marginTop: 5 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSec }}>$</Text>
+                    <Text style={[TYPE.bodySmEm, { color: theme.textSec }]}>$</Text>
                     <TextInput
                       value={incomeDraft}
                       onChangeText={setIncomeDraft}
@@ -358,18 +359,15 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                       keyboardType="decimal-pad"
                       autoFocus
                       selectTextOnFocus
-                      style={{
-                        fontSize: 20,
-                        fontWeight: '700',
-                        letterSpacing: -0.5,
+                      style={[TYPE.headline, {
                         color: theme.text,
                         borderBottomWidth: 1.5,
                         borderBottomColor: theme.accent.dot,
                         paddingVertical: 2,
                         minWidth: 80,
-                      }}
+                      }]}
                     />
-                    <Text style={{ fontSize: 12, color: theme.textTer, marginLeft: 2 }}>
+                    <Text style={[TYPE.caption, { color: theme.textTer, marginLeft: 2 }]}>
                       {cadenceSuffix(cadence)}
                     </Text>
                   </View>
@@ -379,11 +377,11 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                     activeOpacity={0.8}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 }}
                   >
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSec }}>$</Text>
-                    <Text style={{ fontSize: 20, fontWeight: '700', letterSpacing: -0.5, color: theme.text }}>
+                    <Text style={[TYPE.bodySmEm, { color: theme.textSec }]}>$</Text>
+                    <Text style={[TYPE.headline, { color: theme.text }]}>
                       {displayIncome.toLocaleString()}
                     </Text>
-                    <Text style={{ fontSize: 12, color: theme.textTer }}>
+                    <Text style={[TYPE.caption, { color: theme.textTer }]}>
                       {cadenceSuffix(cadence)}
                     </Text>
                     <Icon name="pencil" size={13} color={theme.textTer} stroke={1.5} />
@@ -399,11 +397,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                   backgroundColor: showCadence ? theme.text : theme.chipBg,
                 }]}
               >
-                <Text style={{
-                  fontSize: 11,
-                  fontWeight: '600',
-                  color: showCadence ? theme.bg : theme.textSec,
-                }}>
+                <Text style={[TYPE.labelLg, { textTransform: 'none', letterSpacing: 0, color: showCadence ? theme.bg : theme.textSec }]}>
                   {activeCadenceLabel}
                 </Text>
                 <View style={{ transform: [{ rotate: showCadence ? '180deg' : '0deg' }] }}>
@@ -427,18 +421,14 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                       activeOpacity={0.7}
                       style={[styles.cadencePill, cadence === c.value && { backgroundColor: theme.text }]}
                     >
-                      <Text style={{
-                        fontSize: 12,
-                        fontWeight: '600',
-                        color: cadence === c.value ? theme.bg : theme.textSec,
-                      }}>
+                      <Text style={[TYPE.captionEm, { color: cadence === c.value ? theme.bg : theme.textSec }]}>
                         {c.label}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
                 {cadence !== 'Mo' && (
-                  <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 6 }}>
+                  <Text style={[TYPE.labelLg, { textTransform: 'none', letterSpacing: 0, color: theme.textSec, marginTop: 6 }]}>
                     ${income.toLocaleString()}/month
                   </Text>
                 )}
@@ -454,11 +444,11 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           >
             <Icon name="split" size={15} color={theme.textSec} stroke={1.5} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, letterSpacing: -0.2 }}>
+              <Text style={[TYPE.bodySmEm, { color: theme.text }]}>
                 {activeTemplateName ? activeTemplateName : 'Split templates'}
               </Text>
               {activeTemplateName && (
-                <Text style={{ fontSize: 11, color: theme.accent.dot, marginTop: 1 }}>
+                <Text style={[TYPE.labelLg, { textTransform: 'none', letterSpacing: 0, color: theme.accent.dot, marginTop: 1 }]}>
                   Applied
                 </Text>
               )}
@@ -484,15 +474,13 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                     }]}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={{
-                        fontSize: 14,
-                        fontWeight: '700',
+                      <Text style={[TYPE.body, {
+                        fontWeight: '600',
                         color: isActive ? theme.accent.dot : theme.text,
-                        letterSpacing: -0.3,
-                      }}>
+                      }]}>
                         {t.label}
                       </Text>
-                      <Text style={{ fontSize: 11, color: theme.textSec, marginTop: 2 }}>
+                      <Text style={[TYPE.labelLg, { textTransform: 'none', letterSpacing: 0, color: theme.textSec, marginTop: 2 }]}>
                         {t.subtitle}
                       </Text>
                     </View>
@@ -504,10 +492,10 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                         { abbr: 'S', pct: t.savings, col: savingsCol },
                       ].map(seg => (
                         <View key={seg.abbr} style={styles.templateSplitItem}>
-                          <Text style={{ fontSize: 10, fontWeight: '600', color: seg.col }}>
+                          <Text style={[TYPE.label, { letterSpacing: 0, color: seg.col }]}>
                             {seg.abbr}
                           </Text>
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: seg.col }}>
+                          <Text style={[TYPE.captionEm, { fontWeight: '600', color: seg.col }]}>
                             {Math.round(seg.pct * 100)}%
                           </Text>
                         </View>
@@ -515,7 +503,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                     </View>
                     {isActive && (
                       <View style={[styles.appliedChip, { backgroundColor: theme.accent.fill }]}>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: theme.accent.ink }}>
+                        <Text style={[TYPE.label, { fontWeight: '600', color: theme.accent.ink }]}>
                           On
                         </Text>
                       </View>
@@ -531,7 +519,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
           <View style={styles.sectionHead}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Recurring bills</Text>
           </View>
-          <Text style={{ fontSize: 11, color: theme.textTer, marginBottom: 10, paddingHorizontal: 2 }}>
+          <Text style={[TYPE.labelLg, { textTransform: 'none', letterSpacing: 0, color: theme.textTer, marginBottom: 10, paddingHorizontal: 2 }]}>
             Tracked separately from your category budgets.
           </Text>
           {UPCOMING_BILLS.map((bill, i) => (
@@ -546,19 +534,19 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                 <Icon name={bill.icon} size={16} color="#fff" stroke={1.6} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.2 }}>
+                <Text style={[TYPE.body, { color: theme.text }]}>
                   {bill.name}
                 </Text>
-                <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 2 }}>
+                <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
                   {bill.dueDate}{bill.estimate ? ' · estimated' : ''}
                 </Text>
               </View>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSec, letterSpacing: -0.2 }}>
+              <Text style={[TYPE.bodySmEm, { color: theme.textSec }]}>
                 {bill.estimate ? '≈' : ''}${bill.amount % 1 !== 0 ? bill.amount.toFixed(2) : bill.amount.toLocaleString()}
               </Text>
             </View>
           ))}
-          <Text style={{ fontSize: 12, color: theme.textTer, marginTop: 10, paddingHorizontal: 2 }}>
+          <Text style={[TYPE.caption, { color: theme.textTer, marginTop: 10, paddingHorizontal: 2 }]}>
             ${recurringTotal.toFixed(2)} locked in · ${discretionary.toLocaleString()} discretionary
           </Text>
 
@@ -574,7 +562,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                     <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: groupColor }} />
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>{g.label}</Text>
                   </View>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: groupColor, letterSpacing: -0.4 }}>
+                  <Text style={[TYPE.sectionTitle, { fontSize: 16, color: groupColor }]}>
                     ${groupTotal.toLocaleString()}
                   </Text>
                 </View>
@@ -640,10 +628,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   eyebrow: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
+    ...TYPE.labelLg,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   allocationBar: {
     height: 20,
@@ -746,9 +733,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...TYPE.subsectionTitle,
   },
   row: {
     flexDirection: 'row',
@@ -777,8 +762,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     minWidth: 92,
     textAlign: 'right',
-    fontSize: 14,
-    fontWeight: '700',
+    ...TYPE.body,
+    fontWeight: '600',
     borderWidth: 1.5,
   },
   summaryStrip: {
@@ -797,13 +782,12 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   summaryLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 0.1,
+    ...TYPE.labelLg,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   summaryValue: {
-    fontSize: 17,
-    fontWeight: '600',
+    ...TYPE.pageTitle,
     letterSpacing: -0.3,
   },
 });

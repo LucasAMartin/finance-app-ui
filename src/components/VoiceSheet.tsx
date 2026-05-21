@@ -12,7 +12,7 @@ import { presentationDetents, presentationDragIndicator, type PresentationDetent
 
 type Mode = 'idle' | 'listening' | 'parsed' | 'manual';
 
-const VOICE_DETENT_DEFAULT: PresentationDetent = { fraction: 0.7 };
+const VOICE_DETENT_DEFAULT: PresentationDetent = { fraction: 0.52 };
 const VOICE_DETENT_LARGE: PresentationDetent = 'large';
 const VOICE_DETENTS: PresentationDetent[] = [VOICE_DETENT_DEFAULT, VOICE_DETENT_LARGE];
 
@@ -21,6 +21,13 @@ const EXPENSE_GROUPS = [
   { key: 'wants',   label: 'Wants',   icon: 'sparkle', cats: ['dining', 'shopping', 'entertainment'], defaultCat: 'dining'    },
   { key: 'savings', label: 'Savings', icon: 'wallet',  cats: [],                                      defaultCat: 'savings'   },
 ];
+
+const BAR_COUNT = 24;
+// Bell-curve sine pattern for the idle waveform silhouette
+const STATIC_WAVE = Array.from({ length: BAR_COUNT }, (_, i) => {
+  const t = i / (BAR_COUNT - 1);
+  return 0.12 + 0.55 * Math.sin(t * Math.PI) * (0.7 + 0.3 * Math.sin(t * Math.PI * 4));
+});
 
 interface VoiceSheetProps {
   theme: Theme;
@@ -45,8 +52,13 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
   const transcriptRef = useRef('');
   useEffect(() => { transcriptRef.current = voice.transcript; }, [voice.transcript]);
 
-  const barAnims = useRef(Array.from({ length: 24 }, () => new Animated.Value(0))).current;
+  const barAnims = useRef(Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))).current;
   const waveLoops = useRef<Animated.CompositeAnimation[]>([]);
+
+  // Three staggered pulse rings that expand outward while listening
+  const ringAnims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
+  const ringLoops = useRef<(Animated.CompositeAnimation | null)[]>([null, null, null]);
+  const ringTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const startWave = () => {
     waveLoops.current.forEach(l => l.stop());
@@ -67,6 +79,27 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
     barAnims.forEach(a => a.setValue(0));
   };
 
+  const startRings = () => {
+    ringTimeouts.current.forEach(clearTimeout);
+    ringLoops.current.forEach(l => l?.stop());
+    ringAnims.forEach(a => a.setValue(0));
+    ringTimeouts.current = ringAnims.map((anim, i) =>
+      setTimeout(() => {
+        const loop = Animated.loop(
+          Animated.timing(anim, { toValue: 1, duration: 1800, useNativeDriver: true })
+        );
+        ringLoops.current[i] = loop;
+        loop.start();
+      }, i * 600)
+    );
+  };
+
+  const stopRings = () => {
+    ringTimeouts.current.forEach(clearTimeout);
+    ringLoops.current.forEach(l => l?.stop());
+    ringAnims.forEach(a => a.setValue(0));
+  };
+
   useEffect(() => {
     if (visible) {
       setDetent(VOICE_DETENT_DEFAULT);
@@ -82,17 +115,20 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
     } else {
       voice.abort();
       stopWave();
+      stopRings();
     }
-    return () => { stopWave(); };
+    return () => { stopWave(); stopRings(); };
   }, [visible]);
 
   useEffect(() => {
     if (voice.listening) {
       setMode('listening');
       startWave();
+      startRings();
       return;
     }
     stopWave();
+    stopRings();
     const finalText = transcriptRef.current.trim();
     setMode(m => (m === 'listening' ? (finalText ? 'parsed' : 'idle') : m));
     if (finalText) {
@@ -139,27 +175,26 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
           presentationDragIndicator('visible'),
         ]}>
           <RNHostView>
-            <View style={[S.sheet, { backgroundColor: theme.dark ? '#16161A' : '#fff' }]}>
+            <View style={[S.sheet, { backgroundColor: theme.dark ? '#1A1530' : '#fff' }]}>
               {/* Header */}
               <View style={S.sheetHeader}>
                 <Pressable
-                  onPress={onClose}
+                  onPress={() => { voice.abort(); onClose(); }}
                   pointerEvents="box-only"
-                  disabled={mode === 'listening'}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={S.headerBtn}
                 >
-                  <Text style={{ color: theme.textSec, fontSize: 14, fontWeight: '500', opacity: mode === 'listening' ? 0.4 : 1 }}>Cancel</Text>
+                  <Text style={{ color: theme.textSec, fontSize: 14, fontWeight: '500' }}>Cancel</Text>
                 </Pressable>
                 <Text style={{ color: theme.text, fontSize: 14, fontWeight: '600' }}>New expense</Text>
                 {isParsedOrManual ? (
                   <Pressable
                     onPress={onClose}
                     pointerEvents="box-only"
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={S.headerBtn}
                   >
                     <Text style={{ color: theme.text, fontSize: 14, fontWeight: '700' }}>Save</Text>
                   </Pressable>
-                ) : <View style={{ width: 44 }} />}
+                ) : <View style={S.headerBtn} />}
               </View>
 
               <ScrollView
@@ -172,25 +207,72 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
                 {/* IDLE / LISTENING */}
                 {(mode === 'idle' || mode === 'listening') && (
                   <View style={S.voiceCenter}>
-                    <View style={S.transcriptArea}>
+
+                    {/* Hint text or live transcript */}
+                    <View style={S.topZone}>
                       {mode === 'listening' ? (
                         voice.transcript ? (
-                          <Text style={{ fontSize: 20, fontWeight: '600', letterSpacing: -0.4, color: theme.text, textAlign: 'center' }}>
+                          <Text style={[S.transcriptLive, { color: theme.text }]}>
                             {voice.transcript}
                           </Text>
-                        ) : null
+                        ) : (
+                          <Text style={[S.hintSub, { color: theme.textTer }]}>Listening...</Text>
+                        )
                       ) : voice.error ? (
-                        <Text style={{ fontSize: 13, color: theme.textSec, lineHeight: 20, textAlign: 'center' }}>
+                        <Text style={[S.hintSub, { color: theme.textSec, textAlign: 'center' }]}>
                           {voice.error}
                         </Text>
                       ) : (
-                        <Text style={{ fontSize: 13, color: theme.textSec, lineHeight: 20, textAlign: 'center' }}>
-                          Try <Text style={{ color: theme.text, fontWeight: '600' }}>"Coffee at Blue Bottle, six fifty"</Text>
-                          {'\n'}or <Text style={{ color: theme.text, fontWeight: '600' }}>"Groceries, twenty dollars"</Text>
-                        </Text>
+                        <>
+                          <Text style={[S.hintMeta, { color: theme.textTer }]}>Say something like</Text>
+                          <Text style={[S.hintExample, { color: theme.textSec }]}>
+                            "Coffee at Blue Bottle, six fifty"
+                          </Text>
+                          <Text style={[S.hintExample, { color: theme.textSec }]}>
+                            "Groceries, twenty dollars"
+                          </Text>
+                        </>
                       )}
                     </View>
 
+                    {/* Mic button with expanding pulse rings */}
+                    <View style={S.micZone}>
+                      {ringAnims.map((anim, i) => {
+                        const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
+                        const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
+                        return (
+                          <Animated.View
+                            key={i}
+                            style={[
+                              S.ring,
+                              {
+                                backgroundColor: theme.accent.fill,
+                                opacity,
+                                transform: [{ scale }],
+                              },
+                            ]}
+                          />
+                        );
+                      })}
+                      <Pressable
+                        onPress={mode === 'listening' ? () => voice.stop() : () => voice.start()}
+                        pointerEvents="box-only"
+                        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                        style={[S.micBtn, { backgroundColor: theme.accent.fill }]}
+                      >
+                        {mode === 'listening' ? (
+                          <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
+                        ) : (
+                          <Icon name="mic" size={26} color={theme.accent.dot} stroke={1.8} />
+                        )}
+                      </Pressable>
+                    </View>
+
+                    <Text style={[S.stateLabel, { color: theme.textTer }]}>
+                      {mode === 'listening' ? 'Tap to stop' : 'Tap to speak'}
+                    </Text>
+
+                    {/* Waveform — static silhouette at rest, animated when listening */}
                     <View style={S.waveform}>
                       {barAnims.map((anim, i) => (
                         <Animated.View
@@ -198,51 +280,25 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
                           style={[
                             S.waveBar,
                             {
-                              backgroundColor: mode === 'listening' ? theme.text : theme.hairline,
-                              transform: [{ scaleY: mode === 'listening' ? anim : 0.3 }],
+                              backgroundColor: mode === 'listening' ? theme.accent.dot : theme.hairline,
+                              transform: [{ scaleY: mode === 'listening' ? anim : STATIC_WAVE[i] }],
                             },
                           ]}
                         />
                       ))}
                     </View>
 
-                    <Pressable
-                      onPress={mode === 'listening' ? () => voice.stop() : () => voice.start()}
-                      pointerEvents="box-only"
-                      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-                      style={[
-                        S.micBtn,
-                        {
-                          backgroundColor: theme.text,
-                          shadowColor: '#000',
-                          shadowOffset: { width: 0, height: 8 },
-                          shadowOpacity: mode === 'listening' ? 0 : (theme.dark ? 0.5 : 0.12),
-                          shadowRadius: 18,
-                          elevation: 8,
-                          borderWidth: mode === 'listening' ? 10 : 0,
-                          borderColor: theme.accent.fill,
-                        },
-                      ]}
-                    >
-                      {mode === 'listening' ? (
-                        <View style={[S.stopSquare, { backgroundColor: theme.bg }]} />
-                      ) : (
-                        <Icon name="mic" size={30} color={theme.bg} stroke={1.6} />
-                      )}
-                    </Pressable>
-
-                    <Text style={{ marginTop: 10, fontSize: 12, color: theme.textTer, fontWeight: '500' }}>
-                      {mode === 'listening' ? 'Tap to stop' : 'Tap to record'}
-                    </Text>
-
+                    {/* Enter manually — proper bordered pill */}
                     {mode !== 'listening' && (
                       <Pressable
                         onPress={goManual}
                         pointerEvents="box-only"
-                        style={S.manualLink}
+                        style={[S.manualBtn, { borderColor: theme.hairline }]}
                       >
                         <Icon name="keypad" size={14} color={theme.textSec} stroke={1.5} />
-                        <Text style={{ color: theme.textSec, fontSize: 13, fontWeight: '500', marginLeft: 6 }}>Enter manually</Text>
+                        <Text style={{ color: theme.textSec, fontSize: 14, fontWeight: '500', marginLeft: 7 }}>
+                          Enter manually
+                        </Text>
                       </Pressable>
                     )}
                   </View>
@@ -250,7 +306,7 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
 
                 {/* PARSED */}
                 {mode === 'parsed' && (
-                  <View style={{ paddingHorizontal: 28, paddingTop: 4 }}>
+                  <View style={{ paddingHorizontal: 24, paddingTop: 4 }}>
                     <View style={[S.transcriptChip, { backgroundColor: theme.chipBg }]}>
                       <Icon name="mic" size={14} color={theme.textSec} />
                       <Text style={{ flex: 1, fontSize: 13, color: theme.textSec, marginLeft: 8 }} numberOfLines={2}>
@@ -313,9 +369,9 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
 
                 {/* MANUAL */}
                 {mode === 'manual' && (
-                  <View style={{ paddingHorizontal: 28, paddingTop: 4 }}>
+                  <View style={{ paddingHorizontal: 24, paddingTop: 0 }}>
                     {/* Amount display */}
-                    <View style={{ alignItems: 'center', paddingVertical: 10, marginBottom: 14 }}>
+                    <View style={{ alignItems: 'center', paddingVertical: 6, marginBottom: 10 }}>
                       <Text style={{
                         fontSize: 46, fontWeight: '600', letterSpacing: -1.2,
                         color: parseFloat(manualAmt) > 0 ? theme.text : theme.textTer,
@@ -327,7 +383,7 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
                     </View>
 
                     {/* Merchant + Note */}
-                    <View style={[cardStyle, { overflow: 'hidden', marginBottom: 14 }]}>
+                    <View style={[cardStyle, { overflow: 'hidden', marginBottom: 10 }]}>
                       <View style={[S.parsedRow, { borderBottomColor: theme.sep, borderBottomWidth: 1 }]}>
                         <Text style={[S.parsedRowLabel, { color: theme.textSec }]}>Merchant</Text>
                         <TextInput
@@ -351,8 +407,8 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
                     </View>
 
                     {/* Category */}
-                    <Text style={[S.sectionLabel, { color: theme.textTer, marginBottom: 8 }]}>Category</Text>
-                    <View style={{ marginBottom: 14 }}>
+                    <Text style={[S.sectionLabel, { color: theme.textTer, marginBottom: 6 }]}>Category</Text>
+                    <View style={{ marginBottom: 10 }}>
                       <CategoryPicker
                         theme={theme}
                         activeCat={manualCat}
@@ -458,52 +514,107 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  headerBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    minWidth: 56,
   },
   voiceCenter: {
     alignItems: 'center',
     paddingHorizontal: 28,
+    paddingTop: 12,
     paddingBottom: 16,
-    paddingTop: 4,
   },
-  transcriptArea: {
+  topZone: {
     width: '100%',
-    minHeight: 48,
+    minHeight: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 48,
-    gap: 3,
     marginBottom: 16,
+    gap: 4,
   },
-  waveBar: {
-    width: 3,
-    height: 32,
-    borderRadius: 2,
+  hintMeta: {
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: -0.1,
+    marginBottom: 4,
+  },
+  hintExample: {
+    fontSize: 14,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  hintSub: {
+    fontSize: 14,
+    fontWeight: '500',
+    letterSpacing: -0.2,
+    textAlign: 'center',
+  },
+  transcriptLive: {
+    fontSize: 18,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+    textAlign: 'center',
+    lineHeight: 26,
+  },
+  micZone: {
+    width: 88,
+    height: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  ring: {
+    position: 'absolute',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
   },
   micBtn: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stopSquare: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 5,
   },
-  manualLink: {
+  stateLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: -0.1,
+    marginBottom: 12,
+  },
+  waveform: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 18,
-    paddingVertical: 10,
-    paddingHorizontal: 4,
+    justifyContent: 'center',
+    height: 40,
+    gap: 3,
+    marginBottom: 16,
+    width: '100%',
+  },
+  waveBar: {
+    width: 3,
+    height: 36,
+    borderRadius: 2,
+  },
+  manualBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderRadius: 100,
+    borderWidth: 1,
     minHeight: 44,
   },
   voiceLink: {

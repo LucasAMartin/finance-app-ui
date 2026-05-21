@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { SpendGroup } from '../data';
 import { Icon } from './Icon';
+import { TYPE } from '../typography';
 
 interface Props {
   theme: Theme;
@@ -52,8 +53,8 @@ function GroupPanel({
     : actualPct <= group.targetPct * 1.05;
   const barColor = onTrack ? color : OVER_DOT;
   const statusText = goodWhenOver
-    ? onTrack ? 'on track' : 'below target'
-    : onTrack ? 'on track' : 'over budget';
+    ? onTrack ? 'On Track' : 'Below Target'
+    : onTrack ? 'On Track' : 'Over Budget';
 
   // Very subtle group-tinted header background
   const headerTint = theme.dark
@@ -73,7 +74,7 @@ function GroupPanel({
           <View style={s.labelRow}>
             <View style={[s.groupDot, { backgroundColor: color }]} />
             <Text style={[s.groupLabel, { color }]}>
-              {group.label.toUpperCase()}
+              {group.label}
             </Text>
           </View>
           <Text style={[s.groupTotal, { color: theme.text }]}>
@@ -266,14 +267,14 @@ const s = StyleSheet.create({
     borderRadius: 4,
   },
   groupLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.7,
+    ...TYPE.labelLg,
+    textTransform: 'none',
+    letterSpacing: 0,
+    fontSize: 16,
+    lineHeight: 18,
   },
   groupTotal: {
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: -0.3,
+    ...TYPE.subsectionTitle,
   },
   track: {
     height: 6,
@@ -286,8 +287,8 @@ const s = StyleSheet.create({
     borderRadius: 3,
   },
   meta: {
-    fontSize: 11,
-    fontWeight: '500',
+    ...TYPE.labelLg,
+    textTransform: 'none',
     letterSpacing: -0.1,
   },
 
@@ -321,9 +322,7 @@ const s = StyleSheet.create({
     marginBottom: 5,
   },
   subName: {
-    fontSize: 13,
-    fontWeight: '500',
-    letterSpacing: -0.2,
+    ...TYPE.bodySm,
     flex: 1,
     marginRight: 8,
   },
@@ -333,18 +332,16 @@ const s = StyleSheet.create({
     flexShrink: 0,
   },
   check: {
-    fontSize: 11,
-    fontWeight: '700',
+    ...TYPE.captionEm,
   },
   subSpent: {
-    fontSize: 12,
-    fontWeight: '600',
+    ...TYPE.captionEm,
     letterSpacing: -0.2,
   },
   subBudget: {
+    ...TYPE.caption,
     fontSize: 11,
-    fontWeight: '400',
-    letterSpacing: -0.1,
+    lineHeight: 14,
   },
   subTrack: {
     height: 4,
@@ -372,13 +369,10 @@ const s = StyleSheet.create({
   },
   wantLabel: {
     flex: 1,
-    fontSize: 13,
-    fontWeight: '500',
-    letterSpacing: -0.2,
+    ...TYPE.bodySm,
   },
   wantAmt: {
-    fontSize: 12,
-    fontWeight: '600',
+    ...TYPE.captionEm,
     letterSpacing: -0.2,
   },
 });

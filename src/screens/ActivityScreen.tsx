@@ -26,6 +26,7 @@ import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
 import { Theme, catGroupColor, GROUP_COLORS, cautionBg, cautionText, flagBg } from '../theme';
+import { TYPE } from '../typography';
 
 const SWIPE_W = 72;
 
@@ -247,7 +248,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
         {/* ── Inline calendar ──────────────────────────────────── */}
         <View style={[S.calInline, { backgroundColor: theme.chipBg }]}>
           {calOpen && (
-            <View style={{ paddingHorizontal: 12, paddingTop: 4 }}>
+            <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 8 }}>
               <TransactionCalendar
                 theme={theme}
                 year={calViewYear}
@@ -278,7 +279,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
             </View>
           )}
 
-          {/* Drag handle (open) / expand row (closed) */}
+          {/* Tap to toggle calendar */}
           <Pressable
             onPress={() => setCalOpen(o => !o)}
             pointerEvents="box-only"
@@ -287,24 +288,22 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
             accessibilityLabel={calOpen ? 'Hide calendar' : 'Show calendar'}
             accessibilityState={{ expanded: calOpen }}
           >
-            {calOpen ? (
-              <View style={[S.calHandleBar, { backgroundColor: theme.hairline }]} />
-            ) : (
-              <View style={S.calShowRow}>
-                <Icon name="cal" size={12} color={theme.textTer} stroke={1.5} />
-                <Text style={[S.calShowText, { color: theme.textTer }]}>Show calendar</Text>
-                {selectedDay !== null && (
-                  <View style={[S.calActiveDot, { backgroundColor: theme.textSec }]} />
-                )}
-                <View style={{ flex: 1 }} />
-                <Icon name="chevDown" size={10} color={theme.textTer} stroke={1.8} />
-              </View>
-            )}
+            <View style={S.calShowRow}>
+              <Icon name="cal" size={12} color={theme.textSec} stroke={1.5} />
+              <Text style={[S.calShowText, { color: theme.textSec }]}>
+                {calOpen ? 'Hide calendar' : 'Show calendar'}
+              </Text>
+              {selectedDay !== null && (
+                <View style={[S.calActiveDot, { backgroundColor: theme.textSec }]} />
+              )}
+              <View style={{ flex: 1 }} />
+              <Icon name={calOpen ? 'chevUp' : 'chevDown'} size={10} color={theme.textSec} stroke={1.8} />
+            </View>
           </Pressable>
         </View>
 
         {/* ── Search + filter ──────────────────────────────────── */}
-        <View style={[S.searchRow, { paddingHorizontal: 20, marginTop: 8, marginBottom: 8 }]}>
+        <View style={[S.searchRow, { paddingHorizontal: 20, marginBottom: 12 }]}>
           <View style={[S.search, { flex: 1, backgroundColor: theme.surface, borderColor: theme.hairline }]}>
             <Icon name="search" size={16} color={theme.textSec} />
             <TextInput
@@ -348,7 +347,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={{ paddingLeft: 20, marginBottom: 6 }}
+            style={{ paddingLeft: 20, marginBottom: 8 }}
             contentContainerStyle={S.filterStripScroll}
             keyboardShouldPersistTaps="handled"
           >
@@ -423,14 +422,6 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
         <View style={{ paddingHorizontal: 20 }}>
           {selectedDay !== null ? (
             <>
-              <View style={S.detailHeader}>
-                <Text style={[S.detailDate, { color: theme.text }]}>
-                  {MONTHS[calViewMonth]} {selectedDay}
-                </Text>
-                <Text style={[S.detailDow, { color: theme.textSec }]}>
-                  {WEEKDAY_NAMES[new Date(calViewYear, calViewMonth, selectedDay).getDay()]}
-                </Text>
-              </View>
               {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
                 <Text style={[S.detailEmpty, { color: theme.textTer }]}>No activity this day</Text>
               ) : (
@@ -590,7 +581,7 @@ function FilterSheet({
                 {/* ── Sort by ────────────────────────────────────── */}
                 <View style={[FS.groupDivider, { paddingTop: 18 }]}>
                   <View style={{ height: 1, width: 14, backgroundColor: theme.hairline }} />
-                  <Text style={[FS.groupDividerLabel, { color: theme.textTer }]}>SORT BY</Text>
+                  <Text style={[FS.groupDividerLabel, { color: theme.textTer }]}>Sort by</Text>
                   <View style={{ height: 1, flex: 1, backgroundColor: theme.hairline }} />
                   {activeCount > 0 && (
                     <TouchableOpacity
@@ -626,7 +617,7 @@ function FilterSheet({
                 {/* ── Date presets ───────────────────────────────── */}
                 <View style={FS.groupDivider}>
                   <View style={{ height: 1, width: 14, backgroundColor: theme.hairline }} />
-                  <Text style={[FS.groupDividerLabel, { color: theme.textTer }]}>DATE</Text>
+                  <Text style={[FS.groupDividerLabel, { color: theme.textTer }]}>Date</Text>
                   <View style={{ height: 1, flex: 1, backgroundColor: theme.hairline }} />
                 </View>
 
@@ -711,7 +702,7 @@ function FilterSheet({
                       <View style={FS.groupDivider}>
                         <View style={{ height: 1, width: 14, backgroundColor: groupColor + '40' }} />
                         <Text style={[FS.groupDividerLabel, { color: groupColor }]}>
-                          {g.label.toUpperCase()}
+                          {g.label}
                         </Text>
                         <View style={{ height: 1, flex: 1, backgroundColor: groupColor + '40' }} />
                       </View>
@@ -746,7 +737,8 @@ function FilterSheet({
                               </View>
                               <Text style={[
                                 FS.catName,
-                                { color: active ? theme.text : theme.textSec, fontWeight: active ? '600' : '400' },
+                                active && TYPE.body,
+                                { color: active ? theme.text : theme.textSec },
                               ]}>
                                 {c.label}
                               </Text>
@@ -905,11 +897,8 @@ function MiniCalendar({
                 <View style={[CAL.dayCircle, selected && { backgroundColor: theme.text }]}>
                   <Text
                     style={[
-                      CAL.dayText,
-                      {
-                        color:      selected ? theme.bg : inRange ? theme.text : theme.textSec,
-                        fontWeight: selected ? '600' : '400',
-                      },
+                      selected ? TYPE.bodySmEm : TYPE.bodySm,
+                      { color: selected ? theme.bg : inRange ? theme.text : theme.textSec },
                     ]}
                   >
                     {day}
@@ -924,14 +913,14 @@ function MiniCalendar({
       {(from || to) && (
         <View style={[CAL.summary, { borderTopColor: theme.sep }]}>
           <View style={CAL.summaryItem}>
-            <Text style={[CAL.summaryLabel, { color: theme.textTer }]}>FROM</Text>
+            <Text style={[CAL.summaryLabel, { color: theme.textTer }]}>From</Text>
             <Text style={[CAL.summaryValue, { color: from ? theme.text : theme.textTer }]}>
               {from ? fmtDate(from) : '—'}
             </Text>
           </View>
           <View style={[CAL.summarySep, { backgroundColor: theme.hairline }]} />
           <View style={CAL.summaryItem}>
-            <Text style={[CAL.summaryLabel, { color: theme.textTer }]}>TO</Text>
+            <Text style={[CAL.summaryLabel, { color: theme.textTer }]}>To</Text>
             <Text style={[CAL.summaryValue, { color: to ? theme.text : theme.textTer }]}>
               {to ? fmtDate(to) : '—'}
             </Text>
@@ -952,7 +941,7 @@ function DayGroup({
   theme: Theme;
   onPress: (tx: Transaction) => void;
 }) {
-  const { txs, total } = group;
+  const { txs } = group;
   const label =
     txs[0]?.when === 'today'     ? 'Today'
     : txs[0]?.when === 'yesterday' ? 'Yesterday'
@@ -960,9 +949,9 @@ function DayGroup({
 
   return (
     <View style={{ marginBottom: 24 }}>
+      <View style={[S.groupSep, { backgroundColor: theme.hairline }]} />
       <View style={S.dayHeader}>
         <Text style={[S.dayLabel, { color: theme.text }]}>{label}</Text>
-        <Money value={total} size={14} weight="600" theme={theme} color={theme.textSec} prefix="$" />
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
@@ -1053,14 +1042,7 @@ function TxRow({
       onPress={onPress}
       delayPressIn={0}
       activeOpacity={0.6}
-      style={[
-        S.txRow,
-        {
-          backgroundColor:   theme.bg,
-          borderBottomWidth: last ? 0 : 1,
-          borderBottomColor: theme.sep,
-        },
-      ]}
+      style={[S.txRow, { backgroundColor: theme.bg }]}
       accessibilityRole="button"
       accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, $${tx.amount.toFixed(2)}`}
     >
@@ -1076,7 +1058,8 @@ function TxRow({
         </View>
         <Text style={[S.txMeta, { color: theme.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Money value={tx.amount} size={14} weight="500" theme={theme} color={theme.text} />
+      <Money value={tx.amount} size={13} weight="500" theme={theme} color={theme.textSec} />
+      {!last && <View style={[S.rowSep, { backgroundColor: theme.sep }]} />}
     </TouchableOpacity>
   );
 }
@@ -1086,12 +1069,7 @@ function TxRow({
 function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last: boolean }) {
   const groupColor = catGroupColor(bill.cat, theme.dark);
   return (
-    <View
-      style={[
-        S.txRow,
-        { borderBottomWidth: last ? 0 : 1, borderBottomColor: theme.sep },
-      ]}
-    >
+    <View style={S.txRow}>
       <View style={[S.billIcon, { borderColor: groupColor }]}>
         <Icon name={bill.icon} size={15} color={groupColor} stroke={1.7} />
       </View>
@@ -1116,9 +1094,10 @@ function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last
           prefix="$"
         />
         <View style={[S.upcomingPill, { backgroundColor: cautionBg(theme.dark) }]}>
-          <Text style={[S.upcomingText, { color: cautionText(theme.dark) }]}>UPCOMING</Text>
+          <Text style={[S.upcomingText, { color: cautionText(theme.dark) }]}>Upcoming</Text>
         </View>
       </View>
+      {!last && <View style={[S.rowSep, { backgroundColor: theme.sep }]} />}
     </View>
   );
 }
@@ -1167,24 +1146,21 @@ const S = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   title: {
-    fontSize: 17, fontWeight: '700', letterSpacing: -0.4,
+    ...TYPE.pageTitle,
   },
   // Inline calendar
   calInline: {
     marginHorizontal: 20,
-    marginTop: 4,
-    marginBottom: 10,
+    marginTop: 8,
+    marginBottom: 12,
     borderRadius: 16,
     overflow: 'hidden',
   },
   calHandle: {
-    paddingVertical: 10,
+    paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
     borderTopWidth: 1,
-  },
-  calHandleBar: {
-    width: 32, height: 4, borderRadius: 2,
   },
   calShowRow: {
     flexDirection: 'row',
@@ -1194,7 +1170,7 @@ const S = StyleSheet.create({
     width: '100%',
   },
   calShowText: {
-    fontSize: 12, fontWeight: '500', letterSpacing: -0.1,
+    ...TYPE.caption,
   },
   calActiveDot: {
     width: 6, height: 6, borderRadius: 3,
@@ -1207,7 +1183,7 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderRadius: 16, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1,
   },
-  searchInput: { flex: 1, fontSize: 14, padding: 0 },
+  searchInput: { flex: 1, ...TYPE.bodyRegular, padding: 0 },
   filterBtn: {
     borderRadius: 16,
     paddingHorizontal: 14,
@@ -1222,14 +1198,14 @@ const S = StyleSheet.create({
     width: 16, height: 16, borderRadius: 8,
     alignItems: 'center', justifyContent: 'center',
   },
-  filterBadgeText: { fontSize: 10, fontWeight: '700' },
+  filterBadgeText: { ...TYPE.label, letterSpacing: 0 },
   filterPill: {
     flexDirection: 'row', alignItems: 'center',
     paddingLeft: 11, paddingRight: 8, paddingVertical: 6,
     borderRadius: 100, gap: 5,
   },
   filterPillText: {
-    fontSize: 12, fontWeight: '500', letterSpacing: -0.1,
+    ...TYPE.caption,
   },
   filterStrip: {
     flexDirection: 'row', alignItems: 'center',
@@ -1242,7 +1218,7 @@ const S = StyleSheet.create({
     borderRadius: 100,
   },
   emptyClearText: {
-    fontSize: 13, fontWeight: '500', letterSpacing: -0.1,
+    ...TYPE.bodySm,
   },
   // Day detail
   detailHeader: {
@@ -1252,18 +1228,19 @@ const S = StyleSheet.create({
     marginBottom: 14,
   },
   detailDate: {
-    fontSize: 17, fontWeight: '700', letterSpacing: -0.4,
+    ...TYPE.pageTitle,
     marginBottom: 2,
   },
   detailDow: {
-    fontSize: 13, fontWeight: '400',
+    ...TYPE.bodySm,
   },
   detailClear: {
     width: 28, height: 28, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
   },
   detailEmpty: {
-    fontSize: 13, paddingHorizontal: 2, paddingBottom: 8,
+    ...TYPE.bodySm,
+    paddingHorizontal: 2, paddingBottom: 8,
   },
   // Rows
   nameRow: {
@@ -1277,15 +1254,28 @@ const S = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 100,
   },
   upcomingText: {
-    fontSize: 9, fontWeight: '700', letterSpacing: 0.4,
+    ...TYPE.labelSm,
+    textTransform: 'none',
+    letterSpacing: 0,
+  },
+  groupSep: {
+    height: 1,
+    marginHorizontal: -20,
+    marginBottom: 16,
+  },
+  rowSep: {
+    position: 'absolute',
+    bottom: 0,
+    left: 48,
+    right: 0,
+    height: 1,
   },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'baseline', paddingHorizontal: 2, marginBottom: 8,
+    alignItems: 'baseline', paddingHorizontal: 2, marginBottom: 10,
   },
   dayLabel: {
-    fontSize: 11, fontWeight: '600',
-    letterSpacing: 0.4, textTransform: 'uppercase',
+    ...TYPE.txDateLabel,
   },
   swipeAction: {
     position: 'absolute', right: 0, top: 0, bottom: 0,
@@ -1299,11 +1289,11 @@ const S = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  txName: { fontSize: 14, fontWeight: '600', letterSpacing: -0.2 },
-  txMeta: { fontSize: 12, marginTop: 1 },
+  txName: { ...TYPE.body },
+  txMeta: { ...TYPE.caption, marginTop: 2 },
   empty:      { alignItems: 'center', paddingTop: 64, paddingBottom: 40 },
-  emptyTitle: { fontSize: 15, fontWeight: '600', marginTop: 12 },
-  emptyBody:  { fontSize: 13, marginTop: 5, textAlign: 'center', lineHeight: 20 },
+  emptyTitle: { ...TYPE.subsectionTitle, marginTop: 12 },
+  emptyBody:  { ...TYPE.bodySm, marginTop: 5, textAlign: 'center', lineHeight: 20 },
 });
 
 // ─── FilterSheet styles ───────────────────────────────────────────────────────
@@ -1322,10 +1312,10 @@ const FS = StyleSheet.create({
     paddingBottom: 16,
   },
   title: {
-    fontSize: 17, fontWeight: '700', letterSpacing: -0.5,
+    ...TYPE.pageTitle,
   },
   clearLink: {
-    fontSize: 13, fontWeight: '500', letterSpacing: -0.1,
+    ...TYPE.bodySm,
   },
 
   // Category section
@@ -1338,7 +1328,9 @@ const FS = StyleSheet.create({
     gap: 10,
   },
   groupDividerLabel: {
-    fontSize: 9, fontWeight: '700', letterSpacing: 0.9,
+    ...TYPE.labelSm,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   catRow: {
     flexDirection: 'row',
@@ -1353,14 +1345,14 @@ const FS = StyleSheet.create({
     flexShrink: 0,
   },
   catName: {
-    flex: 1, fontSize: 14, letterSpacing: -0.2,
+    flex: 1, ...TYPE.bodyRegular,
   },
   activeDot: {
     width: 7, height: 7, borderRadius: 3.5, flexShrink: 0,
   },
   groupEmpty: {
     paddingHorizontal: 22, paddingVertical: 10,
-    fontSize: 12, fontStyle: 'italic',
+    ...TYPE.caption, fontStyle: 'italic',
   },
 
   // Date section
@@ -1379,7 +1371,7 @@ const FS = StyleSheet.create({
     borderRadius: 10,
   },
   dateCellText: {
-    fontSize: 13, fontWeight: '500', letterSpacing: -0.2,
+    ...TYPE.bodySm,
   },
   dateCustomRow: {
     flexDirection: 'row',
@@ -1391,7 +1383,7 @@ const FS = StyleSheet.create({
     gap: 10,
   },
   dateCustomText: {
-    flex: 1, fontSize: 13, fontWeight: '500', letterSpacing: -0.2,
+    flex: 1, ...TYPE.bodySm,
   },
 
   // Sort by section
@@ -1411,7 +1403,7 @@ const FS = StyleSheet.create({
     alignItems: 'center',
   },
   sortCellText: {
-    fontSize: 13, fontWeight: '500', letterSpacing: -0.2,
+    ...TYPE.bodySm,
   },
 });
 
@@ -1426,7 +1418,7 @@ const CAL = StyleSheet.create({
     marginBottom: 14,
   },
   monthLabel: {
-    fontSize: 13, fontWeight: '600', letterSpacing: -0.2,
+    ...TYPE.bodySmEm,
   },
   dowRow: {
     flexDirection: 'row', marginBottom: 2,
@@ -1435,7 +1427,9 @@ const CAL = StyleSheet.create({
     flex: 1, alignItems: 'center', paddingVertical: 4,
   },
   dowText: {
-    fontSize: 10, fontWeight: '600', letterSpacing: 0.3,
+    ...TYPE.label,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   weekRow: {
     flexDirection: 'row',
@@ -1449,6 +1443,7 @@ const CAL = StyleSheet.create({
   },
   dayText: {
     fontSize: 13,
+    lineHeight: 16,
   },
   summary: {
     flexDirection: 'row', alignItems: 'center',
@@ -1458,10 +1453,12 @@ const CAL = StyleSheet.create({
     flex: 1, alignItems: 'center', gap: 3,
   },
   summaryLabel: {
-    fontSize: 9, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase',
+    ...TYPE.label,
+    textTransform: 'none',
+    letterSpacing: 0,
   },
   summaryValue: {
-    fontSize: 14, fontWeight: '600', letterSpacing: -0.3,
+    ...TYPE.body,
   },
   summarySep: {
     width: 1, height: 28,

@@ -8,6 +8,7 @@ import { Segmented, SectionHeader } from '../components/shared';
 import { TrendChart } from '../components/TrendChart';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { PieChart } from '../components/PieChart';
+import { TYPE } from '../typography';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CHART_W = SCREEN_W - 40;
@@ -89,7 +90,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
         <IconBtn onPress={onOpenDrawer}>
           <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
         </IconBtn>
-        <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.4, color: theme.text }}>
+        <Text style={[TYPE.pageTitle, { color: theme.text }]}>
           Insights
         </Text>
         <ThemeToggle />
@@ -191,7 +192,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                     </View>
                   </View>
                   <View style={[styles.pctBadge, { backgroundColor: over ? overBg(theme.dark) : theme.chipBg }]}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: over ? overText(theme.dark) : theme.textSec }}>
+                    <Text style={[TYPE.labelLg, { color: over ? overText(theme.dark) : theme.textSec }]}>
                       {pct}%
                     </Text>
                   </View>
@@ -200,7 +201,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                 {/* Transactions in this category */}
                 {catTxs.length === 0 ? (
                   <View style={{ padding: 16 }}>
-                    <Text style={{ fontSize: 13, color: theme.textSec }}>No transactions this period</Text>
+                    <Text style={[TYPE.bodySm, { color: theme.textSec }]}>No transactions this period</Text>
                   </View>
                 ) : catTxs.map((tx, i) => (
                   <View
@@ -214,11 +215,11 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                       <Text style={[styles.catLabel, { color: theme.text }]} numberOfLines={1}>
                         {tx.merchant}
                       </Text>
-                      <Text style={{ fontSize: 11.5, color: theme.textSec, marginTop: 2 }}>
+                      <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
                         {tx.date} · {tx.time}
                       </Text>
                     </View>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.3 }}>
+                    <Text style={[TYPE.body, { color: theme.text }]}>
                       ${tx.amount.toFixed(2)}
                     </Text>
                   </View>
@@ -252,7 +253,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                   </View>
                   <View style={{ flex: 1, marginLeft: 12 }}>
                     <Text style={[styles.catLabel, { color: theme.text }]}>{cat?.label}</Text>
-                    <Text style={{ fontSize: 11.5, color: theme.textSec, marginTop: 2 }}>
+                    <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
                       ${absAmt} {isUp ? 'more' : 'less'} {VS_LABEL[period]}
                     </Text>
                   </View>
@@ -295,11 +296,11 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                     <Text style={[styles.catLabel, { color: theme.text }]} numberOfLines={1}>
                       {tx.merchant}
                     </Text>
-                    <Text style={{ fontSize: 11.5, color: theme.textSec, marginTop: 2 }}>
+                    <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
                       {cat?.label} · {tx.date}
                     </Text>
                   </View>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, letterSpacing: -0.3 }}>
+                  <Text style={[TYPE.body, { color: theme.text }]}>
                     ${tx.amount.toFixed(2)}
                   </Text>
                 </View>
@@ -331,8 +332,7 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   eyebrow: {
-    fontSize: 10,
-    fontWeight: '600',
+    ...TYPE.label,
     letterSpacing: 0.8,
     marginBottom: 10,
   },
@@ -343,10 +343,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   amountText: {
-    fontSize: 52,
-    fontWeight: '700',
-    letterSpacing: -2.5,
-    lineHeight: 56,
+    ...TYPE.displayXl,
   },
   deltaBadge: {
     paddingHorizontal: 10,
@@ -356,14 +353,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   deltaText: {
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: -0.2,
+    ...TYPE.bodySmEm,
   },
   budgetCtx: {
-    fontSize: 13,
-    fontWeight: '500',
-    letterSpacing: -0.1,
+    ...TYPE.bodySm,
   },
   catRow: {
     flexDirection: 'row',
@@ -387,14 +380,10 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   catLabel: {
-    fontSize: 13.5,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    ...TYPE.bodySmEm,
   },
   catAmount: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    ...TYPE.bodySmEm,
   },
   progressTrack: {
     height: 3,
@@ -426,9 +415,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   moverPct: {
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: -0.2,
+    ...TYPE.bodySmEm,
   },
   txRow: {
     flexDirection: 'row',
