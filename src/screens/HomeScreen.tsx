@@ -119,7 +119,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
   return (
     <View style={{ flex: 1, backgroundColor: HERO_BG }}>
       {/* White backdrop covers bottom half — absorbs bounce without affecting scroll */}
-      <View style={{ position: 'absolute', top: '50%', left: 0, right: 0, bottom: 0, backgroundColor: theme.surface }} pointerEvents="none" />
+      <View style={{ position: 'absolute', top: '50%', left: 0, right: 0, bottom: 0, backgroundColor: theme.bg }} pointerEvents="none" />
       {/* ─── Header — pinned ─────────────────────────────── */}
       <View style={[styles.headerWrap, { paddingTop: insets.top + 8, backgroundColor: HERO_BG }]}>
         <View style={styles.headerRow}>
@@ -145,7 +145,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
             tintColor={H_SEC} colors={[theme.accent.dot]}
-            progressBackgroundColor={theme.surface} />
+            progressBackgroundColor={theme.bg} />
         }
       >
       {/* ─── Budget hero ─────────────────────────────────── */}
@@ -236,7 +236,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
       </View>
 
         {/* ─── Card — same ScrollView, always on top of hero ── */}
-        <View style={[styles.contentPanel, { backgroundColor: theme.surface, marginTop: -28 }]}>
+        <View style={[styles.contentPanel, { backgroundColor: theme.bg, marginTop: -28 }]}>
 
           {/* ─── Spending by category ─────────────────────── */}
           <View style={styles.section}>

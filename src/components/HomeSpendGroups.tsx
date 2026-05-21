@@ -1,8 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, TouchableOpacity, View, Text, StyleSheet } from 'react-native';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { SpendGroup } from '../data';
 import { Icon } from './Icon';
+import { Collapsible } from './Collapsible';
 import { TYPE } from '../typography';
 
 interface Props {
@@ -42,88 +43,95 @@ function GroupPanel({
   last: boolean;
   compact?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const rot = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(rot, {
+      toValue: open ? 1 : 0,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [open]);
+
+  const chevRotate = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+
   const color = theme.dark ? GROUP_COLORS[group.key].dark : GROUP_COLORS[group.key].light;
   const groupTotal = group.subs.reduce((s, x) => s + x.spent, 0);
   const actualPct = income > 0 ? groupTotal / income : 0;
   const fill = Math.min(actualPct / group.targetPct, 1);
-
-  const goodWhenOver = group.key === 'savings';
-  const onTrack = goodWhenOver
+  const isSavings = group.key === 'savings';
+  const onTrack = isSavings
     ? actualPct >= group.targetPct * 0.9
     : actualPct <= group.targetPct * 1.05;
   const barColor = onTrack ? color : OVER_DOT;
-  const statusText = goodWhenOver
+  const statusText = isSavings
     ? onTrack ? 'On Track' : 'Below Target'
     : onTrack ? 'On Track' : 'Over Budget';
 
-  // Very subtle group-tinted header background
-  const headerTint = theme.dark
-    ? `${color}12`
-    : `${color}0D`;
+  const headerTint = theme.dark ? `${color}12` : `${color}0D`;
 
   return (
-    <View
-      style={[
-        s.panel,
-        { borderBottomColor: theme.sep, borderBottomWidth: last ? 0 : 1 },
-      ]}
-    >
-      {/* Tinted header zone */}
-      <View style={[s.headerZone, { backgroundColor: headerTint }]}>
-        <View style={s.headerRow}>
-          <View style={s.labelRow}>
-            <View style={[s.groupDot, { backgroundColor: color }]} />
-            <Text style={[s.groupLabel, { color }]}>
-              {group.label}
-            </Text>
+    <View style={[s.panel, { borderBottomColor: theme.sep, borderBottomWidth: last ? 0 : 1 }]}>
+      {/* Tinted container — grows to contain both header and expanded sub-rows */}
+      <View style={[s.tintedContainer, { backgroundColor: headerTint }]}>
+
+        {/* Press target is header area only — Collapsible is a sibling below */}
+        <TouchableOpacity
+          onPress={() => setOpen(o => !o)}
+          activeOpacity={0.7}
+          delayPressIn={0}
+          style={s.headerContent}
+        >
+          <View style={s.headerRow}>
+            <View style={s.labelRow}>
+              <View style={[s.groupDot, { backgroundColor: color }]} />
+              <Text style={[s.groupLabel, { color }]}>{group.label}</Text>
+            </View>
+            <View style={s.totalRow}>
+              <Text style={[s.groupTotal, { color: theme.text }]}>
+                ${groupTotal.toLocaleString()}
+              </Text>
+              <Animated.View style={{ transform: [{ rotate: chevRotate }] }}>
+                <Icon name="chevDown" size={14} color={color} stroke={2.2} />
+              </Animated.View>
+            </View>
           </View>
-          <Text style={[s.groupTotal, { color: theme.text }]}>
-            ${groupTotal.toLocaleString()}
-          </Text>
-        </View>
 
-        <View style={[s.track, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)' }]}>
-          <View style={[s.fill, { width: `${fill * 100}%`, backgroundColor: barColor }]} />
-        </View>
+          <View style={[s.track, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)' }]}>
+            <View style={[s.fill, { width: `${fill * 100}%`, backgroundColor: barColor }]} />
+          </View>
 
-        <Text style={[s.meta, { color: theme.textTer }]}>
-          {Math.round(actualPct * 100)}% of {Math.round(group.targetPct * 100)}% target
-          {'  ·  '}
-          <Text style={{ color: onTrack ? color : OVER_DOT }}>
-            {statusText}
+          <Text style={[s.meta, { color: theme.textTer }]}>
+            {Math.round(actualPct * 100)}% of {Math.round(group.targetPct * 100)}% target
+            {'  ·  '}
+            <Text style={{ color: onTrack ? color : OVER_DOT }}>{statusText}</Text>
           </Text>
-        </Text>
+        </TouchableOpacity>
+
+        {/* Sibling to the touch target — expands the tinted container downward */}
+        <Collapsible open={open}>
+          <View style={s.subContent}>
+            {group.key === 'wants' ? (
+              <WantsChips theme={theme} group={group} color={color} />
+            ) : (
+              <DetailRows theme={theme} group={group} color={color} isSavings={isSavings} />
+            )}
+          </View>
+        </Collapsible>
+
       </View>
-
-      {!compact && (
-        <View style={s.subContent}>
-          {group.key === 'wants' ? (
-            <WantsChips theme={theme} group={group} color={color} />
-          ) : (
-            <DetailRows
-              theme={theme}
-              group={group}
-              color={color}
-              isSavings={group.key === 'savings'}
-            />
-          )}
-        </View>
-      )}
     </View>
   );
 }
 
-// Needs / Savings: compact always-visible rows with individual progress bars
+// ── Sub-content components ───────────────────────────────────────
+
 function DetailRows({
-  theme,
-  group,
-  color,
-  isSavings,
+  theme, group, color, isSavings,
 }: {
-  theme: Theme;
-  group: SpendGroup;
-  color: string;
-  isSavings: boolean;
+  theme: Theme; group: SpendGroup; color: string; isSavings: boolean;
 }) {
   return (
     <View style={s.detailList}>
@@ -131,7 +139,6 @@ function DetailRows({
         const pct = sub.budget > 0 ? Math.min(sub.spent / sub.budget, 1) : 0;
         const over = !isSavings && sub.spent > sub.budget;
         const funded = sub.spent >= sub.budget;
-        const subBarColor = over ? OVER_DOT : color;
 
         return (
           <View key={sub.label} style={s.detailRow}>
@@ -158,9 +165,7 @@ function DetailRows({
                 </View>
               </View>
               <View style={[s.subTrack, { backgroundColor: theme.hairline }]}>
-                <View
-                  style={[s.subFill, { width: `${pct * 100}%`, backgroundColor: subBarColor }]}
-                />
+                <View style={[s.subFill, { width: `${pct * 100}%`, backgroundColor: over ? OVER_DOT : color }]} />
               </View>
             </View>
           </View>
@@ -171,19 +176,14 @@ function DetailRows({
 }
 
 function WantsChips({
-  theme,
-  group,
-  color,
+  theme, group, color,
 }: {
-  theme: Theme;
-  group: SpendGroup;
-  color: string;
+  theme: Theme; group: SpendGroup; color: string;
 }) {
   const total = group.subs.reduce((s, x) => s + x.spent, 0);
 
   return (
     <View>
-      {/* Proportional breakdown bar */}
       <View style={s.propBar}>
         {group.subs.map((sub, i) => {
           const ratio = total > 0 ? sub.spent / total : 0;
@@ -207,18 +207,13 @@ function WantsChips({
           );
         })}
       </View>
-
-      {/* Rows — same language as DetailRows, without per-item progress bars */}
       <View>
         {group.subs.map((sub, i) => (
           <View
             key={sub.label}
             style={[
               s.wantRow,
-              {
-                borderBottomWidth: i < group.subs.length - 1 ? 1 : 0,
-                borderBottomColor: theme.hairline,
-              },
+              { borderBottomWidth: i < group.subs.length - 1 ? 1 : 0, borderBottomColor: theme.hairline },
             ]}
           >
             <View style={[s.iconWrap, { backgroundColor: `${color}18` }]}>
@@ -241,14 +236,14 @@ const s = StyleSheet.create({
   panel: {
     paddingBottom: 4,
   },
-
-  // Tinted header
-  headerZone: {
+  tintedContainer: {
+    borderRadius: 10,
+    marginBottom: 2,
+  },
+  headerContent: {
     paddingHorizontal: 12,
     paddingTop: 14,
     paddingBottom: 12,
-    borderRadius: 10,
-    marginBottom: 2,
   },
   headerRow: {
     flexDirection: 'row',
@@ -260,6 +255,11 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   groupDot: {
     width: 7,
@@ -291,14 +291,12 @@ const s = StyleSheet.create({
     textTransform: 'none',
     letterSpacing: -0.1,
   },
-
-  // Sub content wrapper
   subContent: {
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingHorizontal: 12,
+    paddingBottom: 14,
   },
 
-  // Detail rows (Needs / Savings)
+  // Detail rows
   detailList: {
     gap: 12,
   },
@@ -353,7 +351,7 @@ const s = StyleSheet.create({
     borderRadius: 2,
   },
 
-  // Wants: proportional bar + rows
+  // Wants
   propBar: {
     height: 5,
     flexDirection: 'row',

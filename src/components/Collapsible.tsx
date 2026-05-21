@@ -7,9 +7,9 @@ interface Props {
   duration?: number;
 }
 
-// Measures children once on mount, then animates a clipping wrapper between 0 and that height.
-// Opacity fades alongside the height for a softer reveal/hide. JS-driven (height can't run native)
-// but the content blocks here are small, so the JS-driven path stays smooth.
+// Measures children with an out-of-flow phantom view (absolute, opacity 0) so the
+// measurement never gets clipped or re-measured when the visible clipper animates.
+// The visible clipper animates between 0 and the measured height, with opacity easing.
 export function Collapsible({ open, children, duration = 260 }: Props) {
   const [contentH, setContentH] = useState<number | null>(null);
   const animH = useRef(new Animated.Value(0)).current;
@@ -21,12 +21,10 @@ export function Collapsible({ open, children, duration = 260 }: Props) {
     if (h <= 0) return;
     if (contentH == null || Math.abs(contentH - h) > 0.5) {
       setContentH(h);
-      // First measurement: snap to current open/closed state without animating
       if (!initialised.current) {
         animH.setValue(open ? h : 0);
         initialised.current = true;
       } else if (open) {
-        // Content grew/shrank while open — track new height immediately
         animH.setValue(h);
       }
     }
@@ -51,14 +49,25 @@ export function Collapsible({ open, children, duration = 260 }: Props) {
   }, [open, contentH, duration]);
 
   return (
-    <Animated.View
-      style={{
-        height: contentH == null ? undefined : animH,
-        opacity,
-        overflow: 'hidden',
-      }}
-    >
-      <View onLayout={onLayout}>{children}</View>
-    </Animated.View>
+    <View style={{ position: 'relative' }}>
+      {/* Phantom measurer: out of flow, invisible, never clipped — reports the natural height */}
+      <View
+        pointerEvents="none"
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, opacity: 0 }}
+        onLayout={onLayout}
+      >
+        {children}
+      </View>
+      {/* Visible clipper: drives the actual open/close animation */}
+      <Animated.View
+        style={{
+          height: contentH == null ? 0 : animH,
+          opacity,
+          overflow: 'hidden',
+        }}
+      >
+        {children}
+      </Animated.View>
+    </View>
   );
 }
