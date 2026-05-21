@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Theme } from '../theme';
+import { Picker, Text as SwiftText, Host } from '@expo/ui/swift-ui';
+import { pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
+import { Theme, catGroupColor } from '../theme';
 import { Icon } from './Icon';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -41,50 +43,6 @@ interface Props {
   overrideColors?: CalOverrideColors;
 }
 
-// ── Month picker ──────────────────────────────────────────────────────────────
-
-function MonthPicker({
-  viewYear, viewMonth, onSelect, clr,
-}: {
-  viewYear: number;
-  viewMonth: number;
-  onSelect: (year: number, month: number) => void;
-  clr: ReturnType<typeof resolveColors>;
-}) {
-  const years = [viewYear, viewYear - 1, viewYear - 2];
-  return (
-    <View style={P.container}>
-      {years.map(y => (
-        <View key={y} style={P.section}>
-          <Text style={[P.yearLabel, { color: clr.textTer }]}>{y}</Text>
-          <View style={P.monthGrid}>
-            {MONTH_ABBR.map((abbr, m) => {
-              const active = y === viewYear && m === viewMonth;
-              return (
-                <Pressable
-                  key={m}
-                  onPress={() => onSelect(y, m)}
-                  pointerEvents="box-only"
-                  style={P.monthCell}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${abbr} ${y}`}
-                  accessibilityState={{ selected: active }}
-                >
-                  <View style={[P.monthPill, active && { backgroundColor: clr.selectedBg }]}>
-                    <Text style={[P.monthText, { color: active ? clr.selectedText : clr.textSec }]}>
-                      {abbr}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 // ── Color resolver ─────────────────────────────────────────────────────────────
 
 function resolveColors(theme: Theme, override?: CalOverrideColors) {
@@ -107,9 +65,8 @@ export function TransactionCalendar({
   onSelectDay, onViewMonthChange, overrideColors,
 }: Props) {
   const clr = resolveColors(theme, overrideColors);
-  const [viewYear, setViewYear]     = useState(year);
-  const [viewMonth, setViewMonth]   = useState(month);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [viewYear, setViewYear]   = useState(year);
+  const [viewMonth, setViewMonth] = useState(month);
   const didMountRef = useRef(false);
 
   const firstDow    = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
@@ -126,7 +83,6 @@ export function TransactionCalendar({
   const navigateToMonth = (y: number, m: number) => {
     setViewYear(y);
     setViewMonth(m);
-    setPickerOpen(false);
   };
 
   const prevMonth = () => {
@@ -165,21 +121,24 @@ export function TransactionCalendar({
           <Icon name="chevL" size={18} color={clr.textSec} stroke={1.6} />
         </Pressable>
 
-        <Pressable
-          onPress={() => setPickerOpen(o => !o)}
-          pointerEvents="box-only"
-          style={styles.titleBtn}
-          accessibilityRole="button"
-          accessibilityLabel={`${MONTH_NAMES[viewMonth]} ${viewYear}, change month`}
-          accessibilityState={{ expanded: pickerOpen }}
-        >
-          <Text style={[styles.monthTitle, { color: clr.text }]}>
-            {MONTH_NAMES[viewMonth]} {viewYear}
-          </Text>
-          <View style={{ transform: [{ rotate: pickerOpen ? '180deg' : '0deg' }] }}>
-            <Icon name="chevDown" size={12} color={clr.textSec} stroke={1.8} />
-          </View>
-        </Pressable>
+        <Host style={{ flex: 1, height: 44 }}>
+          <Picker
+            selection={`${viewYear}-${viewMonth}`}
+            onSelectionChange={(val) => {
+              const [y, m] = (val as string).split('-').map(Number);
+              navigateToMonth(y, m);
+            }}
+            modifiers={[pickerStyle('menu'), tint(clr.text)]}
+          >
+            {[viewYear, viewYear - 1, viewYear - 2].flatMap(y =>
+              MONTH_NAMES.map((name, m) => (
+                <SwiftText key={`${y}-${m}`} modifiers={[tag(`${y}-${m}`)]}>
+                  {name} {y}
+                </SwiftText>
+              ))
+            )}
+          </Picker>
+        </Host>
 
         <Pressable
           onPress={nextMonth}
@@ -193,36 +152,28 @@ export function TransactionCalendar({
         </Pressable>
       </View>
 
-      {pickerOpen ? (
-        <MonthPicker
-          viewYear={viewYear}
-          viewMonth={viewMonth}
-          onSelect={navigateToMonth}
-          clr={clr}
-        />
-      ) : (
-        <>
-          {/* Weekday labels */}
-          <View style={styles.row}>
-            {WEEKDAYS.map((w, i) => (
-              <View key={i} style={styles.cell}>
-                <Text style={[styles.weekday, { color: clr.textSec }]}>{w}</Text>
-              </View>
-            ))}
-          </View>
+      <>
+        {/* Weekday labels */}
+        <View style={styles.row}>
+          {WEEKDAYS.map((w, i) => (
+            <View key={i} style={styles.cell}>
+              <Text style={[styles.weekday, { color: clr.textSec }]}>{w}</Text>
+            </View>
+          ))}
+        </View>
 
-          {/* Day grid */}
-          {weeks.map((week, wi) => (
-            <View key={wi} style={styles.row}>
-              {week.map((day, di) => {
+        {/* Day grid */}
+        {weeks.map((week, wi) => (
+          <View key={wi} style={styles.row}>
+            {week.map((day, di) => {
                 if (day == null) return <View key={di} style={styles.cell} />;
 
                 const mark       = marks[day];
                 const isSelected = day === selectedDay;
                 const isToday    = day === today;
 
-                const txCount   = Math.min(mark?.txCats.length ?? 0, MAX_DOTS);
-                const billCount = Math.min(mark?.billCats.length ?? 0, MAX_DOTS - txCount);
+                const txDotColors   = [...new Set((mark?.txCats   ?? []).map(c => catGroupColor(c, theme.dark)))].slice(0, MAX_DOTS);
+                const billDotColors = [...new Set((mark?.billCats ?? []).map(c => catGroupColor(c, theme.dark)))].slice(0, Math.max(0, MAX_DOTS - txDotColors.length));
 
                 return (
                   <Pressable
@@ -248,11 +199,11 @@ export function TransactionCalendar({
                       </Text>
                     </View>
                     <View style={styles.dotRow}>
-                      {Array.from({ length: txCount }).map((_, i) => (
-                        <View key={`tx${i}`} style={[styles.dot, { backgroundColor: clr.dotFill }]} />
+                      {txDotColors.map((color, i) => (
+                        <View key={`tx${i}`} style={[styles.dot, { backgroundColor: color }]} />
                       ))}
-                      {Array.from({ length: billCount }).map((_, i) => (
-                        <View key={`b${i}`} style={[styles.dot, { borderWidth: 1.5, borderColor: clr.billDotBorder }]} />
+                      {billDotColors.map((color, i) => (
+                        <View key={`b${i}`} style={[styles.dot, { borderWidth: 1.5, borderColor: color }]} />
                       ))}
                     </View>
                   </Pressable>
@@ -260,8 +211,7 @@ export function TransactionCalendar({
               })}
             </View>
           ))}
-        </>
-      )}
+      </>
     </View>
   );
 }
@@ -277,14 +227,6 @@ const styles = StyleSheet.create({
   navBtn: {
     width: 44, height: 44,
     alignItems: 'center', justifyContent: 'center',
-  },
-  titleBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    height: 44,
   },
   monthTitle: {
     fontSize: 16, fontWeight: '700', letterSpacing: -0.3,
@@ -313,34 +255,3 @@ const styles = StyleSheet.create({
   },
 });
 
-// ── Month picker styles ───────────────────────────────────────────────────────
-
-const P = StyleSheet.create({
-  container: {
-    paddingBottom: 16,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  yearLabel: {
-    fontSize: 11, fontWeight: '700', letterSpacing: 0.5,
-    textTransform: 'uppercase', marginBottom: 8,
-  },
-  monthGrid: {
-    flexDirection: 'row', flexWrap: 'wrap',
-  },
-  monthCell: {
-    width: '25%',
-    paddingVertical: 3, paddingHorizontal: 3,
-    alignItems: 'center',
-  },
-  monthPill: {
-    width: '100%',
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  monthText: {
-    fontSize: 13, fontWeight: '500',
-  },
-});

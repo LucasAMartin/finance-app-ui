@@ -32,8 +32,8 @@ export const TRANSACTIONS: Transaction[] = [
   { id:'t3', merchant:'Lyft',         cat:'transport',     amount:14.80,  note:'Ride home',          date:'Yesterday', time:'11:02 PM', when:'yesterday', fullDate:'May 12' },
   { id:'t4', merchant:'Nopa',         cat:'dining',        amount:62.40,  note:'Dinner with M',      date:'Yesterday', time:'8:30 PM',  when:'yesterday', fullDate:'May 12' },
   { id:'t5', merchant:'Apple Store',  cat:'shopping',      amount:129.00, note:'USB-C cable + case', date:'May 9',     time:'2:18 PM',  when:'earlier',   fullDate:'May 9'  },
-  { id:'t6', merchant:'PG&E',         cat:'bills',         amount:92.18,  note:'Electric, April',    date:'May 8',     time:'9:00 AM',  when:'earlier',   fullDate:'May 8', recurring:true },
-  { id:'t7', merchant:'Spotify',      cat:'entertainment', amount:10.99,  note:'Monthly',            date:'May 7',     time:'6:30 AM',  when:'earlier',   fullDate:'May 7', recurring:true },
+  { id:'t6', merchant:'PG&E',         cat:'bills',         amount:92.18,  note:'Electric, April',    date:'May 8',     time:'9:00 AM',  when:'earlier',   fullDate:'May 8'  },
+  { id:'t7', merchant:'Spotify',      cat:'entertainment', amount:10.99,  note:'Monthly',            date:'May 7',     time:'6:30 AM',  when:'earlier',   fullDate:'May 7'  },
 ];
 
 export const MONTHLY_BUDGET = 2400;
@@ -64,10 +64,6 @@ export const SPARK_7D = [42, 18, 95, 38, 12, 28, 67];
 // Current month context (May 2026)
 export const DAYS_REMAINING = 17;
 export const DAYS_IN_MONTH = 31;
-
-// Anchor month for the History calendar — every mock date falls in May 2026.
-export const CALENDAR_YEAR = 2026;
-export const CALENDAR_MONTH = 4; // 0-indexed → May
 
 // ─────────────────────────────────────────────────────────────
 // Per-period totals + category breakdown

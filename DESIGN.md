@@ -14,6 +14,9 @@ colors:
   pure-surface: "#FFFFFF"
   surface-midnight: "#141B2E"
   near-ink: "#0E0E10"
+  hero-bg: "#3A2860"
+  hero-text: "#EDE8F5"
+  hero-sec: "rgba(237,232,245,0.60)"
   over-ember: "#D4522A"
   over-bg: "#F4E9E5"
   caution-amber: "#C5A946"
@@ -23,7 +26,7 @@ colors:
 typography:
   display:
     fontFamily: "Inter, system-ui, sans-serif"
-    fontSize: "42px"
+    fontSize: "32px"
     fontWeight: 700
     letterSpacing: "-1.2px"
     lineHeight: 1
@@ -99,7 +102,7 @@ The palette is built on near-ink neutrals with one runtime-switchable accent. Th
 This system explicitly rejects gamification (badges, points, streaks), dark mode as an aesthetic default (dark mode here serves low-ambient-light reading, not style), and every finance-domain reflex: no navy and gold, no gradient metrics, no glowing dashboards. If something shouts or celebrates, it is wrong.
 
 **Key Characteristics:**
-- Single typeface (Inter) carrying all roles: 10px uppercase metadata through 42px budget display
+- Single typeface (Inter) carrying all roles: 10px uppercase metadata through 32px budget display
 - Hairline borders define surfaces at rest; shadows appear only on chrome that physically layers above content
 - Six switchable accent keys (sage, butter, sky, rose, plum, ink) using fill, ink, and dot roles
 - 50/30/20 groups encoded in a fixed three-color palette: slate (needs), amber (wants), moss (savings)
@@ -132,6 +135,11 @@ A two-tier palette: a fixed neutral field that carries most of the screen, and a
 - **Surface Midnight** (#141B2E): Card surfaces in dark mode.
 - **Near Ink** (#0E0E10): Primary text in light mode. The save button background.
 
+### Hero
+- **Hero Bg** (#3A2860): The home screen budget hero surface. Deep plum, invariant across theme modes and accent keys. All text tokens below are calibrated against this surface.
+- **Hero Text** (#EDE8F5): Primary text and display amount on the hero — lavender-tinted near-white for warmth against the plum.
+- **Hero Sec** (rgba(237,232,245,0.60)): Secondary labels and metadata on the hero (status sub-label, income strip labels).
+
 ### Named Rules
 **The No-Chart-Accent Rule.** Charts, donut segments, and progress bars always use the group palette (slate, amber, moss) or category pastels. The accent color is forbidden in data visualization. The eye should read "needs/wants/savings" from a chart, not "the user picked sage."
 
@@ -143,14 +151,14 @@ A two-tier palette: a fixed neutral field that carries most of the screen, and a
 **Character:** A single sans-serif family used throughout with no decorative pairing. Hierarchy comes entirely from scale and weight contrast, not from multiple typefaces. The type is precise and undemonstrative, like printed figures on a statement.
 
 ### Hierarchy
-- **Display** (700, 42px, tracking −1.2px, line-height 1): The available/over-budget figure on the home screen. Used exactly once per screen.
+- **Display** (700, 32px, tracking −1.2px, line-height 1): The available/over-budget figure on the home screen. Used exactly once per screen.
 - **Headline** (700, 18px, tracking −0.4px, line-height 1.2): Section headers — Spending, Upcoming, Activity. The only 700-weight text below display size.
 - **Title** (600, 15px, tracking −0.3px, line-height 1.3): Income strip values, input fields, transaction sheet amounts (secondary).
 - **Body** (500–600, 14px, tracking −0.2px, line-height 1.4): Row titles, merchant names, field labels.
 - **Label** (600, 10–12px, tracking +0.4–0.6px, uppercase, line-height 1.2): Uppercase metadata — group names (TODAY, YESTERDAY), strip labels (INCOME, BUDGET), period selectors. Tight tracking enforces the all-caps feel without needing a separate typeface.
 
 ### Named Rules
-**The Silent Scale Rule.** Type size changes signal function. The 42px display belongs to one metric: the available or over-budget figure. The 18px headline belongs to section titles. Emphasis within a tier uses weight (500→700), not size. Two elements sharing the same size should differ in weight, color, or case — never both size and weight at once.
+**The Silent Scale Rule.** Type size changes signal function. The 32px display belongs to one metric: the available or over-budget figure. The 18px headline belongs to section titles. Emphasis within a tier uses weight (500→700), not size. Two elements sharing the same size should differ in weight, color, or case — never both size and weight at once.
 
 ## 4. Elevation
 
@@ -203,7 +211,7 @@ Grouped inside a chipBg-background container with radius 14. Each row: paddingVe
 - **Do** reserve the accent color (verdigris-dot, fill, ink) for the hero zone, action links, and the mic button — and only those three roles.
 - **Do** use over-ember (#D4522A) consistently for all over-budget signals: the amount, the label, and the tick bar gradient.
 - **Do** let Inter carry the full visual hierarchy without introducing a second typeface.
-- **Do** treat the 42px display as singular: exactly one per screen, for the primary budget figure.
+- **Do** treat the 32px display as singular: exactly one per screen, for the primary budget figure.
 - **Do** apply the flat-first rule: data surfaces never cast shadows at rest.
 
 ### Don't:

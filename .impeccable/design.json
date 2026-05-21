@@ -195,20 +195,12 @@
     ],
     "dos": [
       "Do use 1px hairline borders to define surfaces at rest.",
-      "Do encode the three budget groups with their fixed colors: slate for needs, amber for wants, moss for savings.",
-      "Do reserve the accent color for the hero zone, action links, and the mic button only.",
-      "Do use over-ember (#D4522A) consistently for all over-budget signals.",
-      "Do let Inter carry the full visual hierarchy without a second typeface.",
-      "Do treat the 42px display as singular: exactly one per screen, for the primary budget figure.",
       "Do apply the flat-first rule: data surfaces never cast shadows at rest."
     ],
     "donts": [
       "Don't add gamification: no badges, achievement notifications, points, streaks, or celebratory animations.",
-      "Don't use navy and gold, neon on black, or any finance-domain reflex palette.",
       "Don't use gradient text (background-clip: text).",
       "Don't add side-stripe borders (border-left or border-right over 1px) to rows, cards, or callouts.",
-      "Don't apply glassmorphism decoratively.",
-      "Don't use the accent color in charts or data visualization.",
       "Don't shadow data rows, category cards, or list items.",
       "Don't build complex navigation hierarchies or hide features behind nested menus."
     ]
