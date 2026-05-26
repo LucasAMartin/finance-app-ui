@@ -114,11 +114,16 @@ export function overBg(dark: boolean)   { return dark ? '#2A1612' : OVER_BG; }
 export function overText(dark: boolean) { return dark ? '#F09272' : OVER_TEXT; }
 
 // Caution colors (bills due soon, off-target spending)
-export const CAUTION_BG   = '#F1E6B7';
-export const CAUTION_TEXT = '#6E5A1F';
+export const CAUTION_BG     = '#F1E6B7';
+export const CAUTION_TEXT   = '#6E5A1F';
+export const CAUTION_AMBER  = '#C5A946'; // chart/bar fill at "near limit" — DESIGN.md caution-amber
 export function cautionBg(dark: boolean)   { return dark ? '#201A0A' : CAUTION_BG; }
 export function cautionText(dark: boolean) { return dark ? '#CCA838' : CAUTION_TEXT; }
 export function flagBg(dark: boolean):     string { return dark ? '#C8881C' : '#B87018'; }
+
+// Hero "available" status color — teal on the dark hero/wallpaper surface.
+// DESIGN.md hero-avail token.
+export const HERO_AVAIL = '#5CC4BA';
 
 // Accent colors for the three 50/30/20 spending groups.
 // Import GROUP_COLORS in any component that needs to color by group.

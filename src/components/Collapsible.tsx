@@ -10,7 +10,10 @@ interface Props {
 // Measures children with an out-of-flow phantom view (absolute, opacity 0) so the
 // measurement never gets clipped or re-measured when the visible clipper animates.
 // The visible clipper animates between 0 and the measured height, with opacity easing.
-export function Collapsible({ open, children, duration = 260 }: Props) {
+// Easing: ease-out-quint — snappy decelerate, modern iOS feel without bounce.
+const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
+
+export function Collapsible({ open, children, duration = 300 }: Props) {
   const [contentH, setContentH] = useState<number | null>(null);
   const animH = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(open ? 1 : 0)).current;
@@ -36,13 +39,16 @@ export function Collapsible({ open, children, duration = 260 }: Props) {
       Animated.timing(animH, {
         toValue: open ? contentH : 0,
         duration,
-        easing: Easing.out(Easing.cubic),
+        easing: EASE_OUT_QUINT,
         useNativeDriver: false,
       }),
       Animated.timing(opacity, {
+        // Fade in slightly behind the height so content emerges as the space appears;
+        // fade out faster so the content visually clears before the height collapses.
         toValue: open ? 1 : 0,
-        duration: open ? duration : duration * 0.6,
-        easing: Easing.out(Easing.cubic),
+        duration: open ? duration * 0.85 : duration * 0.5,
+        delay:    open ? duration * 0.15 : 0,
+        easing: EASE_OUT_QUINT,
         useNativeDriver: false,
       }),
     ]).start();

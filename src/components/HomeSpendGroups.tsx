@@ -11,9 +11,10 @@ interface Props {
   groups: SpendGroup[];
   income: number;
   compact?: boolean;
+  onMedia?: boolean;
 }
 
-export function HomeSpendGroups({ theme, groups, income, compact }: Props) {
+export function HomeSpendGroups({ theme, groups, income, compact, onMedia }: Props) {
   return (
     <View>
       {groups.map((g, i) => (
@@ -24,11 +25,24 @@ export function HomeSpendGroups({ theme, groups, income, compact }: Props) {
           income={income}
           last={i === groups.length - 1}
           compact={compact}
+          onMedia={onMedia}
         />
       ))}
     </View>
   );
 }
+
+// On-media palette: used when this component renders inside a translucent dark
+// BlurView (HomeScreen wallpaper layout). Flips text and hairline tokens to a
+// light-on-dark vocabulary; lifts the colored header tint so it reads on blur.
+const ON_MEDIA = {
+  text: '#FFFFFF',
+  textTer: 'rgba(255,255,255,0.78)',
+  hairline: 'rgba(255,255,255,0.18)',
+  sep: 'rgba(255,255,255,0.14)',
+  trackBg: 'rgba(255,255,255,0.18)',
+  headerTintHex: '50',
+};
 
 function GroupPanel({
   theme,
@@ -36,12 +50,14 @@ function GroupPanel({
   income,
   last,
   compact,
+  onMedia,
 }: {
   theme: Theme;
   group: SpendGroup;
   income: number;
   last: boolean;
   compact?: boolean;
+  onMedia?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rot = useRef(new Animated.Value(0)).current;
@@ -57,7 +73,7 @@ function GroupPanel({
 
   const chevRotate = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
 
-  const color = theme.dark ? GROUP_COLORS[group.key].dark : GROUP_COLORS[group.key].light;
+  const color = (onMedia || theme.dark) ? GROUP_COLORS[group.key].dark : GROUP_COLORS[group.key].light;
   const groupTotal = group.subs.reduce((s, x) => s + x.spent, 0);
   const actualPct = income > 0 ? groupTotal / income : 0;
   const fill = Math.min(actualPct / group.targetPct, 1);
@@ -70,10 +86,18 @@ function GroupPanel({
     ? onTrack ? 'On Track' : 'Below Target'
     : onTrack ? 'On Track' : 'Over Budget';
 
-  const headerTint = theme.dark ? `${color}12` : `${color}0D`;
+  const headerTint = onMedia
+    ? `${color}${ON_MEDIA.headerTintHex}`
+    : theme.dark ? `${color}12` : `${color}0D`;
+  const textColor = onMedia ? ON_MEDIA.text : theme.text;
+  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.textTer;
+  const sepColor = onMedia ? ON_MEDIA.sep : theme.sep;
+  const trackBg = onMedia
+    ? ON_MEDIA.trackBg
+    : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
 
   return (
-    <View style={[s.panel, { borderBottomColor: theme.sep, borderBottomWidth: last ? 0 : 1 }]}>
+    <View style={[s.panel, { borderBottomColor: sepColor, borderBottomWidth: last ? 0 : 1 }]}>
       {/* Tinted container — grows to contain both header and expanded sub-rows */}
       <View style={[s.tintedContainer, { backgroundColor: headerTint }]}>
 
@@ -87,10 +111,10 @@ function GroupPanel({
           <View style={s.headerRow}>
             <View style={s.labelRow}>
               <View style={[s.groupDot, { backgroundColor: color }]} />
-              <Text style={[s.groupLabel, { color }]}>{group.label}</Text>
+              <Text style={[s.groupLabel, { color: textColor }]}>{group.label}</Text>
             </View>
             <View style={s.totalRow}>
-              <Text style={[s.groupTotal, { color: theme.text }]}>
+              <Text style={[s.groupTotal, { color: textColor }]}>
                 ${groupTotal.toLocaleString()}
               </Text>
               <Animated.View style={{ transform: [{ rotate: chevRotate }] }}>
@@ -99,11 +123,11 @@ function GroupPanel({
             </View>
           </View>
 
-          <View style={[s.track, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)' }]}>
+          <View style={[s.track, { backgroundColor: trackBg }]}>
             <View style={[s.fill, { width: `${fill * 100}%`, backgroundColor: barColor }]} />
           </View>
 
-          <Text style={[s.meta, { color: theme.textTer }]}>
+          <Text style={[s.meta, { color: textTerColor }]}>
             {Math.round(actualPct * 100)}% of {Math.round(group.targetPct * 100)}% target
             {'  ·  '}
             <Text style={{ color: onTrack ? color : OVER_DOT }}>{statusText}</Text>
@@ -114,9 +138,9 @@ function GroupPanel({
         <Collapsible open={open}>
           <View style={s.subContent}>
             {group.key === 'wants' ? (
-              <WantsChips theme={theme} group={group} color={color} />
+              <WantsChips theme={theme} group={group} color={color} onMedia={onMedia} />
             ) : (
-              <DetailRows theme={theme} group={group} color={color} isSavings={isSavings} />
+              <DetailRows theme={theme} group={group} color={color} isSavings={isSavings} onMedia={onMedia} />
             )}
           </View>
         </Collapsible>
@@ -129,10 +153,14 @@ function GroupPanel({
 // ── Sub-content components ───────────────────────────────────────
 
 function DetailRows({
-  theme, group, color, isSavings,
+  theme, group, color, isSavings, onMedia,
 }: {
-  theme: Theme; group: SpendGroup; color: string; isSavings: boolean;
+  theme: Theme; group: SpendGroup; color: string; isSavings: boolean; onMedia?: boolean;
 }) {
+  const textColor = onMedia ? ON_MEDIA.text : theme.text;
+  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.textTer;
+  const trackBg = onMedia ? ON_MEDIA.hairline : theme.hairline;
+
   return (
     <View style={s.detailList}>
       {group.subs.map(sub => {
@@ -147,24 +175,24 @@ function DetailRows({
             </View>
             <View style={{ flex: 1 }}>
               <View style={s.subHeaderRow}>
-                <Text style={[s.subName, { color: theme.text }]} numberOfLines={1}>
+                <Text style={[s.subName, { color: textColor }]} numberOfLines={1}>
                   {sub.label}
                 </Text>
                 <View style={s.subAmtGroup}>
                   {funded && isSavings && (
                     <Text style={[s.check, { color }]}>✓{'  '}</Text>
                   )}
-                  <Text style={[s.subSpent, { color: over ? OVER_DOT : theme.text }]}>
+                  <Text style={[s.subSpent, { color: over ? OVER_DOT : textColor }]}>
                     ${sub.spent.toLocaleString()}
                   </Text>
                   {!funded && (
-                    <Text style={[s.subBudget, { color: theme.textTer }]}>
+                    <Text style={[s.subBudget, { color: textTerColor }]}>
                       {'  /  $'}{sub.budget.toLocaleString()}
                     </Text>
                   )}
                 </View>
               </View>
-              <View style={[s.subTrack, { backgroundColor: theme.hairline }]}>
+              <View style={[s.subTrack, { backgroundColor: trackBg }]}>
                 <View style={[s.subFill, { width: `${pct * 100}%`, backgroundColor: over ? OVER_DOT : color }]} />
               </View>
             </View>
@@ -176,10 +204,12 @@ function DetailRows({
 }
 
 function WantsChips({
-  theme, group, color,
+  theme, group, color, onMedia,
 }: {
-  theme: Theme; group: SpendGroup; color: string;
+  theme: Theme; group: SpendGroup; color: string; onMedia?: boolean;
 }) {
+  const textColor = onMedia ? ON_MEDIA.text : theme.text;
+  const hairlineColor = onMedia ? ON_MEDIA.hairline : theme.hairline;
   const total = group.subs.reduce((s, x) => s + x.spent, 0);
 
   return (
@@ -213,16 +243,16 @@ function WantsChips({
             key={sub.label}
             style={[
               s.wantRow,
-              { borderBottomWidth: i < group.subs.length - 1 ? 1 : 0, borderBottomColor: theme.hairline },
+              { borderBottomWidth: i < group.subs.length - 1 ? 1 : 0, borderBottomColor: hairlineColor },
             ]}
           >
             <View style={[s.iconWrap, { backgroundColor: `${color}18` }]}>
               <Icon name={sub.icon} size={14} color={color} stroke={1.5} />
             </View>
-            <Text style={[s.wantLabel, { color: theme.text }]} numberOfLines={1}>
+            <Text style={[s.wantLabel, { color: textColor }]} numberOfLines={1}>
               {sub.label}
             </Text>
-            <Text style={[s.wantAmt, { color: theme.text }]}>
+            <Text style={[s.wantAmt, { color: textColor }]}>
               ${sub.spent.toLocaleString()}
             </Text>
           </View>

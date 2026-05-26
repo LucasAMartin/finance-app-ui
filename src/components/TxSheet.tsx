@@ -108,9 +108,11 @@ export function TxSheet({
                           onPress={() => setDetent(DETENT_LARGE)}
                           pointerEvents="box-only"
                           style={S.expandHint}
+                          accessibilityRole="button"
+                          accessibilityLabel="Edit transaction"
                         >
-                          <Icon name="chevUp" size={13} color={theme.textTer} stroke={2} />
-                          <Text style={[S.expandHintText, { color: theme.textTer }]}>Edit</Text>
+                          <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
+                          <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
                         </Pressable>
                       )}
                       {isExpanded && (
@@ -154,7 +156,7 @@ function SheetBody({ tx, theme, isExpanded }: { tx: Transaction; theme: Theme; i
   return (
     <>
       <View style={[S.hero, isExpanded && S.heroCompact]}>
-        <View style={[S.catCircle, isExpanded && S.catCircleCompact, { backgroundColor: color + '26' }]}>
+        <View style={[S.catCircle, isExpanded && S.catCircleCompact, { backgroundColor: color + '42' }]}>
           <Icon name={cat?.icon ?? 'tag'} size={isExpanded ? 18 : 24} color={groupColor} stroke={1.5} />
         </View>
         <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  ImageBackground,
   PanResponder,
   Pressable,
   ScrollView,
@@ -10,8 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
-import { presentationDetents, presentationDragIndicator } from '@expo/ui/swift-ui/modifiers';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BottomSheet, Group, Host, RNHostView, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
+import { presentationDetents, presentationDragIndicator, pickerStyle, tag, tint, fixedSize, environment } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CATS, TRANSACTIONS, Transaction,
@@ -20,16 +23,48 @@ import {
 
 const CALENDAR_YEAR  = 2026;
 const CALENDAR_MONTH = 4; // 0-indexed → May
+
+// Calendar open state persists across screen remounts (and across the rest of
+// the app session). Module-scope so it survives even if ActivityScreen ever
+// unmounts; today the App keeps all screens mounted, but this is the cheap
+// safeguard against future architectural changes.
+let cachedCalOpen = true;
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
 import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
+import { Collapsible } from '../components/Collapsible';
 import { Theme, catGroupColor, GROUP_COLORS, cautionBg, cautionText, flagBg } from '../theme';
 import { TYPE } from '../typography';
 
-const SWIPE_W = 72;
+const WALLPAPER = require('../../assets/example-images/wallpaper.jpg');
 
+const MEDIA = {
+  text: '#FFFFFF',
+  textSec: 'rgba(255,255,255,0.78)',
+  textTer: 'rgba(255,255,255,0.62)',
+  hairline: 'rgba(255,255,255,0.18)',
+  hairlineStrong: 'rgba(255,255,255,0.28)',
+};
+
+const ON_MEDIA_TEXT_SHADOW = {
+  textShadowColor: 'rgba(0,0,0,0.35)',
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 6,
+};
+
+function SectionCard({ children, style, noPad }: { children: React.ReactNode; style?: any; noPad?: boolean }) {
+  return (
+    <BlurView intensity={70} tint="systemMaterialDark" style={[S.sectionCard, style]}>
+      <View style={[S.sectionCardBorder, noPad && S.sectionCardBorderFlush]}>
+        {children}
+      </View>
+    </BlurView>
+  );
+}
+
+const SWIPE_W = 72;
 
 type DateFilterPreset = 'today' | 'yesterday' | 'this-week' | 'this-month';
 type DateFilter = DateFilterPreset | { from: Date; to: Date } | null;
@@ -107,7 +142,14 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
   const [selectedDay, setSelectedDay]       = useState<number | null>(null);
   const [calViewYear, setCalViewYear]       = useState(CALENDAR_YEAR);
   const [calViewMonth, setCalViewMonth]     = useState(CALENDAR_MONTH);
-  const [calOpen, setCalOpen]               = useState(true);
+  const [calOpen, _setCalOpen]              = useState(cachedCalOpen);
+  const setCalOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    _setCalOpen(prev => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      cachedCalOpen = resolved;
+      return resolved;
+    });
+  };
 
   const handleSetDateFilter = (d: DateFilter) => {
     setDateFilter(d);
@@ -219,258 +261,279 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
   }, [selectedDay, calViewMonth, calSource, calBills]);
 
+  const scrimTop    = theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.40)';
+  const scrimMid    = theme.dark ? 'rgba(0,0,0,0.20)' : 'rgba(0,0,0,0.05)';
+  const scrimLower  = theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
+  const scrimBottom = theme.dark ? 'rgba(0,0,0,0.80)' : 'rgba(0,0,0,0.65)';
+
+  const hasFilterPills = selectedDay !== null || dateFilter !== null || catFilter.length > 0;
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <ImageBackground source={WALLPAPER} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
+        <LinearGradient
+          pointerEvents="none"
+          colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
+          locations={[0, 0.30, 0.70, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
 
-      {/* ── Header ──────────────────────────────────────────────────── */}
-      <View style={[S.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable
-          onPress={onOpenDrawer}
-          pointerEvents="box-only"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={[S.iconBtn, { backgroundColor: 'transparent' }]}
-          accessibilityRole="button"
-          accessibilityLabel="Open menu"
-        >
-          <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
-        </Pressable>
-        <Text style={[S.title, { color: theme.text }]}>History</Text>
-        <ThemeToggle />
-      </View>
-
-      {/* ── All content scrolls together ─────────────────────────── */}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* ── Inline calendar ──────────────────────────────────── */}
-        <View style={[S.calInline, { backgroundColor: theme.chipBg }]}>
-          {calOpen && (
-            <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 8 }}>
-              <TransactionCalendar
-                theme={theme}
-                year={calViewYear}
-                month={calViewMonth}
-                marks={calMarks}
-                selectedDay={selectedDay}
-                today={TODAY_DOM}
-                onSelectDay={(day) => {
-                  setSelectedDay(day);
-                  if (day !== null) setDateFilter(null);
-                }}
-                onViewMonthChange={(y, m) => {
-                  setCalViewYear(y);
-                  setCalViewMonth(m);
-                  setSelectedDay(null);
-                }}
-                overrideColors={{
-                  text: theme.text,
-                  textSec: theme.textSec,
-                  textTer: theme.textTer,
-                  selectedBg: theme.text,
-                  selectedText: theme.surface,
-                  todayBorder: theme.textSec,
-                  dotFill: theme.textSec,
-                  billDotBorder: theme.textTer,
-                }}
-              />
-            </View>
-          )}
-
-          {/* Tap to toggle calendar */}
+        {/* ── Header — pinned ─────────────────────────────────────── */}
+        <View style={[S.header, { paddingTop: insets.top + 8 }]}>
           <Pressable
-            onPress={() => setCalOpen(o => !o)}
+            onPress={onOpenDrawer}
             pointerEvents="box-only"
-            style={[S.calHandle, { borderTopColor: calOpen ? theme.sep : 'transparent' }]}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={[S.iconBtn, { backgroundColor: 'transparent' }]}
             accessibilityRole="button"
-            accessibilityLabel={calOpen ? 'Hide calendar' : 'Show calendar'}
-            accessibilityState={{ expanded: calOpen }}
+            accessibilityLabel="Open menu"
           >
-            <View style={S.calShowRow}>
-              <Icon name="cal" size={12} color={theme.textSec} stroke={1.5} />
-              <Text style={[S.calShowText, { color: theme.textSec }]}>
-                {calOpen ? 'Hide calendar' : 'Show calendar'}
-              </Text>
-              {selectedDay !== null && (
-                <View style={[S.calActiveDot, { backgroundColor: theme.textSec }]} />
-              )}
-              <View style={{ flex: 1 }} />
-              <Icon name={calOpen ? 'chevUp' : 'chevDown'} size={10} color={theme.textSec} stroke={1.8} />
-            </View>
+            <Icon name="menu" size={22} color={MEDIA.text} stroke={1.7} />
           </Pressable>
+          <Text style={[S.title, { color: MEDIA.text }, ON_MEDIA_TEXT_SHADOW]}>History</Text>
+          <ThemeToggle />
         </View>
 
-        {/* ── Search + filter ──────────────────────────────────── */}
-        <View style={[S.searchRow, { paddingHorizontal: 20, marginBottom: 12 }]}>
-          <View style={[S.search, { flex: 1, backgroundColor: theme.surface, borderColor: theme.hairline }]}>
-            <Icon name="search" size={16} color={theme.textSec} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search transactions…"
-              placeholderTextColor={theme.textTer}
-              style={[S.searchInput, { color: theme.text }]}
-              returnKeyType="search"
-              accessibilityLabel="Search transactions"
-            />
-            {query.length > 0 && (
-              <TouchableOpacity
-                onPress={() => setQuery('')}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        {/* ── Scrollable content ──────────────────────────────────── */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={S.sectionStack}>
+
+            {/* ── Calendar card ─────────────────────────────────── */}
+            <SectionCard noPad>
+              <Collapsible open={calOpen}>
+                <View style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 }}>
+                  <TransactionCalendar
+                    theme={theme}
+                    year={calViewYear}
+                    month={calViewMonth}
+                    marks={calMarks}
+                    selectedDay={selectedDay}
+                    today={TODAY_DOM}
+                    onSelectDay={(day) => {
+                      setSelectedDay(day);
+                      if (day !== null) setDateFilter(null);
+                    }}
+                    onViewMonthChange={(y, m) => {
+                      setCalViewYear(y);
+                      setCalViewMonth(m);
+                      setSelectedDay(null);
+                    }}
+                    overrideColors={{
+                      text: MEDIA.text,
+                      textSec: MEDIA.textSec,
+                      textTer: MEDIA.textTer,
+                      selectedBg: MEDIA.text,
+                      selectedText: '#111111',
+                      todayBorder: MEDIA.textSec,
+                      dotFill: MEDIA.textSec,
+                      billDotBorder: MEDIA.textTer,
+                    }}
+                  />
+                </View>
+              </Collapsible>
+
+              {/* Toggle handle */}
+              <Pressable
+                onPress={() => setCalOpen(o => !o)}
+                pointerEvents="box-only"
+                style={[S.calHandle, { borderTopColor: calOpen ? MEDIA.hairline : 'transparent' }]}
                 accessibilityRole="button"
-                accessibilityLabel="Clear search"
+                accessibilityLabel={calOpen ? 'Hide calendar' : 'Show calendar'}
+                accessibilityState={{ expanded: calOpen }}
               >
-                <Icon name="close" size={14} color={theme.textSec} />
-              </TouchableOpacity>
-            )}
-          </View>
-          <TouchableOpacity
-            onPress={() => setFilterSheetOpen(true)}
-            activeOpacity={0.7}
-            style={[S.filterBtn, { backgroundColor: activeCount > 0 ? theme.text : theme.chipBg }]}
-            accessibilityRole="button"
-            accessibilityLabel={activeCount > 0 ? `Filters, ${activeCount} active` : 'Filters'}
-          >
-            <Icon name="filter" size={15} color={activeCount > 0 ? theme.bg : theme.textSec} stroke={1.6} />
-            {activeCount > 0 && (
-              <View style={[S.filterBadge, { backgroundColor: theme.bg }]}>
-                <Text style={[S.filterBadgeText, { color: theme.text }]}>{activeCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* ── Active filter pills ───────────────────────────────── */}
-        {(selectedDay !== null || dateFilter !== null || catFilter.length > 0) && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ paddingLeft: 20, marginBottom: 8 }}
-            contentContainerStyle={S.filterStripScroll}
-            keyboardShouldPersistTaps="handled"
-          >
-            {selectedDay !== null && (
-              <View style={[S.filterPill, { backgroundColor: theme.chipBg, borderWidth: 1, borderColor: theme.hairline }]}>
-                <Icon name="cal" size={10} color={theme.textSec} stroke={1.7} />
-                <Text style={[S.filterPillText, { color: theme.text }]}>
-                  {MONTHS[calViewMonth]} {selectedDay}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setSelectedDay(null)}
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear day selection"
-                >
-                  <Icon name="close" size={10} color={theme.textSec} stroke={2} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {dateFilter && typeof dateFilter === 'string' && (
-              <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
-                <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
-                  {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setDateFilter(null)}
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove date filter"
-                >
-                  <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {dateFilter && typeof dateFilter !== 'string' && (
-              <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
-                <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
-                  {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setDateFilter(null)}
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove date filter"
-                >
-                  <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {catFilter.map(catId => {
-              const cat = CATS[catId];
-              const groupColor = catGroupColor(catId, theme.dark);
-              return (
-                <View key={catId} style={[S.filterPill, { backgroundColor: groupColor + '1A' }]}>
-                  <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
-                  <Text style={[S.filterPillText, { color: theme.text }]}>{cat?.label}</Text>
-                  <TouchableOpacity
-                    onPress={() => setCatFilter(catFilter.filter(c => c !== catId))}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${cat?.label} filter`}
-                  >
-                    <Icon name="close" size={10} color={groupColor} stroke={2} />
-                  </TouchableOpacity>
+                <View style={S.calShowRow}>
+                  <Icon name="cal" size={12} color={MEDIA.textSec} stroke={1.5} />
+                  <Text style={[S.calShowText, { color: MEDIA.textSec }]}>
+                    {calOpen ? 'Hide calendar' : 'Show calendar'}
+                  </Text>
+                  {selectedDay !== null && (
+                    <View style={[S.calActiveDot, { backgroundColor: MEDIA.textSec }]} />
+                  )}
+                  <View style={{ flex: 1 }} />
+                  <Icon name={calOpen ? 'chevUp' : 'chevDown'} size={10} color={MEDIA.textSec} stroke={1.8} />
                 </View>
-              );
-            })}
-          </ScrollView>
-        )}
+              </Pressable>
+            </SectionCard>
 
-        {/* ── Content ──────────────────────────────────────────── */}
-        <View style={{ paddingHorizontal: 20 }}>
-          {selectedDay !== null ? (
-            <>
-              {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
-                <Text style={[S.detailEmpty, { color: theme.textTer }]}>No activity this day</Text>
-              ) : (
-                <View>
-                  {dayDetail.txs.map((tx, i) => (
-                    <TxRow
-                      key={tx.id}
-                      tx={tx}
-                      theme={theme}
-                      onPress={() => setSheetTx(tx)}
-                      last={i === dayDetail.txs.length - 1 && dayDetail.bills.length === 0}
-                    />
-                  ))}
-                  {dayDetail.bills.map((bill, i) => (
-                    <BillRow key={bill.id} bill={bill} theme={theme} last={i === dayDetail.bills.length - 1} />
-                  ))}
+            {/* ── Search + filter card ──────────────────────────── */}
+            <SectionCard>
+              <View style={S.searchRow}>
+                <View style={[S.search, { flex: 1, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: MEDIA.hairline }]}>
+                  <Icon name="search" size={16} color={MEDIA.textSec} />
+                  <TextInput
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder="Search transactions…"
+                    placeholderTextColor={MEDIA.textTer}
+                    style={[S.searchInput, { color: MEDIA.text }]}
+                    returnKeyType="search"
+                    accessibilityLabel="Search transactions"
+                  />
+                  {query.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setQuery('')}
+                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear search"
+                    >
+                      <Icon name="close" size={14} color={MEDIA.textSec} />
+                    </TouchableOpacity>
+                  )}
                 </View>
+                <TouchableOpacity
+                  onPress={() => setFilterSheetOpen(true)}
+                  activeOpacity={0.7}
+                  style={[S.filterBtn, { backgroundColor: activeCount > 0 ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.12)' }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={activeCount > 0 ? `Filters, ${activeCount} active` : 'Filters'}
+                >
+                  <Icon name="filter" size={15} color={activeCount > 0 ? 'rgba(0,0,0,0.75)' : MEDIA.textSec} stroke={1.6} />
+                  {activeCount > 0 && (
+                    <View style={[S.filterBadge, { backgroundColor: 'rgba(0,0,0,0.12)' }]}>
+                      <Text style={[S.filterBadgeText, { color: 'rgba(0,0,0,0.75)' }]}>{activeCount}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* Active filter pills */}
+              {hasFilterPills && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginHorizontal: -18, marginTop: 10 }}
+                  contentContainerStyle={[S.filterStripScroll, { paddingHorizontal: 18 }]}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {selectedDay !== null && (
+                    <View style={[S.filterPill, { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: MEDIA.hairline }]}>
+                      <Icon name="cal" size={10} color={MEDIA.textSec} stroke={1.7} />
+                      <Text style={[S.filterPillText, { color: MEDIA.text }]}>
+                        {MONTHS[calViewMonth]} {selectedDay}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setSelectedDay(null)}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear day selection"
+                      >
+                        <Icon name="close" size={10} color={MEDIA.textSec} stroke={2} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {dateFilter && typeof dateFilter === 'string' && (
+                    <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
+                      <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
+                        {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setDateFilter(null)}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove date filter"
+                      >
+                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {dateFilter && typeof dateFilter !== 'string' && (
+                    <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
+                      <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
+                        {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setDateFilter(null)}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove date filter"
+                      >
+                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {catFilter.map(catId => {
+                    const cat = CATS[catId];
+                    const groupColor = catGroupColor(catId, theme.dark);
+                    return (
+                      <View key={catId} style={[S.filterPill, { backgroundColor: groupColor + '30' }]}>
+                        <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
+                        <Text style={[S.filterPillText, { color: MEDIA.text }]}>{cat?.label}</Text>
+                        <TouchableOpacity
+                          onPress={() => setCatFilter(catFilter.filter(c => c !== catId))}
+                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${cat?.label} filter`}
+                        >
+                          <Icon name="close" size={10} color={groupColor} stroke={2} />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
               )}
-            </>
-          ) : (
-            dayKeys.length === 0 ? (
-              <EmptyState
-                theme={theme}
-                isFiltered={isFiltered}
-                onClearFilters={() => { setCatFilter([]); setDateFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
-              />
-            ) : (
-              dayKeys.map(day => (
-                <DayGroup key={day} day={day} group={grouped[day]} theme={theme} onPress={setSheetTx} />
-              ))
-            )
-          )}
-        </View>
-      </ScrollView>
+            </SectionCard>
 
-      <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
+            {/* ── Transactions card ─────────────────────────────── */}
+            <SectionCard>
+              {selectedDay !== null ? (
+                <>
+                  {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
+                    <Text style={[S.detailEmpty, { color: MEDIA.textTer }]}>No activity this day</Text>
+                  ) : (
+                    <View>
+                      {dayDetail.txs.map((tx, i) => (
+                        <TxRow
+                          key={tx.id}
+                          tx={tx}
+                          theme={theme}
+                          onPress={() => setSheetTx(tx)}
+                          last={i === dayDetail.txs.length - 1 && dayDetail.bills.length === 0}
+                        />
+                      ))}
+                      {dayDetail.bills.map((bill, i) => (
+                        <BillRow key={bill.id} bill={bill} theme={theme} last={i === dayDetail.bills.length - 1} />
+                      ))}
+                    </View>
+                  )}
+                </>
+              ) : (
+                dayKeys.length === 0 ? (
+                  <EmptyState
+                    theme={theme}
+                    isFiltered={isFiltered}
+                    onClearFilters={() => { setCatFilter([]); setDateFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
+                  />
+                ) : (
+                  dayKeys.map(day => (
+                    <DayGroup key={day} day={day} group={grouped[day]} theme={theme} onPress={setSheetTx} />
+                  ))
+                )
+              )}
+            </SectionCard>
 
-      <FilterSheet
-        visible={filterSheetOpen}
-        theme={theme}
-        catFilter={catFilter}
-        dateFilter={dateFilter}
-        sortBy={sortBy}
-        setCatFilter={setCatFilter}
-        setDateFilter={handleSetDateFilter}
-        setSortBy={setSortBy}
-        clearDay={() => setSelectedDay(null)}
-        onClose={() => setFilterSheetOpen(false)}
-      />
+          </View>
+        </ScrollView>
+
+        <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
+
+        <FilterSheet
+          visible={filterSheetOpen}
+          theme={theme}
+          catFilter={catFilter}
+          dateFilter={dateFilter}
+          sortBy={sortBy}
+          setCatFilter={setCatFilter}
+          setDateFilter={handleSetDateFilter}
+          setSortBy={setSortBy}
+          clearDay={() => setSelectedDay(null)}
+          onClose={() => setFilterSheetOpen(false)}
+        />
+      </ImageBackground>
     </View>
   );
 }
@@ -518,21 +581,27 @@ function FilterSheet({
     else if (!from && !to) setDateFilter(null);
   };
 
-  const handlePresetPress = (id: DateFilterPreset) => {
-    const isActive = typeof dateFilter === 'string' && dateFilter === id;
-    setDateFilter(isActive ? null : id);
-    setCustomMode(false);
-    setLocalFrom(null);
-    setLocalTo(null);
-  };
+  // Picker index ↔ dateFilter state mapping.
+  // 0 = Any time, 1-4 = presets (in DATE_PRESETS order), 5 = Custom range.
+  const datePickerIdx = customMode || (dateFilter !== null && typeof dateFilter !== 'string')
+    ? 5
+    : typeof dateFilter === 'string'
+      ? DATE_PRESETS.findIndex(p => p.id === dateFilter) + 1
+      : 0;
 
-  const handleCustomToggle = () => {
-    if (customMode) {
+  const handleDatePickerChange = (idx: number) => {
+    if (idx === 0) {
+      setDateFilter(null);
       setCustomMode(false);
-      if (typeof dateFilter !== 'string') setDateFilter(null);
       setLocalFrom(null);
       setLocalTo(null);
-    } else {
+    } else if (idx >= 1 && idx <= 4) {
+      setDateFilter(DATE_PRESETS[idx - 1].id);
+      setCustomMode(false);
+      setLocalFrom(null);
+      setLocalTo(null);
+    } else if (idx === 5) {
+      // Switch to custom mode; preserve any existing custom range
       setCustomMode(true);
       if (typeof dateFilter === 'string') setDateFilter(null);
     }
@@ -549,7 +618,6 @@ function FilterSheet({
   };
 
   const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
-  const isCustomActive = customMode || (dateFilter !== null && typeof dateFilter !== 'string');
 
   const customLabel = (() => {
     if (dateFilter && typeof dateFilter !== 'string') {
@@ -558,6 +626,8 @@ function FilterSheet({
     if (localFrom && !localTo) return `${fmtDate(localFrom)} – …`;
     return 'Custom range';
   })();
+
+  const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
 
   return (
     <Host style={{ width: 0, height: 0, position: 'absolute' }}>
@@ -572,118 +642,83 @@ function FilterSheet({
           <RNHostView>
             <View style={[FS.content, { backgroundColor: theme.surface }]}>
 
+              {/* ── Header ──────────────────────────────────────── */}
+              <View style={[FS.header, { borderBottomColor: theme.sep }]}>
+                <Text style={[FS.title, { color: theme.text }]}>Filters</Text>
+                <View style={FS.headerActions}>
+                  {activeCount > 0 && (
+                    <TouchableOpacity
+                      onPress={clearAll}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear all filters"
+                    >
+                      <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={onClose}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Done"
+                  >
+                    <Text style={[FS.doneLink, { color: theme.text }]}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               <ScrollView
                 style={{ flex: 1 }}
                 contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 20 }}
                 showsVerticalScrollIndicator={false}
                 scrollEventThrottle={16}
               >
-                {/* ── Sort by ────────────────────────────────────── */}
-                <View style={[FS.groupDivider, { paddingTop: 18 }]}>
-                  <View style={{ height: 1, width: 14, backgroundColor: theme.hairline }} />
-                  <Text style={[FS.groupDividerLabel, { color: theme.textTer }]}>Sort by</Text>
-                  <View style={{ height: 1, flex: 1, backgroundColor: theme.hairline }} />
-                  {activeCount > 0 && (
-                    <TouchableOpacity
-                      onPress={clearAll}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                {/* ── Sort by — native iOS menu picker ───────────── */}
+                <View style={FS.sortRow}>
+                  <Text style={[FS.sortRowLabel, { color: theme.text }]}>Sort by</Text>
+                  <Host matchContents>
+                    <Picker
+                      selection={sortIdx >= 0 ? sortIdx : 0}
+                      onSelectionChange={(val) => setSortBy(SORT_OPTIONS[Number(val)].id)}
+                      modifiers={[
+                        pickerStyle('menu'),
+                        tint(theme.accent.dot),
+                        environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                        fixedSize({ horizontal: true, vertical: false }),
+                      ]}
                     >
-                      <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
-                    </TouchableOpacity>
-                  )}
+                      {SORT_OPTIONS.map((o, idx) => (
+                        <SwiftText key={o.id} modifiers={[tag(idx)]}>{o.label}</SwiftText>
+                      ))}
+                    </Picker>
+                  </Host>
                 </View>
 
-                <View style={FS.sortGrid}>
-                  {SORT_OPTIONS.map(o => {
-                    const active = sortBy === o.id;
-                    return (
-                      <TouchableOpacity
-                        key={o.id}
-                        onPress={() => setSortBy(o.id)}
-                        activeOpacity={0.7}
-                        style={[FS.sortCell, { backgroundColor: active ? theme.text : theme.chipBg }]}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: active }}
-                        accessibilityLabel={o.label}
-                      >
-                        <Text style={[FS.sortCellText, { color: active ? theme.bg : theme.textSec }]}>
-                          {o.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                {/* ── Date — native picker dropdown ──────────────── */}
+                {/* Picker indices: 0 = Any time, 1-4 = presets, 5 = Custom range */}
+                <View style={FS.sortRow}>
+                  <Text style={[FS.sortRowLabel, { color: theme.text }]}>Date</Text>
+                  <Host matchContents>
+                    <Picker
+                      selection={datePickerIdx}
+                      onSelectionChange={(val) => handleDatePickerChange(Number(val))}
+                      modifiers={[
+                        pickerStyle('menu'),
+                        tint(theme.accent.dot),
+                        environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                        fixedSize({ horizontal: true, vertical: false }),
+                      ]}
+                    >
+                      <SwiftText modifiers={[tag(0)]}>Any time</SwiftText>
+                      {DATE_PRESETS.map((o, i) => (
+                        <SwiftText key={o.id} modifiers={[tag(i + 1)]}>{o.label}</SwiftText>
+                      ))}
+                      <SwiftText modifiers={[tag(5)]}>{customLabel}</SwiftText>
+                    </Picker>
+                  </Host>
                 </View>
 
-                {/* ── Date presets ───────────────────────────────── */}
-                <View style={FS.groupDivider}>
-                  <View style={{ height: 1, width: 14, backgroundColor: theme.hairline }} />
-                  <Text style={[FS.groupDividerLabel, { color: theme.textTer }]}>Date</Text>
-                  <View style={{ height: 1, flex: 1, backgroundColor: theme.hairline }} />
-                </View>
-
-                <View style={FS.dateGrid}>
-                  <View style={FS.dateGridRow}>
-                    {[DATE_PRESETS[0], DATE_PRESETS[1]].map(o => {
-                      const active = typeof dateFilter === 'string' && dateFilter === o.id;
-                      return (
-                        <TouchableOpacity
-                          key={o.id}
-                          onPress={() => handlePresetPress(o.id)}
-                          activeOpacity={0.7}
-                          style={[FS.dateCell, { backgroundColor: active ? theme.text : theme.chipBg }]}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: active }}
-                          accessibilityLabel={o.label}
-                        >
-                          <Text style={[FS.dateCellText, { color: active ? theme.bg : theme.textSec }]}>
-                            {o.label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  <View style={FS.dateGridRow}>
-                    {[DATE_PRESETS[2], DATE_PRESETS[3]].map(o => {
-                      const active = typeof dateFilter === 'string' && dateFilter === o.id;
-                      return (
-                        <TouchableOpacity
-                          key={o.id}
-                          onPress={() => handlePresetPress(o.id)}
-                          activeOpacity={0.7}
-                          style={[FS.dateCell, { backgroundColor: active ? theme.text : theme.chipBg }]}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: active }}
-                          accessibilityLabel={o.label}
-                        >
-                          <Text style={[FS.dateCellText, { color: active ? theme.bg : theme.textSec }]}>
-                            {o.label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  onPress={handleCustomToggle}
-                  activeOpacity={0.7}
-                  style={[FS.dateCustomRow, {
-                    backgroundColor: isCustomActive ? theme.text : theme.chipBg,
-                  }]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isCustomActive }}
-                  accessibilityLabel={customLabel}
-                >
-                  <Icon name="cal" size={13} color={isCustomActive ? theme.bg : theme.textSec} stroke={1.5} />
-                  <Text style={[FS.dateCustomText, { color: isCustomActive ? theme.bg : theme.textSec }]}>
-                    {customLabel}
-                  </Text>
-                  <View style={{ transform: [{ rotate: customMode ? '180deg' : '0deg' }] }}>
-                    <Icon name="chevDown" size={11} color={isCustomActive ? theme.bg : theme.textTer} stroke={1.8} />
-                  </View>
-                </TouchableOpacity>
-
-                {customMode && (
+                <Collapsible open={customMode}>
                   <View style={{ paddingHorizontal: 22, paddingTop: 4 }}>
                     <MiniCalendar
                       theme={theme}
@@ -692,7 +727,7 @@ function FilterSheet({
                       onRangeChange={handleRangeChange}
                     />
                   </View>
-                )}
+                </Collapsible>
 
                 {/* ── Category rows ─────────────────────────────── */}
                 {EXPENSE_GROUPS.filter(g => g.cats.length > 0).map(g => {
@@ -700,15 +735,15 @@ function FilterSheet({
                   return (
                     <View key={g.key}>
                       <View style={FS.groupDivider}>
-                        <View style={{ height: 1, width: 14, backgroundColor: groupColor + '40' }} />
-                        <Text style={[FS.groupDividerLabel, { color: groupColor }]}>
+                        <View style={{ height: 1, width: 14, backgroundColor: groupColor + '55' }} />
+                        <Text style={[FS.groupDividerLabel, { color: groupColor, fontWeight: '600' }]}>
                           {g.label}
                         </Text>
-                        <View style={{ height: 1, flex: 1, backgroundColor: groupColor + '40' }} />
+                        <View style={{ height: 1, flex: 1, backgroundColor: groupColor + '55' }} />
                       </View>
 
                       {g.cats.length === 0 ? (
-                        <Text style={[FS.groupEmpty, { color: theme.textTer }]}>
+                        <Text style={[FS.groupEmpty, { color: theme.textSec }]}>
                           No savings transactions yet
                         </Text>
                       ) : (
@@ -738,7 +773,7 @@ function FilterSheet({
                               <Text style={[
                                 FS.catName,
                                 active && TYPE.body,
-                                { color: active ? theme.text : theme.textSec },
+                                { color: theme.text },
                               ]}>
                                 {c.label}
                               </Text>
@@ -913,15 +948,15 @@ function MiniCalendar({
       {(from || to) && (
         <View style={[CAL.summary, { borderTopColor: theme.sep }]}>
           <View style={CAL.summaryItem}>
-            <Text style={[CAL.summaryLabel, { color: theme.textTer }]}>From</Text>
-            <Text style={[CAL.summaryValue, { color: from ? theme.text : theme.textTer }]}>
+            <Text style={[CAL.summaryLabel, { color: theme.textSec }]}>From</Text>
+            <Text style={[CAL.summaryValue, { color: from ? theme.text : theme.textSec }]}>
               {from ? fmtDate(from) : '—'}
             </Text>
           </View>
           <View style={[CAL.summarySep, { backgroundColor: theme.hairline }]} />
           <View style={CAL.summaryItem}>
-            <Text style={[CAL.summaryLabel, { color: theme.textTer }]}>To</Text>
-            <Text style={[CAL.summaryValue, { color: to ? theme.text : theme.textTer }]}>
+            <Text style={[CAL.summaryLabel, { color: theme.textSec }]}>To</Text>
+            <Text style={[CAL.summaryValue, { color: to ? theme.text : theme.textSec }]}>
               {to ? fmtDate(to) : '—'}
             </Text>
           </View>
@@ -948,10 +983,9 @@ function DayGroup({
     : day;
 
   return (
-    <View style={{ marginBottom: 24 }}>
-      <View style={[S.groupSep, { backgroundColor: theme.hairline }]} />
+    <View style={{ marginBottom: 16 }}>
       <View style={S.dayHeader}>
-        <Text style={[S.dayLabel, { color: theme.text }]}>{label}</Text>
+        <Text style={[S.dayLabel, { color: MEDIA.textTer }]}>{label}</Text>
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
@@ -1042,7 +1076,7 @@ function TxRow({
       onPress={onPress}
       delayPressIn={0}
       activeOpacity={0.6}
-      style={[S.txRow, { backgroundColor: theme.bg }]}
+      style={S.txRow}
       accessibilityRole="button"
       accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, $${tx.amount.toFixed(2)}`}
     >
@@ -1051,15 +1085,15 @@ function TxRow({
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
-          <Text style={[S.txName, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
+          <Text style={[S.txName, { color: MEDIA.text, flexShrink: 1 }]} numberOfLines={1}>
             {tx.merchant}
           </Text>
-          {tx.recurring && <Icon name="repeat" size={11} color={theme.textTer} stroke={1.7} />}
+          {tx.recurring && <Icon name="repeat" size={11} color={MEDIA.textTer} stroke={1.7} />}
         </View>
-        <Text style={[S.txMeta, { color: theme.textSec }]}>{cat?.label} · {tx.time}</Text>
+        <Text style={[S.txMeta, { color: MEDIA.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Money value={tx.amount} size={13} weight="500" theme={theme} color={theme.textSec} />
-      {!last && <View style={[S.rowSep, { backgroundColor: theme.sep }]} />}
+      <Money value={tx.amount} size={13} weight="500" theme={theme} color={MEDIA.textSec} />
+      {!last && <View style={[S.rowSep, { backgroundColor: MEDIA.hairline }]} />}
     </TouchableOpacity>
   );
 }
@@ -1075,12 +1109,12 @@ function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
-          <Text style={[S.txName, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
+          <Text style={[S.txName, { color: MEDIA.text, flexShrink: 1 }]} numberOfLines={1}>
             {bill.name}
           </Text>
-          <Icon name="repeat" size={11} color={theme.textTer} stroke={1.7} />
+          <Icon name="repeat" size={11} color={MEDIA.textTer} stroke={1.7} />
         </View>
-        <Text style={[S.txMeta, { color: theme.textSec }]}>
+        <Text style={[S.txMeta, { color: MEDIA.textSec }]}>
           {bill.estimate ? 'Estimated · Upcoming bill' : 'Upcoming bill'}
         </Text>
       </View>
@@ -1090,14 +1124,14 @@ function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last
           size={13}
           weight="500"
           theme={theme}
-          color={theme.textSec}
+          color={MEDIA.textSec}
           prefix="$"
         />
-        <View style={[S.upcomingPill, { backgroundColor: cautionBg(theme.dark) }]}>
-          <Text style={[S.upcomingText, { color: cautionText(theme.dark) }]}>Upcoming</Text>
+        <View style={[S.upcomingPill, { backgroundColor: 'rgba(255,200,80,0.18)' }]}>
+          <Text style={[S.upcomingText, { color: 'rgba(255,200,80,0.9)' }]}>Upcoming</Text>
         </View>
       </View>
-      {!last && <View style={[S.rowSep, { backgroundColor: theme.sep }]} />}
+      {!last && <View style={[S.rowSep, { backgroundColor: MEDIA.hairline }]} />}
     </View>
   );
 }
@@ -1111,20 +1145,20 @@ function EmptyState({ theme, isFiltered, onClearFilters }: {
 }) {
   return (
     <View style={S.empty}>
-      <Icon name="search" size={28} color={theme.textTer} />
-      <Text style={[S.emptyTitle, { color: theme.textSec }]}>
+      <Icon name="search" size={28} color={MEDIA.textTer} />
+      <Text style={[S.emptyTitle, { color: MEDIA.textSec }]}>
         {isFiltered ? 'No results' : 'No transactions yet'}
       </Text>
-      <Text style={[S.emptyBody, { color: theme.textTer }]}>
+      <Text style={[S.emptyBody, { color: MEDIA.textTer }]}>
         {isFiltered ? 'Try adjusting your filters' : 'Your spending will appear here'}
       </Text>
       {isFiltered && onClearFilters && (
         <TouchableOpacity
           onPress={onClearFilters}
           activeOpacity={0.7}
-          style={[S.emptyClear, { backgroundColor: theme.chipBg }]}
+          style={[S.emptyClear, { backgroundColor: 'rgba(255,255,255,0.12)' }]}
         >
-          <Text style={[S.emptyClearText, { color: theme.textSec }]}>Clear filters</Text>
+          <Text style={[S.emptyClearText, { color: MEDIA.textSec }]}>Clear filters</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -1134,12 +1168,18 @@ function EmptyState({ theme, isFiltered, onClearFilters }: {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
+  // Header
   header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 10,
+    zIndex: 10,
   },
   iconBtn: {
     width: 40, height: 40,
@@ -1148,14 +1188,31 @@ const S = StyleSheet.create({
   title: {
     ...TYPE.pageTitle,
   },
-  // Inline calendar
-  calInline: {
-    marginHorizontal: 20,
-    marginTop: 8,
-    marginBottom: 12,
-    borderRadius: 16,
+
+  // Section stack
+  sectionStack: {
+    paddingHorizontal: 16,
+    gap: 14,
+  },
+  sectionCard: {
+    borderRadius: 24,
     overflow: 'hidden',
   },
+  sectionCardBorder: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+  },
+  sectionCardBorderFlush: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+
+  // Calendar toggle handle
   calHandle: {
     paddingVertical: 13,
     alignItems: 'center',
@@ -1165,7 +1222,7 @@ const S = StyleSheet.create({
   calShowRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 18,
     gap: 6,
     width: '100%',
   },
@@ -1175,17 +1232,18 @@ const S = StyleSheet.create({
   calActiveDot: {
     width: 6, height: 6, borderRadius: 3,
   },
+
   // Search
   searchRow: {
     flexDirection: 'row', alignItems: 'stretch', gap: 8,
   },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    borderRadius: 16, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1,
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1,
   },
   searchInput: { flex: 1, ...TYPE.bodyRegular, padding: 0 },
   filterBtn: {
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 14,
     minWidth: 44,
     minHeight: 44,
@@ -1207,9 +1265,6 @@ const S = StyleSheet.create({
   filterPillText: {
     ...TYPE.caption,
   },
-  filterStrip: {
-    flexDirection: 'row', alignItems: 'center',
-  },
   filterStripScroll: {
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 4,
   },
@@ -1221,23 +1276,6 @@ const S = StyleSheet.create({
     ...TYPE.bodySm,
   },
   // Day detail
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 2,
-    marginBottom: 14,
-  },
-  detailDate: {
-    ...TYPE.pageTitle,
-    marginBottom: 2,
-  },
-  detailDow: {
-    ...TYPE.bodySm,
-  },
-  detailClear: {
-    width: 28, height: 28, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center',
-  },
   detailEmpty: {
     ...TYPE.bodySm,
     paddingHorizontal: 2, paddingBottom: 8,
@@ -1258,11 +1296,6 @@ const S = StyleSheet.create({
     textTransform: 'none',
     letterSpacing: 0,
   },
-  groupSep: {
-    height: 1,
-    marginHorizontal: -20,
-    marginBottom: 16,
-  },
   rowSep: {
     position: 'absolute',
     bottom: 0,
@@ -1272,7 +1305,7 @@ const S = StyleSheet.create({
   },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'baseline', paddingHorizontal: 2, marginBottom: 10,
+    alignItems: 'baseline', paddingHorizontal: 2, marginBottom: 6,
   },
   dayLabel: {
     ...TYPE.txDateLabel,
@@ -1291,7 +1324,7 @@ const S = StyleSheet.create({
   },
   txName: { ...TYPE.body },
   txMeta: { ...TYPE.caption, marginTop: 2 },
-  empty:      { alignItems: 'center', paddingTop: 64, paddingBottom: 40 },
+  empty:      { alignItems: 'center', paddingTop: 40, paddingBottom: 24 },
   emptyTitle: { ...TYPE.subsectionTitle, marginTop: 12 },
   emptyBody:  { ...TYPE.bodySm, marginTop: 5, textAlign: 'center', lineHeight: 20 },
 });
@@ -1308,14 +1341,37 @@ const FS = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingTop: 14,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
   title: {
     ...TYPE.pageTitle,
   },
   clearLink: {
     ...TYPE.bodySm,
+  },
+  doneLink: {
+    ...TYPE.bodySmEm,
+  },
+
+  // Sort by — single row with native iOS Picker
+  sortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 4,
+    minHeight: 44,
+  },
+  sortRowLabel: {
+    ...TYPE.body,
   },
 
   // Category section
@@ -1355,56 +1411,6 @@ const FS = StyleSheet.create({
     ...TYPE.caption, fontStyle: 'italic',
   },
 
-  // Date section
-  dateGrid: {
-    paddingHorizontal: 22,
-    gap: 8,
-    marginBottom: 8,
-  },
-  dateGridRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  dateCell: {
-    flex: 1, paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 10,
-  },
-  dateCellText: {
-    ...TYPE.bodySm,
-  },
-  dateCustomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 22,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    gap: 10,
-  },
-  dateCustomText: {
-    flex: 1, ...TYPE.bodySm,
-  },
-
-  // Sort by section
-  sortGrid: {
-    paddingHorizontal: 22,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 4,
-  },
-  sortCell: {
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    minWidth: '45%',
-    flex: 1,
-    alignItems: 'center',
-  },
-  sortCellText: {
-    ...TYPE.bodySm,
-  },
 });
 
 // ─── MiniCalendar styles ──────────────────────────────────────────────────────

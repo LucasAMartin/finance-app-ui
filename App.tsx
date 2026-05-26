@@ -147,6 +147,7 @@ function AppInner() {
             theme={theme}
             onViewSpending={() => navigate('spending')}
             onViewActivity={() => navigate('activity')}
+            onViewBudget={() => navigate('budget')}
             onOpenDrawer={openDrawer}
           />
         </AnimatedScreen>

@@ -44,6 +44,14 @@ export const TYPE = {
 
   // Transaction date group header — "Today", "Yesterday", "Mon 12 May"
   txDateLabel:    { fontSize: 13, fontWeight: '500', letterSpacing: 0,    lineHeight: 18 },
+
+  // On-media — text sitting on the Home wallpaper / BlurView surfaces. Sized
+  // to roughly match SwiftUI body controls in the same row so native and RN
+  // text read at the same scale on this surface.
+  onMediaStatus:   { fontSize: 15, fontWeight: '600', letterSpacing: -0.2, lineHeight: 20 },
+  onMediaStatusSub:{ fontSize: 15, fontWeight: '400', letterSpacing: -0.2, lineHeight: 20 },
+  onMediaAmount:   { fontSize: 44, fontWeight: '700', letterSpacing: -1.4, lineHeight: 48 },
+  onMediaQa:       { fontSize: 12, fontWeight: '600', letterSpacing: -0.1, lineHeight: 16 },
 } satisfies Record<string, TextStyle>;
 
 export type TypeToken = keyof typeof TYPE;
