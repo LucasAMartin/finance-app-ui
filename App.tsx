@@ -8,6 +8,7 @@ import {
   Pressable,
   Easing,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
@@ -17,6 +18,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { SpendingScreen } from './src/screens/SpendingScreen';
 import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
+import { ThemeScreen } from './src/screens/ThemeScreen';
 import { TabBar } from './src/components/TabBar';
 import { VoiceSheet } from './src/components/VoiceSheet';
 import { Drawer } from './src/components/Drawer';
@@ -59,7 +61,14 @@ function AppInner() {
   // The actual visual positions are driven imperatively via TX refs.
   const [screen, setScreen] = useState<Screen>('home');
   const [adding, setAdding] = useState(false);
+  const [addingMode, setAddingMode] = useState<'voice' | 'manual'>('voice');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+
+  const openAdd = (mode: 'voice' | 'manual' = 'voice') => {
+    setAddingMode(mode);
+    setAdding(true);
+  };
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -147,8 +156,10 @@ function AppInner() {
             theme={theme}
             onViewSpending={() => navigate('spending')}
             onViewActivity={() => navigate('activity')}
-            onViewBudget={() => navigate('budget')}
             onOpenDrawer={openDrawer}
+            onAddVoice={() => openAdd('voice')}
+            onAddManual={() => openAdd('manual')}
+            onOpenTheme={() => setThemeOpen(true)}
           />
         </AnimatedScreen>
 
@@ -167,7 +178,7 @@ function AppInner() {
         <TabBar
           theme={theme}
           active={screen === 'activity' ? 'profile' : screen}
-          onAdd={() => setAdding(true)}
+          onAdd={() => openAdd('voice')}
           onTabPress={(id) => {
             if      (id === 'home')     navigate('home');
             else if (id === 'spending') navigate('spending');
@@ -201,7 +212,18 @@ function AppInner() {
           />
         </View>
 
-        <VoiceSheet theme={theme} visible={adding} onClose={() => setAdding(false)} />
+        <VoiceSheet
+          theme={theme}
+          visible={adding}
+          initialMode={addingMode}
+          onClose={() => setAdding(false)}
+        />
+
+        <ThemeScreen
+          theme={theme}
+          visible={themeOpen}
+          onClose={() => setThemeOpen(false)}
+        />
       </View>
     </>
   );
@@ -212,11 +234,13 @@ export default function App() {
   if (!fontsLoaded) return null;
 
   return (
-    <ThemeProvider defaultDark={true} defaultAccent="plum" defaultCardStyle="flat">
-      <SafeAreaProvider>
-        <AppInner />
-      </SafeAreaProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider defaultDark={true} defaultAccent="plum" defaultCardStyle="flat">
+        <SafeAreaProvider>
+          <AppInner />
+        </SafeAreaProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 

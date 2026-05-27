@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,16 @@ import {
   StyleSheet,
   RefreshControl,
   ImageBackground,
+  Animated,
 } from 'react-native';
+import { useTheme } from '../ThemeProvider';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Picker, Text as SwiftText, Host } from '@expo/ui/swift-ui';
+import { Picker, Text as SwiftText, Host, Menu, Button, RNHostView } from '@expo/ui/swift-ui';
 import { pickerStyle, tag, tint, fixedSize } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, catGroupColor, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
+import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
 import {
   CATS,
@@ -26,50 +29,11 @@ import {
   Transaction,
 } from '../data';
 import { Icon } from '../components/Icon';
+import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TYPE } from '../typography';
-
-const WALLPAPER = require('../../assets/example-images/wallpaper.jpg');
-
-// ── Dark-mode on-wallpaper palette ──────────────────────────────
-// Used only in dark mode where the scrim is dark violet-black.
-// In light mode the scrim is a white/violet overlay — everything
-// switches to near-ink via the adaptive palette below.
-const MEDIA = {
-  text: '#FBF8FF',
-  textSec: 'rgba(245,238,255,0.78)',
-  textTer: 'rgba(245,238,255,0.62)',
-  hairline: 'rgba(235,225,255,0.20)',
-  hairlineStrong: 'rgba(235,225,255,0.30)',
-  trackBg: 'rgba(235,225,255,0.20)',
-};
-
-// Text shadow only makes sense in dark mode (dark text on a light
-// background would get a smudgy dark halo).
-const DARK_TEXT_SHADOW = {
-  textShadowColor: 'rgba(8,6,20,0.40)',
-  textShadowOffset: { width: 0, height: 1 },
-  textShadowRadius: 6,
-};
-
-// ── Adaptive palette ─────────────────────────────────────────────
-// Single source of truth for text/hairline/track tokens that must
-// read on both the wallpaper zone (hero, header, quick actions) AND
-// the section card interiors. In dark mode → MEDIA values (near-white).
-// In light mode → near-ink values (dark text on light scrim/card).
-function makeP(dark: boolean) {
-  return {
-    text:          dark ? MEDIA.text          : '#0E0C18',
-    textSec:       dark ? MEDIA.textSec       : 'rgba(14,12,24,0.55)',
-    textTer:       dark ? MEDIA.textTer       : 'rgba(14,12,24,0.38)',
-    hairline:      dark ? MEDIA.hairline      : 'rgba(14,12,24,0.09)',
-    hairlineStrong:dark ? MEDIA.hairlineStrong: 'rgba(14,12,24,0.20)',
-    trackBg:       dark ? MEDIA.trackBg       : 'rgba(14,12,24,0.10)',
-  };
-}
-type P = ReturnType<typeof makeP>;
 
 // ── Budget progress bar ──────────────────────────────────────────
 function BudgetBar({ pct, trackBg }: { pct: number; trackBg: string }) {
@@ -135,32 +99,47 @@ function HeroAmount({ value, prefix, color, shadow }: { value: number; prefix: s
 
 // ── Quick-action tile ─────────────────────────────────────────────
 // All colors adapt dark/light via the adaptive palette.
-function QuickAction({
-  icon, label, onPress, dark, p,
-}: {
-  icon: 'chart' | 'wallet' | 'receipt' | 'menu';
+// `primary` swaps the circle to the accent fill — used for Voice, the
+// signature capture action, so it visually rhymes with the tab-bar mic.
+const QuickAction = React.forwardRef<View, {
+  icon: string;
   label: string;
   onPress: () => void;
   dark: boolean;
   p: P;
-}) {
-  const circleBg     = dark ? 'rgba(28,22,56,0.55)' : 'rgba(255,255,255,0.22)';
-  const circleBorder = dark ? 'rgba(235,225,255,0.20)' : 'rgba(255,255,255,0.45)';
+  shadow?: object;
+  primary?: boolean;
+  accent?: { fill: string; ink: string };
+}>(function QuickAction(
+  { icon, label, onPress, dark, p, shadow, primary, accent },
+  ref,
+) {
+  const circleBg     = primary && accent
+    ? accent.fill
+    : dark ? 'rgba(28,22,56,0.55)' : 'rgba(255,255,255,0.92)';
+  const circleBorder = primary && accent
+    ? 'transparent'
+    : dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
+  const iconColor = primary && accent
+    ? accent.ink
+    : dark ? p.text : '#0E0C18';
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.qa, { opacity: pressed ? 0.7 : 1 }]}
-      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-    >
-      <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
-        <Icon name={icon} size={20} color={p.text} stroke={1.7} />
-      </View>
-      <Text style={[styles.qaLabel, { color: p.text }]}>{label}</Text>
-    </Pressable>
+    <View ref={ref} collapsable={false} style={styles.qa}>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.qaInner, { opacity: pressed ? 0.7 : 1 }]}
+        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+      >
+        <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
+          <Icon name={icon} size={20} color={iconColor} stroke={1.7} />
+        </View>
+        <Text style={[styles.qaLabel, { color: p.text }, shadow]}>{label}</Text>
+      </Pressable>
+    </View>
   );
-}
+});
 
 // ── Section card ─────────────────────────────────────────────────
 // Dark: heavy dark frost (intensity 70). Light: light frost (intensity 35)
@@ -184,11 +163,14 @@ interface Props {
   theme: Theme;
   onViewSpending: () => void;
   onViewActivity: () => void;
-  onViewBudget: () => void;
   onOpenDrawer: () => void;
+  onAddVoice: () => void;
+  onAddManual: () => void;
+  onOpenTheme: () => void;
 }
 
-export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget, onOpenDrawer }: Props) {
+export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onOpenTheme }: Props) {
+  const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
   // pWallpaper: hero, header, quick-actions — always on the wallpaper, always white.
   // p: card interiors — adaptive (dark text in light mode reads on light frosted glass).
@@ -209,6 +191,20 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
   const [sheetTx, setSheetTx] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const handleEditTheme = () => {
+    onOpenTheme();
+  };
+
+  const handleAddRecurring = () => {
+    // TODO: wire to a recurring-expense sheet once the flow is designed.
+  };
+
+  const handleLogIncome = () => {
+    // TODO: wire to an income-entry sheet once the flow is designed.
+  };
+
+  const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
 
   useEffect(() => {
     const t = setTimeout(() => setLoading(false), 1100);
@@ -236,7 +232,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.dark ? '#000' : '#F8F6FF' }}>
-      <ImageBackground source={WALLPAPER} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
+      <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
         <LinearGradient
           pointerEvents="none"
           colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
@@ -246,13 +242,36 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
 
         {/* ─── Header ─────────────────────────────── */}
         <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFillObject, { opacity: headerBgOpacity }]}
+          >
+            <BlurView
+              intensity={theme.dark ? 70 : 100}
+              tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View style={[styles.headerDivider, {
+              backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)',
+            }]} />
+          </Animated.View>
           <View style={styles.headerRow}>
             <IconBtn onPress={onOpenDrawer} accessibilityLabel="Open menu">
-              <Icon name="menu" size={22} color={pWallpaper.text} stroke={1.7} />
+              <HeaderIcon
+                name="menu"
+                wallpaperColor={pWallpaper.text}
+                scrolledColor={p.text}
+                scrolledOpacity={iconScrolledOpacity}
+              />
             </IconBtn>
             <View style={{ flexDirection: 'row', gap: 4 }}>
               <View style={[styles.iconBtn, { width: 40, height: 40 }]}>
-                <Icon name="bell" size={22} color={pWallpaper.text} stroke={1.7} />
+                <HeaderIcon
+                  name="bell"
+                  wallpaperColor={pWallpaper.text}
+                  scrolledColor={p.text}
+                  scrolledOpacity={iconScrolledOpacity}
+                />
                 <View style={[styles.bellDot, {
                   backgroundColor: OVER_DOT,
                   borderColor: 'rgba(8,6,20,0.4)',
@@ -263,10 +282,15 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
           </View>
         </View>
 
-        <ScrollView
+        <Animated.ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
           showsVerticalScrollIndicator={false}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
               tintColor={pWallpaper.textSec} colors={[theme.accent.dot]}
@@ -339,11 +363,29 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
           </View>
 
           {/* ─── Quick actions ─────────────────────── */}
+          {/* Three capture modes (voice / manual / income) plus a More menu */}
+          {/* for less-frequent options. Voice carries the accent fill so it */}
+          {/* visually rhymes with the tab-bar mic button: same action. */}
           <View style={styles.quickRow}>
-            <QuickAction icon="chart"   label="Insights" onPress={onViewSpending} dark={theme.dark} p={pWallpaper} />
-            <QuickAction icon="wallet"  label="Budget"   onPress={onViewBudget}   dark={theme.dark} p={pWallpaper} />
-            <QuickAction icon="receipt" label="Activity" onPress={onViewActivity} dark={theme.dark} p={pWallpaper} />
-            <QuickAction icon="menu"    label="More"     onPress={onOpenDrawer}   dark={theme.dark} p={pWallpaper} />
+            <QuickAction
+              icon="mic"
+              label="Voice"
+              onPress={onAddVoice}
+              dark={theme.dark}
+              p={pWallpaper}
+              shadow={shadow}
+              primary
+              accent={{ fill: theme.accent.fill, ink: theme.accent.ink }}
+            />
+            <QuickAction icon="keypad"   label="Manual"   onPress={onAddManual}     dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction icon="plus"     label="Income"   onPress={handleLogIncome} dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <MoreMenuButton
+              dark={theme.dark}
+              p={pWallpaper}
+              shadow={shadow}
+              onEditTheme={handleEditTheme}
+              onAddRecurring={handleAddRecurring}
+            />
           </View>
 
           {/* ─── Sections stack ──────────────────── */}
@@ -399,7 +441,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
                           </Text>
                         </Text>
                       </View>
-                      <Text style={[styles.rowAmt, { color: p.textSec }]}>{amountStr}</Text>
+                      <Text style={[styles.rowAmt, { color: p.text }]}>{amountStr}</Text>
                     </View>
                   );
                 })
@@ -435,7 +477,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onViewBudget
             </SectionCard>
 
           </View>
-        </ScrollView>
+        </Animated.ScrollView>
 
         <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
       </ImageBackground>
@@ -566,6 +608,44 @@ const TxRow = React.memo(function TxRow({
   );
 });
 
+// ── MoreMenuButton ────────────────────────────────────────────────
+// Native iOS dropdown menu. The trigger is rendered as a QuickAction-
+// styled label embedded in the SwiftUI Menu via RNHostView; tapping it
+// opens the platform menu with Button rows. Same visual rhythm as the
+// other three quick-actions, but the dropdown itself is fully native.
+function MoreMenuButton({
+  dark, p, shadow, onEditTheme, onAddRecurring,
+}: {
+  dark: boolean;
+  p: P;
+  shadow?: object;
+  onEditTheme: () => void;
+  onAddRecurring: () => void;
+}) {
+  const circleBg     = dark ? 'rgba(28,22,56,0.55)' : 'rgba(255,255,255,0.92)';
+  const circleBorder = dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
+  const iconColor    = dark ? p.text : '#0E0C18';
+  return (
+    <Host style={styles.qa} matchContents>
+      <Menu
+        label={
+          <RNHostView>
+            <View style={styles.qaInner}>
+              <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
+                <Icon name="ellipsis" size={20} color={iconColor} stroke={1.7} />
+              </View>
+              <Text style={[styles.qaLabel, { color: p.text }, shadow]}>More</Text>
+            </View>
+          </RNHostView>
+        }
+      >
+        <Button label="Edit theme" systemImage="paintbrush" onPress={onEditTheme} />
+        <Button label="Add recurring expense" systemImage="arrow.triangle.2.circlepath" onPress={onAddRecurring} />
+      </Menu>
+    </Host>
+  );
+}
+
 const styles = StyleSheet.create({
   headerWrap: {
     position: 'absolute',
@@ -575,6 +655,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 8,
     zIndex: 10,
+    overflow: 'hidden',
+  },
+  headerDivider: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
   },
   headerRow: {
     flexDirection: 'row',
@@ -637,9 +725,11 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   qa: {
+    flex: 1,
+  },
+  qaInner: {
     alignItems: 'center',
     gap: 8,
-    flex: 1,
   },
   qaCircle: {
     width: 56,

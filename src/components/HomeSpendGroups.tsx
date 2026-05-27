@@ -73,7 +73,9 @@ function GroupPanel({
 
   const chevRotate = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
 
-  const color = (onMedia || theme.dark) ? GROUP_COLORS[group.key].dark : GROUP_COLORS[group.key].light;
+  const color = (onMedia || theme.dark)
+    ? GROUP_COLORS[group.key].dark
+    : GROUP_COLORS[group.key].vibrant;
   const groupTotal = group.subs.reduce((s, x) => s + x.spent, 0);
   const actualPct = income > 0 ? groupTotal / income : 0;
   const fill = Math.min(actualPct / group.targetPct, 1);
@@ -88,9 +90,9 @@ function GroupPanel({
 
   const headerTint = onMedia
     ? `${color}${ON_MEDIA.headerTintHex}`
-    : theme.dark ? `${color}12` : `${color}0D`;
+    : theme.dark ? `${color}12` : `${color}26`;
   const textColor = onMedia ? ON_MEDIA.text : theme.text;
-  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.textTer;
+  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.dark ? theme.textTer : theme.textSec;
   const sepColor = onMedia ? ON_MEDIA.sep : theme.sep;
   const trackBg = onMedia
     ? ON_MEDIA.trackBg
@@ -158,7 +160,7 @@ function DetailRows({
   theme: Theme; group: SpendGroup; color: string; isSavings: boolean; onMedia?: boolean;
 }) {
   const textColor = onMedia ? ON_MEDIA.text : theme.text;
-  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.textTer;
+  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.dark ? theme.textTer : theme.textSec;
   const trackBg = onMedia ? ON_MEDIA.hairline : theme.hairline;
 
   return (

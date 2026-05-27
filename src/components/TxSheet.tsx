@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, TextInput, ScrollView, StyleSheet, Animated, Easing } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
-import { presentationDetents, presentationDragIndicator, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { presentationDetents, presentationDragIndicator, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
 
 const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
 const DETENT_LARGE: PresentationDetent = 'large';
@@ -76,9 +76,12 @@ export function TxSheet({
           <Group modifiers={[
             presentationDetents(DETENTS, { selection: detent, onSelectionChange: setDetent }),
             presentationDragIndicator('visible'),
+            environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
           ]}>
             <RNHostView>
-              <View style={[S.content, { backgroundColor: theme.surface }]}>
+              <View style={[S.content, {
+                backgroundColor: theme.dark ? 'rgba(14,12,26,0.89)' : 'rgba(255,255,255,0.40)',
+              }]}>
                 {t && (
                   <>
                     {!isExpanded && (

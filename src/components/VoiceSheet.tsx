@@ -33,9 +33,10 @@ interface VoiceSheetProps {
   theme: Theme;
   visible: boolean;
   onClose: () => void;
+  initialMode?: 'voice' | 'manual';
 }
 
-export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
+export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: VoiceSheetProps) {
   const insets = useSafeAreaInsets();
 
   const [detent, setDetent] = useState<PresentationDetent>(VOICE_DETENT_DEFAULT);
@@ -102,8 +103,6 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
 
   useEffect(() => {
     if (visible) {
-      setDetent(VOICE_DETENT_DEFAULT);
-      setMode('idle');
       setManualAmt('0');
       setManualCat('groceries');
       setManualMerchant('');
@@ -111,7 +110,14 @@ export function VoiceSheet({ theme, visible, onClose }: VoiceSheetProps) {
       setParsedAmtStr('');
       setParsedNote('');
       voice.reset();
-      voice.start();
+      if (initialMode === 'manual') {
+        setDetent(VOICE_DETENT_LARGE);
+        setMode('manual');
+      } else {
+        setDetent(VOICE_DETENT_DEFAULT);
+        setMode('idle');
+        voice.start();
+      }
     } else {
       voice.abort();
       stopWave();

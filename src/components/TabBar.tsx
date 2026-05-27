@@ -112,10 +112,12 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
           style={[
             styles.blurPill,
             {
-              borderColor: theme.hairline,
+              borderColor: theme.dark
+                ? 'rgba(235,225,255,0.32)'
+                : 'rgba(14,12,24,0.22)',
               shadowColor: '#000',
               shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: theme.dark ? 0.5 : 0.08,
+              shadowOpacity: theme.dark ? 0.5 : 0.22,
               shadowRadius: 20,
             },
           ]}
@@ -128,7 +130,9 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
             styles.blurPill,
             {
               backgroundColor: theme.dark ? 'rgba(20,20,24,0.95)' : 'rgba(255,255,255,0.95)',
-              borderColor: theme.hairline,
+              borderColor: theme.dark
+                ? 'rgba(235,225,255,0.32)'
+                : 'rgba(14,12,24,0.22)',
               elevation: 12,
             },
           ]}

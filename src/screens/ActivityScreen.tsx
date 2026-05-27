@@ -35,29 +35,21 @@ import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
 import { Collapsible } from '../components/Collapsible';
+import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { Theme, catGroupColor, GROUP_COLORS, cautionBg, cautionText, flagBg } from '../theme';
+import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim } from '../wallpaperPalette';
 import { TYPE } from '../typography';
+import { useTheme } from '../ThemeProvider';
 
-const WALLPAPER = require('../../assets/example-images/wallpaper.jpg');
-
-const MEDIA = {
-  text: '#FFFFFF',
-  textSec: 'rgba(255,255,255,0.78)',
-  textTer: 'rgba(255,255,255,0.62)',
-  hairline: 'rgba(255,255,255,0.18)',
-  hairlineStrong: 'rgba(255,255,255,0.28)',
-};
-
-const ON_MEDIA_TEXT_SHADOW = {
-  textShadowColor: 'rgba(0,0,0,0.35)',
-  textShadowOffset: { width: 0, height: 1 },
-  textShadowRadius: 6,
-};
-
-function SectionCard({ children, style, noPad }: { children: React.ReactNode; style?: any; noPad?: boolean }) {
+function SectionCard({ children, style, noPad, dark }: { children: React.ReactNode; style?: any; noPad?: boolean; dark: boolean }) {
+  const borderColor = dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
   return (
-    <BlurView intensity={70} tint="systemMaterialDark" style={[S.sectionCard, style]}>
-      <View style={[S.sectionCardBorder, noPad && S.sectionCardBorderFlush]}>
+    <BlurView
+      intensity={dark ? 70 : 100}
+      tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+      style={[S.sectionCard, style]}
+    >
+      <View style={[S.sectionCardBorder, noPad && S.sectionCardBorderFlush, { borderColor }]}>
         {children}
       </View>
     </BlurView>
@@ -132,6 +124,7 @@ interface Props {
 
 export function ActivityScreen({ theme, onOpenDrawer }: Props) {
   const insets = useSafeAreaInsets();
+  const { wallpaper } = useTheme();
 
   const [query, setQuery]                   = useState('');
   const [catFilter, setCatFilter]           = useState<string[]>([]);
@@ -165,9 +158,22 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
 
   const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
 
+  const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
+
+  // Calendar-driven month filter: when the user navigates the calendar
+  // away from the default month, the transaction list narrows to that
+  // month. Explicit date filters (preset / custom range) take precedence,
+  // since they encode a more specific user intent.
+  const isViewingNonDefaultMonth =
+    calViewMonth !== CALENDAR_MONTH || calViewYear !== CALENDAR_YEAR;
+
   const filtered = useMemo(() => {
     const result = TRANSACTIONS.filter(t => {
       if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
+      if (isViewingNonDefaultMonth && dateFilter === null) {
+        const pd = parseMonthDay(t.fullDate);
+        if (!pd || pd.month !== calViewMonth) return false;
+      }
       if (dateFilter !== null) {
         if (typeof dateFilter === 'string') {
           if (dateFilter === 'today'     && t.when !== 'today')     return false;
@@ -198,7 +204,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     else if (sortBy === 'date-asc')    result.reverse();
     else if (sortBy === 'cat')         result.sort((a, b) => a.cat.localeCompare(b.cat) || a.merchant.localeCompare(b.merchant));
     return result;
-  }, [query, catFilter, dateFilter, sortBy]);
+  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth]);
 
   const grouped = useMemo(() => {
     const g: Record<string, { txs: Transaction[]; total: number }> = {};
@@ -261,16 +267,20 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
   }, [selectedDay, calViewMonth, calSource, calBills]);
 
-  const scrimTop    = theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.40)';
-  const scrimMid    = theme.dark ? 'rgba(0,0,0,0.20)' : 'rgba(0,0,0,0.05)';
-  const scrimLower  = theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
-  const scrimBottom = theme.dark ? 'rgba(0,0,0,0.80)' : 'rgba(0,0,0,0.65)';
+  const pWallpaper = makeP(true);
+  const p          = makeP(theme.dark);
+  const scrim      = makeScrim(theme.dark);
+
+  const scrimTop    = scrim.top;
+  const scrimMid    = scrim.mid;
+  const scrimLower  = scrim.lower;
+  const scrimBottom = scrim.bottom;
 
   const hasFilterPills = selectedDay !== null || dateFilter !== null || catFilter.length > 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <ImageBackground source={WALLPAPER} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
+    <View style={{ flex: 1, backgroundColor: theme.dark ? '#000' : '#F8F6FF' }}>
+      <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
         <LinearGradient
           pointerEvents="none"
           colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
@@ -280,6 +290,19 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
 
         {/* ── Header — pinned ─────────────────────────────────────── */}
         <View style={[S.header, { paddingTop: insets.top + 8 }]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFillObject, { opacity: headerBgOpacity }]}
+          >
+            <BlurView
+              intensity={theme.dark ? 70 : 100}
+              tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View style={[S.headerDivider, {
+              backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)',
+            }]} />
+          </Animated.View>
           <Pressable
             onPress={onOpenDrawer}
             pointerEvents="box-only"
@@ -288,23 +311,41 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Open menu"
           >
-            <Icon name="menu" size={22} color={MEDIA.text} stroke={1.7} />
+            <HeaderIcon
+              name="menu"
+              wallpaperColor={pWallpaper.text}
+              scrolledColor={p.text}
+              scrolledOpacity={iconScrolledOpacity}
+            />
           </Pressable>
-          <Text style={[S.title, { color: MEDIA.text }, ON_MEDIA_TEXT_SHADOW]}>History</Text>
+          <View style={S.titleStack}>
+            <Text style={[S.title, { color: pWallpaper.text }, DARK_TEXT_SHADOW]}>History</Text>
+            <Animated.Text
+              style={[S.title, S.titleScrolled, { color: p.text, opacity: iconScrolledOpacity }]}
+              pointerEvents="none"
+            >
+              History
+            </Animated.Text>
+          </View>
           <ThemeToggle />
         </View>
 
         {/* ── Scrollable content ──────────────────────────────────── */}
-        <ScrollView
+        <Animated.ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          scrollEventThrottle={16}
         >
           <View style={S.sectionStack}>
 
             {/* ── Calendar card ─────────────────────────────────── */}
-            <SectionCard noPad>
+            <SectionCard noPad dark={theme.dark}>
               <Collapsible open={calOpen}>
                 <View style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 }}>
                   <TransactionCalendar
@@ -323,7 +364,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                       setCalViewMonth(m);
                       setSelectedDay(null);
                     }}
-                    overrideColors={{
+                    overrideColors={theme.dark ? {
                       text: MEDIA.text,
                       textSec: MEDIA.textSec,
                       textTer: MEDIA.textTer,
@@ -332,7 +373,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                       todayBorder: MEDIA.textSec,
                       dotFill: MEDIA.textSec,
                       billDotBorder: MEDIA.textTer,
-                    }}
+                    } : undefined}
                   />
                 </View>
               </Collapsible>
@@ -341,36 +382,36 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
               <Pressable
                 onPress={() => setCalOpen(o => !o)}
                 pointerEvents="box-only"
-                style={[S.calHandle, { borderTopColor: calOpen ? MEDIA.hairline : 'transparent' }]}
+                style={[S.calHandle, { borderTopColor: calOpen ? p.hairline : 'transparent' }]}
                 accessibilityRole="button"
                 accessibilityLabel={calOpen ? 'Hide calendar' : 'Show calendar'}
                 accessibilityState={{ expanded: calOpen }}
               >
                 <View style={S.calShowRow}>
-                  <Icon name="cal" size={12} color={MEDIA.textSec} stroke={1.5} />
-                  <Text style={[S.calShowText, { color: MEDIA.textSec }]}>
+                  <Icon name="cal" size={12} color={p.textSec} stroke={1.5} />
+                  <Text style={[S.calShowText, { color: p.textSec }]}>
                     {calOpen ? 'Hide calendar' : 'Show calendar'}
                   </Text>
                   {selectedDay !== null && (
-                    <View style={[S.calActiveDot, { backgroundColor: MEDIA.textSec }]} />
+                    <View style={[S.calActiveDot, { backgroundColor: p.textSec }]} />
                   )}
                   <View style={{ flex: 1 }} />
-                  <Icon name={calOpen ? 'chevUp' : 'chevDown'} size={10} color={MEDIA.textSec} stroke={1.8} />
+                  <Icon name={calOpen ? 'chevUp' : 'chevDown'} size={10} color={p.textSec} stroke={1.8} />
                 </View>
               </Pressable>
             </SectionCard>
 
             {/* ── Search + filter card ──────────────────────────── */}
-            <SectionCard>
+            <SectionCard dark={theme.dark}>
               <View style={S.searchRow}>
-                <View style={[S.search, { flex: 1, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: MEDIA.hairline }]}>
-                  <Icon name="search" size={16} color={MEDIA.textSec} />
+                <View style={[S.search, { flex: 1, backgroundColor: theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(14,12,24,0.06)', borderColor: p.hairline }]}>
+                  <Icon name="search" size={16} color={p.textSec} />
                   <TextInput
                     value={query}
                     onChangeText={setQuery}
                     placeholder="Search transactions…"
-                    placeholderTextColor={MEDIA.textTer}
-                    style={[S.searchInput, { color: MEDIA.text }]}
+                    placeholderTextColor={p.textTer}
+                    style={[S.searchInput, { color: p.text }]}
                     returnKeyType="search"
                     accessibilityLabel="Search transactions"
                   />
@@ -381,21 +422,23 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                       accessibilityRole="button"
                       accessibilityLabel="Clear search"
                     >
-                      <Icon name="close" size={14} color={MEDIA.textSec} />
+                      <Icon name="close" size={14} color={p.textSec} />
                     </TouchableOpacity>
                   )}
                 </View>
                 <TouchableOpacity
                   onPress={() => setFilterSheetOpen(true)}
                   activeOpacity={0.7}
-                  style={[S.filterBtn, { backgroundColor: activeCount > 0 ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.12)' }]}
+                  style={[S.filterBtn, { backgroundColor: activeCount > 0
+                    ? (theme.dark ? 'rgba(255,255,255,0.90)' : 'rgba(14,12,24,0.85)')
+                    : (theme.dark ? 'rgba(255,255,255,0.12)' : 'rgba(14,12,24,0.08)') }]}
                   accessibilityRole="button"
                   accessibilityLabel={activeCount > 0 ? `Filters, ${activeCount} active` : 'Filters'}
                 >
-                  <Icon name="filter" size={15} color={activeCount > 0 ? 'rgba(0,0,0,0.75)' : MEDIA.textSec} stroke={1.6} />
+                  <Icon name="filter" size={15} color={activeCount > 0 ? (theme.dark ? 'rgba(0,0,0,0.75)' : '#FBF8FF') : p.textSec} stroke={1.6} />
                   {activeCount > 0 && (
-                    <View style={[S.filterBadge, { backgroundColor: 'rgba(0,0,0,0.12)' }]}>
-                      <Text style={[S.filterBadgeText, { color: 'rgba(0,0,0,0.75)' }]}>{activeCount}</Text>
+                    <View style={[S.filterBadge, { backgroundColor: theme.dark ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.18)' }]}>
+                      <Text style={[S.filterBadgeText, { color: theme.dark ? 'rgba(0,0,0,0.75)' : '#FBF8FF' }]}>{activeCount}</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -411,9 +454,9 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                   keyboardShouldPersistTaps="handled"
                 >
                   {selectedDay !== null && (
-                    <View style={[S.filterPill, { backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: MEDIA.hairline }]}>
-                      <Icon name="cal" size={10} color={MEDIA.textSec} stroke={1.7} />
-                      <Text style={[S.filterPillText, { color: MEDIA.text }]}>
+                    <View style={[S.filterPill, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.15)' : 'rgba(14,12,24,0.08)', borderWidth: 1, borderColor: p.hairline }]}>
+                      <Icon name="cal" size={10} color={p.textSec} stroke={1.7} />
+                      <Text style={[S.filterPillText, { color: p.text }]}>
                         {MONTHS[calViewMonth]} {selectedDay}
                       </Text>
                       <TouchableOpacity
@@ -422,7 +465,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                         accessibilityRole="button"
                         accessibilityLabel="Clear day selection"
                       >
-                        <Icon name="close" size={10} color={MEDIA.textSec} stroke={2} />
+                        <Icon name="close" size={10} color={p.textSec} stroke={2} />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -462,7 +505,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                     return (
                       <View key={catId} style={[S.filterPill, { backgroundColor: groupColor + '30' }]}>
                         <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
-                        <Text style={[S.filterPillText, { color: MEDIA.text }]}>{cat?.label}</Text>
+                        <Text style={[S.filterPillText, { color: p.text }]}>{cat?.label}</Text>
                         <TouchableOpacity
                           onPress={() => setCatFilter(catFilter.filter(c => c !== catId))}
                           hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
@@ -479,11 +522,11 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
             </SectionCard>
 
             {/* ── Transactions card ─────────────────────────────── */}
-            <SectionCard>
+            <SectionCard dark={theme.dark}>
               {selectedDay !== null ? (
                 <>
                   {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
-                    <Text style={[S.detailEmpty, { color: MEDIA.textTer }]}>No activity this day</Text>
+                    <Text style={[S.detailEmpty, { color: p.textTer }]}>No activity this day</Text>
                   ) : (
                     <View>
                       {dayDetail.txs.map((tx, i) => (
@@ -517,7 +560,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
             </SectionCard>
 
           </View>
-        </ScrollView>
+        </Animated.ScrollView>
 
         <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
 
@@ -976,6 +1019,7 @@ function DayGroup({
   theme: Theme;
   onPress: (tx: Transaction) => void;
 }) {
+  const p     = makeP(theme.dark);
   const { txs } = group;
   const label =
     txs[0]?.when === 'today'     ? 'Today'
@@ -985,7 +1029,7 @@ function DayGroup({
   return (
     <View style={{ marginBottom: 16 }}>
       <View style={S.dayHeader}>
-        <Text style={[S.dayLabel, { color: MEDIA.textTer }]}>{label}</Text>
+        <Text style={[S.dayLabel, { color: p.textTer }]}>{label}</Text>
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
@@ -1068,6 +1112,7 @@ function TxRow({
 }: {
   tx: Transaction; theme: Theme; onPress: () => void; last: boolean;
 }) {
+  const p          = makeP(theme.dark);
   const cat        = CATS[tx.cat];
   const groupColor = catGroupColor(tx.cat, theme.dark);
 
@@ -1076,24 +1121,23 @@ function TxRow({
       onPress={onPress}
       delayPressIn={0}
       activeOpacity={0.6}
-      style={S.txRow}
+      style={[S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}
       accessibilityRole="button"
       accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, $${tx.amount.toFixed(2)}`}
     >
       <View style={[S.txIcon, { backgroundColor: groupColor }]}>
-        <Icon name={cat?.icon} size={16} color="#fff" stroke={1.6} />
+        <Icon name={cat?.icon} size={16} color="#FBF8FF" stroke={1.6} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
-          <Text style={[S.txName, { color: MEDIA.text, flexShrink: 1 }]} numberOfLines={1}>
+          <Text style={[S.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>
             {tx.merchant}
           </Text>
-          {tx.recurring && <Icon name="repeat" size={11} color={MEDIA.textTer} stroke={1.7} />}
+          {tx.recurring && <Icon name="repeat" size={11} color={p.textTer} stroke={1.7} />}
         </View>
-        <Text style={[S.txMeta, { color: MEDIA.textSec }]}>{cat?.label} · {tx.time}</Text>
+        <Text style={[S.txMeta, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Money value={tx.amount} size={13} weight="500" theme={theme} color={MEDIA.textSec} />
-      {!last && <View style={[S.rowSep, { backgroundColor: MEDIA.hairline }]} />}
+      <Money value={tx.amount} size={13} weight="500" theme={theme} color={p.text} />
     </TouchableOpacity>
   );
 }
@@ -1101,20 +1145,21 @@ function TxRow({
 // ─── BillRow ─────────────────────────────────────────────────────────────────
 
 function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last: boolean }) {
+  const p          = makeP(theme.dark);
   const groupColor = catGroupColor(bill.cat, theme.dark);
   return (
-    <View style={S.txRow}>
+    <View style={[S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}>
       <View style={[S.billIcon, { borderColor: groupColor }]}>
         <Icon name={bill.icon} size={15} color={groupColor} stroke={1.7} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
-          <Text style={[S.txName, { color: MEDIA.text, flexShrink: 1 }]} numberOfLines={1}>
+          <Text style={[S.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>
             {bill.name}
           </Text>
-          <Icon name="repeat" size={11} color={MEDIA.textTer} stroke={1.7} />
+          <Icon name="repeat" size={11} color={p.textTer} stroke={1.7} />
         </View>
-        <Text style={[S.txMeta, { color: MEDIA.textSec }]}>
+        <Text style={[S.txMeta, { color: p.textSec }]}>
           {bill.estimate ? 'Estimated · Upcoming bill' : 'Upcoming bill'}
         </Text>
       </View>
@@ -1124,14 +1169,13 @@ function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last
           size={13}
           weight="500"
           theme={theme}
-          color={MEDIA.textSec}
+          color={p.text}
           prefix="$"
         />
         <View style={[S.upcomingPill, { backgroundColor: 'rgba(255,200,80,0.18)' }]}>
           <Text style={[S.upcomingText, { color: 'rgba(255,200,80,0.9)' }]}>Upcoming</Text>
         </View>
       </View>
-      {!last && <View style={[S.rowSep, { backgroundColor: MEDIA.hairline }]} />}
     </View>
   );
 }
@@ -1143,22 +1187,23 @@ function EmptyState({ theme, isFiltered, onClearFilters }: {
   isFiltered: boolean;
   onClearFilters?: () => void;
 }) {
+  const p = makeP(theme.dark);
   return (
     <View style={S.empty}>
-      <Icon name="search" size={28} color={MEDIA.textTer} />
-      <Text style={[S.emptyTitle, { color: MEDIA.textSec }]}>
+      <Icon name="search" size={28} color={p.textTer} />
+      <Text style={[S.emptyTitle, { color: p.textSec }]}>
         {isFiltered ? 'No results' : 'No transactions yet'}
       </Text>
-      <Text style={[S.emptyBody, { color: MEDIA.textTer }]}>
+      <Text style={[S.emptyBody, { color: p.textTer }]}>
         {isFiltered ? 'Try adjusting your filters' : 'Your spending will appear here'}
       </Text>
       {isFiltered && onClearFilters && (
         <TouchableOpacity
           onPress={onClearFilters}
           activeOpacity={0.7}
-          style={[S.emptyClear, { backgroundColor: 'rgba(255,255,255,0.12)' }]}
+          style={[S.emptyClear, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.12)' : 'rgba(14,12,24,0.07)' }]}
         >
-          <Text style={[S.emptyClearText, { color: MEDIA.textSec }]}>Clear filters</Text>
+          <Text style={[S.emptyClearText, { color: p.textSec }]}>Clear filters</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -1180,13 +1225,32 @@ const S = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 10,
     zIndex: 10,
+    overflow: 'hidden',
+  },
+  headerDivider: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
   },
   iconBtn: {
     width: 40, height: 40,
     alignItems: 'center', justifyContent: 'center',
   },
+  titleStack: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   title: {
     ...TYPE.pageTitle,
+  },
+  titleScrolled: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    textAlign: 'center',
   },
 
   // Section stack
@@ -1201,7 +1265,6 @@ const S = StyleSheet.create({
   sectionCardBorder: {
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 12,
@@ -1296,13 +1359,6 @@ const S = StyleSheet.create({
     textTransform: 'none',
     letterSpacing: 0,
   },
-  rowSep: {
-    position: 'absolute',
-    bottom: 0,
-    left: 48,
-    right: 0,
-    height: 1,
-  },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'baseline', paddingHorizontal: 2, marginBottom: 6,
@@ -1316,7 +1372,7 @@ const S = StyleSheet.create({
   },
   txRow: {
     flexDirection: 'row', alignItems: 'center',
-    gap: 12, paddingVertical: 12, paddingHorizontal: 2,
+    gap: 12, paddingVertical: 14,
   },
   txIcon: {
     width: 36, height: 36, borderRadius: 18,

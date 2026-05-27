@@ -127,10 +127,10 @@ export const HERO_AVAIL = '#5CC4BA';
 
 // Accent colors for the three 50/30/20 spending groups.
 // Import GROUP_COLORS in any component that needs to color by group.
-export const GROUP_COLORS: Record<string, { light: string; dark: string }> = {
-  needs:   { light: '#5B7FBB', dark: '#7A9ED8' },
-  wants:   { light: '#B86C60', dark: '#D08878' },
-  savings: { light: '#4AA8A0', dark: '#5CC4BA' },
+export const GROUP_COLORS: Record<string, { light: string; dark: string; vibrant: string }> = {
+  needs:   { light: '#5B7FBB', dark: '#7A9ED8', vibrant: '#2857CC' },
+  wants:   { light: '#B86C60', dark: '#D08878', vibrant: '#C4311E' },
+  savings: { light: '#4AA8A0', dark: '#5CC4BA', vibrant: '#0A8C85' },
 };
 
 // Maps every transaction category key to its spending group.
