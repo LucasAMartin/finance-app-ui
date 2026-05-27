@@ -429,7 +429,19 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const commitIncome = () => {
     const v = parseAmountDraft(incomeDraft);
     if (v === null || v <= 0) return;
-    setIncome(toMonthly(v, cadence));
+    const monthly = toMonthly(v, cadence);
+    const primary = incomes[0];
+    if (primary) {
+      incomeRepo.update(primary.id, { amount: monthly });
+    } else {
+      incomeRepo.create({
+        amount: monthly,
+        source: 'Primary income',
+        cadence: 'monthly',
+        startDate: new Date().toISOString().slice(0, 10),
+      });
+    }
+    setIncome(monthly);
     setIncomeSheetOpen(false);
   };
 
@@ -438,8 +450,31 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     setTemplatePromptVisible(false);
   }, []);
 
+  const syncBudgetRecord = (key: string, v: number) => {
+    if (key.startsWith('bill:')) {
+      const [, , billId] = key.split(':');
+      if (billId) billsRepo.update(billId, { amount: v });
+      return;
+    }
+    const [groupKey, label] = key.split(':') as [SpendGroup['key'] | undefined, string | undefined];
+    if (!groupKey || !label) return;
+    const existing = budgetRecords.find(b => b.group === groupKey && b.label === label && b.month === '2026-05');
+    if (existing) {
+      budgetsRepo.update(existing.id, { amount: v });
+    } else {
+      budgetsRepo.create({
+        month: '2026-05',
+        group: groupKey,
+        label,
+        icon: visibleSpendGroups.find(g => g.key === groupKey)?.subs.find(s => s.label === label)?.icon ?? 'tag',
+        amount: v,
+      });
+    }
+  };
+
   const updateBudget = (key: string, v: number) => {
     markBudgetTouched();
+    syncBudgetRecord(key, v);
     setBudgets(b => ({ ...b, [key]: v }));
   };
 
@@ -458,6 +493,8 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     saveSnapshot();
     if (isCustom) {
       setCustomSubs(prev => ({ ...prev, [gKey]: prev[gKey].filter(s => s.label !== label) }));
+      const existing = budgetRecords.find(b => b.group === gKey && b.label === label && b.month === '2026-05');
+      if (existing) budgetsRepo.delete(existing.id);
       setBudgets(b => { const n = { ...b }; delete n[bKey(gKey, label)]; return n; });
     } else {
       setRemovedSubs(prev => new Set([...prev, bKey(gKey, label)]));
@@ -480,6 +517,14 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     ]);
     if (taken.has(label.toLowerCase())) return;
     markBudgetTouched();
+    budgetsRepo.create({
+      month: '2026-05',
+      group: gKey as SpendGroup['key'],
+      label,
+      icon: 'tag',
+      amount: 0,
+      meta: { custom: true },
+    });
     setCustomSubs(prev => ({ ...prev, [gKey]: [...(prev[gKey] ?? []), { label }] }));
     setBudgets(b => ({ ...b, [bKey(gKey, label)]: 0 }));
     setAddingFor(null);

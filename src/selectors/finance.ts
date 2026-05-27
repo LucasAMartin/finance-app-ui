@@ -5,6 +5,7 @@ import {
   SEED_PERIOD_DATA,
   SEED_SPARK_7D,
   SEED_SPEND_GROUPS,
+  SEED_TRANSACTIONS,
   SEED_TREND,
 } from '../data';
 import type { Budget, Income, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
@@ -13,6 +14,25 @@ import type { PeriodData, TrendConfig } from './types';
 export type Period = 'Week' | 'Month' | 'Year';
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
+
+const subCategory: Record<string, string | undefined> = {
+  Groceries: 'groceries',
+  Transportation: 'transport',
+  Dining: 'dining',
+  Shopping: 'shopping',
+  Entertainment: 'entertainment',
+  Utilities: 'bills',
+};
+
+const seedCatTotals = SEED_TRANSACTIONS.reduce<Record<string, number>>((acc, tx) => {
+  acc[tx.cat] = (acc[tx.cat] ?? 0) + tx.amount;
+  return acc;
+}, {});
+
+function categoryTotal(transactions: Transaction[], cat: string | undefined): number {
+  if (!cat) return 0;
+  return transactions.filter(tx => tx.cat === cat).reduce((sum, tx) => sum + tx.amount, 0);
+}
 
 export function monthlyIncome(incomes: Income[]): number {
   return incomes[0]?.amount ?? DEFAULT_MONTHLY_INCOME;
@@ -81,15 +101,17 @@ export function groupSpent(
   return spendGroups(transactions, budgets).find(group => group.key === groupKey);
 }
 
-export function spendGroups(_transactions: Transaction[], budgets: Budget[] = []): SpendGroup[] {
+export function spendGroups(transactions: Transaction[], budgets: Budget[] = []): SpendGroup[] {
   return SEED_SPEND_GROUPS.map(group => ({
     ...group,
     subs: group.subs.map(sub => {
       const budget = budgets.find(b => b.group === group.key && b.label === sub.label);
+      const cat = subCategory[sub.label];
+      const baselineSpent = sub.spent - (cat ? (seedCatTotals[cat] ?? 0) : 0);
       return {
         ...sub,
         budget: budget?.amount ?? sub.budget,
-        spent: budget?.spent ?? sub.spent,
+        spent: roundMoney(baselineSpent + categoryTotal(transactions, cat)),
       };
     }),
   }));
@@ -105,9 +127,11 @@ export function monthSpent(
 
 export function monthBudgets(transactions: Transaction[], budgets: Budget[] = []): MonthBudget[] {
   const monthlyBudget = currentMonthlyBudget(budgets);
+  const seedTransactionTotal = SEED_TRANSACTIONS.reduce((sum, tx) => sum + tx.amount, 0);
+  const transactionTotal = transactions.reduce((sum, tx) => sum + tx.amount, 0);
   return SEED_MONTH_BUDGETS.map((month, idx) => {
     if (idx !== 0) return { ...month };
-    const spent = roundMoney(transactions.reduce((sum, tx) => sum + tx.amount, 0));
+    const spent = roundMoney(month.spent - seedTransactionTotal + transactionTotal);
     return {
       ...month,
       spent,

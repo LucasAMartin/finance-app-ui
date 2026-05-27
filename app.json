@@ -41,7 +41,8 @@
           "speechRecognitionPermission": "Allow finance-app to recognize speech so you can add expenses hands-free."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {

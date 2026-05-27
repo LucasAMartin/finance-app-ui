@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
+import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { makeTheme, Theme, AccentKey, CardStyle } from './theme';
 import { DEFAULT_WALLPAPER_ID, findWallpaperById, Wallpaper } from './wallpapers';
+import { useRepositories, useRepositoryList } from './repositories/RepositoryProvider';
 
 interface ThemeCtx {
   theme: Theme;
@@ -36,11 +37,21 @@ export function ThemeProvider({
   defaultCardStyle = 'flat',
   defaultWallpaperId = DEFAULT_WALLPAPER_ID,
 }: ProviderProps) {
+  const { settingsRepo } = useRepositories();
+  const settingsList = useRepositoryList(settingsRepo);
   const system = useColorScheme();
-  const [dark, setDark] = useState<boolean>(followSystem ? system === 'dark' : defaultDark);
-  const [accentKey, setAccentKey] = useState<AccentKey>(defaultAccent);
-  const [cardStyle, setCardStyle] = useState<CardStyle>(defaultCardStyle);
-  const [wallpaperId, setWallpaperId] = useState<string>(defaultWallpaperId);
+  const settings = settingsList[0] ?? {
+    id: 'settings' as const,
+    themeDark: followSystem ? system === 'dark' : defaultDark,
+    accentKey: defaultAccent,
+    cardStyle: defaultCardStyle,
+    wallpaperId: defaultWallpaperId,
+  };
+
+  const dark = settings.themeDark;
+  const accentKey = settings.accentKey;
+  const cardStyle = settings.cardStyle;
+  const wallpaperId = settings.wallpaperId ?? defaultWallpaperId;
 
   const theme = useMemo(
     () => makeTheme(dark, accentKey, cardStyle),
@@ -49,7 +60,19 @@ export function ThemeProvider({
 
   const wallpaper = useMemo(() => findWallpaperById(wallpaperId), [wallpaperId]);
 
-  const toggleDark = useCallback(() => setDark(d => !d), []);
+  const setDark = useCallback((v: boolean) => {
+    settingsRepo.update('settings', { themeDark: v }) ?? settingsRepo.create({ ...settings, themeDark: v });
+  }, [settingsRepo, settings]);
+  const setAccentKey = useCallback((k: AccentKey) => {
+    settingsRepo.update('settings', { accentKey: k }) ?? settingsRepo.create({ ...settings, accentKey: k });
+  }, [settingsRepo, settings]);
+  const setCardStyle = useCallback((s: CardStyle) => {
+    settingsRepo.update('settings', { cardStyle: s }) ?? settingsRepo.create({ ...settings, cardStyle: s });
+  }, [settingsRepo, settings]);
+  const setWallpaperId = useCallback((id: string) => {
+    settingsRepo.update('settings', { wallpaperId: id }) ?? settingsRepo.create({ ...settings, wallpaperId: id });
+  }, [settingsRepo, settings]);
+  const toggleDark = useCallback(() => setDark(!dark), [dark, setDark]);
 
   const value = useMemo<ThemeCtx>(
     () => ({
@@ -58,7 +81,7 @@ export function ThemeProvider({
       cardStyle, setCardStyle,
       wallpaperId, wallpaper, setWallpaperId,
     }),
-    [theme, dark, toggleDark, accentKey, cardStyle, wallpaperId, wallpaper],
+    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

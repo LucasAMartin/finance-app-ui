@@ -15,6 +15,18 @@ export interface Transaction {
   meta?: Record<string, unknown>;
 }
 
+export interface CreateTransactionInput {
+  merchant: string;
+  cat: string;
+  amount: number;
+  note?: string;
+  occurredAt?: string;
+  recurring?: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export type UpdateTransactionInput = Partial<CreateTransactionInput>;
+
 export interface Income {
   id: string;
   amount: number;
@@ -72,7 +84,7 @@ export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'
   subscribe(listener: RepoListener): Unsubscribe;
 }
 
-export type TransactionsRepo = Repository<Transaction>;
+export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, UpdateTransactionInput>;
 export type IncomeRepo = Repository<Income>;
 export type BillsRepo = Repository<Bill>;
 export type BudgetsRepo = Repository<Budget>;

@@ -13,7 +13,7 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import type { Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { Money } from './shared';
-import { Theme, catGroupColor, catPastel, CAT_TO_GROUP, GROUP_COLORS } from '../theme';
+import { Theme, catGroupColor, catPastel, CAT_TO_GROUP, GROUP_COLORS, OVER_DOT } from '../theme';
 import { TYPE } from '../typography';
 
 const EXPENSE_GROUPS = [
@@ -70,6 +70,28 @@ export function TxSheet({
       editAnim.setValue(0);
     }
   }, [isExpanded]);
+
+  const saveEdit = () => {
+    if (!t) return;
+    const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    transactionsRepo.update(t.id, {
+      amount,
+      cat: editCat,
+      merchant: editMerchant.trim() || t.merchant,
+      note: editNote,
+      occurredAt: t.occurredAt,
+      recurring: t.recurring,
+      meta: t.meta,
+    });
+    onClose();
+  };
+
+  const deleteTx = () => {
+    if (!t) return;
+    transactionsRepo.delete(t.id);
+    onClose();
+  };
 
   return (
     <Host style={{ width: 0, height: 0, position: 'absolute' }}>
@@ -137,7 +159,8 @@ export function TxSheet({
                             setEditNote={setEditNote}
                             editAmt={editAmt}
                             setEditAmt={setEditAmt}
-                            onClose={onClose}
+                            onSave={saveEdit}
+                            onDelete={deleteTx}
                           />
                         </Animated.View>
                       )}
@@ -217,14 +240,15 @@ function SheetBody({
 
 function EditSection({
   theme, editCat, setEditCat, editMerchant, setEditMerchant,
-  editNote, setEditNote, editAmt, setEditAmt, onClose,
+  editNote, setEditNote, editAmt, setEditAmt, onSave, onDelete,
 }: {
   theme: Theme;
   editCat: string; setEditCat: (v: string) => void;
   editMerchant: string; setEditMerchant: (v: string) => void;
   editNote: string; setEditNote: (v: string) => void;
   editAmt: string; setEditAmt: (v: string) => void;
-  onClose: () => void;
+  onSave: () => void;
+  onDelete: () => void;
 }) {
   return (
     <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
@@ -322,11 +346,18 @@ function EditSection({
 
       {/* Save */}
       <Pressable
-        onPress={onClose}
+        onPress={onSave}
         pointerEvents="box-only"
         style={[S.saveBtn, { backgroundColor: theme.text }]}
       >
         <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save changes</Text>
+      </Pressable>
+      <Pressable
+        onPress={onDelete}
+        pointerEvents="box-only"
+        style={S.deleteBtn}
+      >
+        <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete transaction</Text>
       </Pressable>
     </View>
   );
@@ -468,6 +499,10 @@ const S = StyleSheet.create({
     marginTop: 28,
     paddingVertical: 16,
     borderRadius: 16,
+    alignItems: 'center',
+  },
+  deleteBtn: {
+    paddingVertical: 14,
     alignItems: 'center',
   },
 });

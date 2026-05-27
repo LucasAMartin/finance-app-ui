@@ -1,11 +1,15 @@
 import React, { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from 'react';
 import { createInMemoryRepositories } from './inMemory';
+import { createSQLiteRepositories } from './sqlite';
 import type { Repositories, Repository } from './types';
 
 const RepositoryContext = createContext<Repositories | null>(null);
 
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
-  const repos = useMemo(() => createInMemoryRepositories(), []);
+  const repos = useMemo(
+    () => process.env.NODE_ENV === 'test' ? createInMemoryRepositories() : createSQLiteRepositories(),
+    [],
+  );
   return (
     <RepositoryContext.Provider value={repos}>
       {children}

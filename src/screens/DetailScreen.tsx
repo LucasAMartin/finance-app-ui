@@ -1,7 +1,7 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, getCardStyle, catGroupColor } from '../theme';
+import { Theme, getCardStyle, catGroupColor, OVER_DOT } from '../theme';
 import { CATS } from '../data';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import type { Transaction } from '../repositories/types';
@@ -20,9 +20,41 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   const insets = useSafeAreaInsets();
   const card = getCardStyle(theme);
   if (!tx) return null;
-  const cat = CATS[tx.cat];
-  const catTotal = transactions.filter(t => t.cat === tx.cat).reduce((s, t) => s + t.amount, 0);
-  const catBudget = CATS[tx.cat]?.budget ?? 0;
+  const currentTx = transactions.find(t => t.id === tx.id) ?? tx;
+  const [editing, setEditing] = useState(false);
+  const [merchantDraft, setMerchantDraft] = useState(currentTx.merchant);
+  const [amountDraft, setAmountDraft] = useState(currentTx.amount.toFixed(2));
+  const [noteDraft, setNoteDraft] = useState(currentTx.note ?? '');
+
+  useEffect(() => {
+    setMerchantDraft(currentTx.merchant);
+    setAmountDraft(currentTx.amount.toFixed(2));
+    setNoteDraft(currentTx.note ?? '');
+  }, [currentTx.id, currentTx.merchant, currentTx.amount, currentTx.note]);
+
+  const saveEdit = () => {
+    const amount = parseFloat(amountDraft.replace(/[$,\s]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    transactionsRepo.update(currentTx.id, {
+      amount,
+      merchant: merchantDraft.trim() || currentTx.merchant,
+      note: noteDraft,
+      cat: currentTx.cat,
+      occurredAt: currentTx.occurredAt,
+      recurring: currentTx.recurring,
+      meta: currentTx.meta,
+    });
+    setEditing(false);
+  };
+
+  const deleteTx = () => {
+    transactionsRepo.delete(currentTx.id);
+    onBack();
+  };
+
+  const cat = CATS[currentTx.cat];
+  const catTotal = transactions.filter(t => t.cat === currentTx.cat).reduce((s, t) => s + t.amount, 0);
+  const catBudget = CATS[currentTx.cat]?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.round((catTotal / catBudget) * 100) : 0;
 
   return (
@@ -41,6 +73,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           {cat?.label}
         </Text>
         <TouchableOpacity
+          onPress={() => setEditing(e => !e)}
           delayPressIn={0}
           hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
           style={[styles.circleBtn, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
@@ -57,27 +90,31 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
 
       {/* Hero */}
       <View style={styles.hero}>
-        <View style={[styles.catIcon, { backgroundColor: catGroupColor(tx.cat, theme.dark) }]}>
+        <View style={[styles.catIcon, { backgroundColor: catGroupColor(currentTx.cat, theme.dark) }]}>
           <Icon name={cat?.icon} size={22} color="#fff" stroke={1.5} />
         </View>
         <Text style={{ fontSize: 22, fontWeight: '700', letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 14 }}>
-          {tx.merchant}
+          {currentTx.merchant}
         </Text>
         <Text style={{ fontSize: 13, color: theme.textSec, marginTop: 4, textAlign: 'center' }}>
-          {tx.date} · {tx.time}
+          {currentTx.date} · {currentTx.time}
         </Text>
         <View style={{ marginTop: 16 }}>
-          <Money value={tx.amount} size={42} weight="700" prefix="−$" theme={theme} />
+          <Money value={currentTx.amount} size={42} weight="700" prefix="−$" theme={theme} />
         </View>
       </View>
 
       <View style={{ paddingHorizontal: 20 }}>
         {/* Details card */}
         <View style={[card, { overflow: 'hidden', marginBottom: 12 }]}>
-          {[
-            { label: 'Date', value: `${tx.fullDate}, ${tx.time}` },
-            { label: 'Note', value: tx.note, last: true },
-          ].map(r => (
+          {(editing ? [
+            { label: 'Amount', value: amountDraft, setter: setAmountDraft },
+            { label: 'Merchant', value: merchantDraft, setter: setMerchantDraft },
+            { label: 'Note', value: noteDraft, setter: setNoteDraft, last: true },
+          ] : [
+            { label: 'Date', value: `${currentTx.fullDate}, ${currentTx.time}` },
+            { label: 'Note', value: currentTx.note, last: true },
+          ]).map(r => (
             <View
               key={r.label}
               style={[
@@ -86,7 +123,17 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
               ]}
             >
               <Text style={{ fontSize: 13, color: theme.textSec, flex: 1 }}>{r.label}</Text>
-              <Text style={{ fontSize: 13, color: theme.text, fontWeight: '500' }}>{r.value}</Text>
+              {'setter' in r ? (
+                <TextInput
+                  value={r.value}
+                  onChangeText={r.setter}
+                  keyboardType={r.label === 'Amount' ? 'decimal-pad' : 'default'}
+                  placeholderTextColor={theme.textTer}
+                  style={{ fontSize: 13, color: theme.text, fontWeight: '500', textAlign: 'right', flex: 1, padding: 0 }}
+                />
+              ) : (
+                <Text style={{ fontSize: 13, color: theme.text, fontWeight: '500' }}>{r.value}</Text>
+              )}
             </View>
           ))}
         </View>
@@ -107,10 +154,13 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
 
         {/* Action buttons */}
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-          {[{ icon: 'split', label: 'Split' }, { icon: 'repeat', label: 'Make recurring' }].map(a => (
-            <TouchableOpacity key={a.label} style={[card, styles.actionBtn]}>
+          {(editing
+            ? [{ icon: 'pencil', label: 'Save', onPress: saveEdit }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
+            : [{ icon: 'split', label: 'Edit', onPress: () => setEditing(true) }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
+          ).map(a => (
+            <TouchableOpacity key={a.label} onPress={a.onPress} style={[card, styles.actionBtn]}>
               <Icon name={a.icon} size={16} color={theme.text} stroke={1.5} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginLeft: 8 }}>{a.label}</Text>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: a.danger ? OVER_DOT : theme.text, marginLeft: 8 }}>{a.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -127,7 +177,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           <View style={[styles.catBar, { backgroundColor: theme.hairline }]}>
             <View style={[styles.catBarFill, {
               width: `${Math.min(catPct, 100)}%` as any,
-              backgroundColor: catGroupColor(tx.cat, theme.dark),
+              backgroundColor: catGroupColor(currentTx.cat, theme.dark),
             }]} />
           </View>
           <Text style={{ fontSize: 11, color: theme.textTer, marginTop: 5 }}>

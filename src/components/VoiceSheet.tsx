@@ -5,6 +5,7 @@ import { CATS } from '../data';
 import { Icon } from './Icon';
 import { getCardStyle } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRepositories } from '../repositories/RepositoryProvider';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
 import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
@@ -37,6 +38,7 @@ interface VoiceSheetProps {
 }
 
 export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: VoiceSheetProps) {
+  const { transactionsRepo } = useRepositories();
   const insets = useSafeAreaInsets();
 
   const [detent, setDetent] = useState<PresentationDetent>(VOICE_DETENT_DEFAULT);
@@ -170,6 +172,23 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
   const isManual = mode === 'manual';
   const isParsedOrManual = mode === 'parsed' || mode === 'manual';
 
+  const saveExpense = () => {
+    const amount = mode === 'manual' ? parseFloat(manualAmt) : parsed.amount;
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const cat = mode === 'manual' ? manualCat : parsed.cat;
+    const merchant = (mode === 'manual' ? manualMerchant : parsed.merchant).trim() || CATS[cat]?.label || 'Expense';
+    const note = mode === 'manual' ? manualNote : parsedNote;
+    transactionsRepo.create({
+      amount,
+      cat,
+      merchant,
+      note,
+      occurredAt: new Date().toISOString(),
+    });
+    voice.abort();
+    onClose();
+  };
+
   return (
     <Host style={{ width: 0, height: 0, position: 'absolute' }}>
       <BottomSheet
@@ -194,7 +213,7 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
                 <Text style={{ color: theme.text, fontSize: 14, fontWeight: '600' }}>New expense</Text>
                 {isParsedOrManual ? (
                   <Pressable
-                    onPress={onClose}
+                    onPress={saveExpense}
                     pointerEvents="box-only"
                     style={S.headerBtn}
                   >

@@ -90,12 +90,12 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
   const groups = useMemo(() => {
     const g: Record<string, Transaction[]> = { today: [], yesterday: [], earlier: [] };
-    TRANSACTIONS.forEach(t => g[t.when].push(t));
+    LEGACY_TRANSACTIONS.forEach(t => g[t.when].push(t));
     return g;
   }, []);
 
   const [monthIdx, setMonthIdx] = useState(0);
-  const mb = MONTH_BUDGETS[monthIdx];
+  const mb = LEGACY_MONTH_BUDGETS[monthIdx];
 
   const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
   const [dropdownY, setDropdownY] = useState(0);
@@ -126,7 +126,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
   const closeDropdown = () => { setMonthDropdownOpen(false); setFilterText(''); };
 
-  const filteredMonths = MONTH_BUDGETS.map((m, idx) => ({ m, idx })).filter(({ m }) => {
+  const filteredMonths = LEGACY_MONTH_BUDGETS.map((m, idx) => ({ m, idx })).filter(({ m }) => {
     const q = filterText.toLowerCase().trim();
     if (!q) return true;
     const year = m.key.split('-')[0];
@@ -142,7 +142,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
   const over = mb.spent > mb.budget;
   const todayTickIndex = Math.round((mb.expectedPct / BAR_MAX) * (TICK_COUNT - 1));
   const year = mb.key.split('-')[0];
-  const afterBudget = MONTHLY_INCOME - mb.budget;
+  const afterBudget = LEGACY_MONTHLY_INCOME - mb.budget;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -232,7 +232,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                 <View style={styles.incomeStat}>
                   <Text style={[styles.incomeLabel, { color: theme.textTer }]}>Income</Text>
                   <Text style={[styles.incomeValue, { color: theme.text }]}>
-                    ${MONTHLY_INCOME.toLocaleString()}
+                    ${LEGACY_MONTHLY_INCOME.toLocaleString()}
                   </Text>
                 </View>
                 <View style={[styles.incomeDiv, { backgroundColor: theme.hairline }]} />
@@ -274,7 +274,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
           {loading ? (
             <CategorySkeleton theme={theme} />
           ) : (
-            <CategoryGroups theme={theme} groups={SPEND_GROUPS} income={MONTHLY_INCOME} naked />
+            <CategoryGroups theme={theme} groups={LEGACY_SPEND_GROUPS} income={LEGACY_MONTHLY_INCOME} naked />
           )}
         </View>
 
@@ -288,10 +288,10 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
           {loading ? (
             <BillsSkeleton theme={theme} />
           ) : (
-            UPCOMING_BILLS.map((b, i) => (
+            LEGACY_UPCOMING_BILLS.map((b, i) => (
               <View key={b.id} style={[
                 styles.billRow,
-                { borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
+                { borderBottomWidth: i < LEGACY_UPCOMING_BILLS.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
               ]}>
                 <View style={[styles.rowIcon, { backgroundColor: catGroupColor(b.cat, theme.dark) }]}>
                   <Icon name={b.icon} size={16} color="#fff" stroke={1.6} />
