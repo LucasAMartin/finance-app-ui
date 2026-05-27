@@ -11,6 +11,7 @@ import {
   Platform,
   ImageBackground,
   Animated,
+  Easing,
 } from 'react-native';
 import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 'react-native-gesture-handler';
 
@@ -18,14 +19,30 @@ const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, GROUP_COLORS, catGroupColor, OVER_DOT, CAT_TO_GROUP } from '../theme';
+import { Theme, GROUP_COLORS, catGroupColor, OVER_DOT, HERO_AVAIL, CAT_TO_GROUP } from '../theme';
 import { SPEND_GROUPS, UPCOMING_BILLS, MONTHLY_INCOME } from '../data';
 import { Icon } from '../components/Icon';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TYPE } from '../typography';
 import { makeP, DARK_TEXT_SHADOW, makeScrim } from '../wallpaperPalette';
-import { Picker, Text as SwiftText, Host } from '@expo/ui/swift-ui';
-import { tint, pickerStyle, tag, fixedSize } from '@expo/ui/swift-ui/modifiers';
+import {
+  BottomSheet,
+  Group,
+  Picker,
+  Text as SwiftText,
+  Host,
+  RNHostView,
+} from '@expo/ui/swift-ui';
+import {
+  tint,
+  pickerStyle,
+  tag,
+  fixedSize,
+  presentationDetents,
+  presentationDragIndicator,
+  environment,
+  type PresentationDetent,
+} from '@expo/ui/swift-ui/modifiers';
 import { useTheme } from '../ThemeProvider';
 
 interface Props {
@@ -40,6 +57,8 @@ const CADENCES: { value: Cadence; label: string }[] = [
   { value: 'Wk', label: 'Weekly' },
   { value: 'Yr', label: 'Annual' },
 ];
+
+const INCOME_DETENT: PresentationDetent = { fraction: 0.42 };
 
 interface BudgetTemplate {
   id: string; label: string; subtitle: string;
@@ -82,6 +101,15 @@ const fromMonthly = (monthly: number, c: Cadence): number => {
   }
 };
 const fmtAmt = (n: number) => n % 1 !== 0 ? n.toFixed(2) : n.toLocaleString();
+const fmtMoney = (n: number) => Math.round(n).toLocaleString();
+const fmtPct = (n: number) => `${Math.round(n * 100)}%`;
+
+const parseAmountDraft = (text: string): number | null => {
+  const clean = text.replace(/[$,\s]/g, '');
+  if (!/^\d*\.?\d{0,2}$/.test(clean) || clean === '' || clean === '.') return null;
+  const v = Number(clean);
+  return Number.isFinite(v) && v >= 0 ? v : null;
+};
 
 function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
@@ -147,46 +175,84 @@ function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
   );
 }
 
-// Amount field — underline-only affordance; no chip, no icon
-function AmountField({ theme, dark, amount, onChange }: {
-  theme: Theme; dark: boolean; amount: number; onChange: (v: number) => void;
+function AmountField({ theme, dark, amount, onChange, label, onFocusChange }: {
+  theme: Theme; dark: boolean; amount: number; onChange: (v: number) => void; label: string;
+  onFocusChange: (focused: boolean, dismiss?: () => void) => void;
 }) {
   const p = makeP(dark);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(fmtAmt(amount));
+  const [draft, setDraft] = useState(`$${fmtAmt(amount)}`);
+  const [invalid, setInvalid] = useState(false);
+  const commitGuard = useRef(false);
+  const fieldRef = useRef<TextInput>(null);
 
+  // When not editing, keep the displayed text in sync with the canonical amount.
   useEffect(() => {
-    if (!editing) setDraft(fmtAmt(amount));
+    if (!editing) {
+      setDraft(`$${fmtAmt(amount)}`);
+    }
   }, [amount, editing]);
 
   const handleChange = (text: string) => {
     setDraft(text);
-    const v = parseFloat(text.replace(/[^0-9.]/g, ''));
-    if (Number.isFinite(v) && v >= 0) onChange(v);
+    setInvalid(parseAmountDraft(text) === null);
   };
 
   const commit = () => {
-    const v = parseFloat(draft.replace(/[^0-9.]/g, ''));
-    if (!Number.isFinite(v) || v < 0) setDraft(fmtAmt(amount));
+    if (commitGuard.current) return;
+    commitGuard.current = true;
+    const v = parseAmountDraft(draft);
+    if (v === null) {
+      setDraft(`$${fmtAmt(amount)}`);
+      setInvalid(false);
+      setEditing(false);
+      return;
+    }
+    if (v !== amount) {
+      onChange(v);
+    }
+    setDraft(`$${fmtAmt(v)}`);
+    setInvalid(false);
     setEditing(false);
   };
 
-  return editing ? (
-    <TextInput value={draft} onChangeText={handleChange} onBlur={commit} onSubmitEditing={commit}
-      keyboardType="decimal-pad" autoFocus selectTextOnFocus
-      style={[TYPE.bodySmEm, styles.amountInput, {
-        color: p.text,
-        borderBottomColor: theme.accent.dot,
-      }]}
-    />
-  ) : (
-    <TouchableOpacity onPress={() => { setDraft(fmtAmt(amount)); setEditing(true); }}
-      activeOpacity={0.75}
-    >
-      <View style={{ borderBottomWidth: 1, borderBottomColor: theme.accent.dot + '55', paddingBottom: 2 }}>
-        <Text style={[TYPE.bodySmEm, { color: p.text }]}>${fmtAmt(amount)}</Text>
+  const restBg = theme.dark ? 'rgba(235,225,255,0.07)' : 'rgba(14,12,24,0.045)';
+  const restBorder = theme.dark ? 'rgba(235,225,255,0.14)' : 'rgba(14,12,24,0.08)';
+  const fieldBg = editing
+    ? (invalid ? (theme.dark ? 'rgba(212,82,42,0.14)' : 'rgba(212,82,42,0.10)') : theme.accent.fill)
+    : restBg;
+  const borderColor = editing
+    ? (invalid ? OVER_DOT : theme.accent.dot)
+    : restBorder;
+  const textColor = invalid ? OVER_DOT : p.text;
+
+  return (
+    <View>
+      <View style={[styles.amountField, { backgroundColor: fieldBg as any, borderColor: borderColor as any }]}>
+        <TextInput
+          ref={fieldRef}
+          value={draft}
+          onChangeText={handleChange}
+          onFocus={() => {
+            setEditing(true);
+            commitGuard.current = false;
+            onFocusChange(true, () => fieldRef.current?.blur());
+          }}
+          onBlur={() => {
+            commit();
+            onFocusChange(false);
+          }}
+          keyboardType="decimal-pad"
+          selectTextOnFocus
+          accessibilityLabel={`Edit ${label} budget amount`}
+          accessibilityHint="Use the Done button above the keyboard to finish editing"
+          style={[styles.amountInput, { color: textColor }]}
+        />
       </View>
-    </TouchableOpacity>
+      {invalid && (
+        <Text style={[TYPE.labelSm, styles.amountError, { color: OVER_DOT }]}>Use dollars</Text>
+      )}
+    </View>
   );
 }
 
@@ -260,35 +326,19 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const stickyRadius   = stickyAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] });
   const stickyOpacity  = stickyAnim.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.15, 1] });
 
-  // ── Keyboard-driven done bar ───────────────────────────────────
-  const kbBottom = useRef(new Animated.Value(0)).current;
-  const kbVisible = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardWillShow', e => {
-      Animated.parallel([
-        Animated.timing(kbBottom,  { toValue: e.endCoordinates.height, duration: e.duration ?? 250, useNativeDriver: false }),
-        Animated.timing(kbVisible, { toValue: 1, duration: 120, useNativeDriver: true }),
-      ]).start();
-    });
-    const hide = Keyboard.addListener('keyboardWillHide', e => {
-      Animated.parallel([
-        Animated.timing(kbBottom,  { toValue: 0, duration: e.duration ?? 200, useNativeDriver: false }),
-        Animated.timing(kbVisible, { toValue: 0, duration: 80,  useNativeDriver: true }),
-      ]).start();
-    });
-    return () => { show.remove(); hide.remove(); };
-  }, [kbBottom, kbVisible]);
-
   // ── Budget state ──────────────────────────────────────────────
   const [income, setIncome] = useState(MONTHLY_INCOME);
   const [cadence, setCadence] = useState<Cadence>('Mo');
-  const [editingIncome, setEditingIncome] = useState(false);
+  const [incomeSheetOpen, setIncomeSheetOpen] = useState(false);
   const [incomeDraft, setIncomeDraft] = useState('');
   const [budgets, setBudgets] = useState<Record<string, number>>(initBudgets);
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+  const [templatePromptVisible, setTemplatePromptVisible] = useState(true);
+  const [budgetTouched, setBudgetTouched] = useState(false);
   const [undoVisible, setUndoVisible] = useState(false);
   const [undoLabel, setUndoLabel] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [activeAmountDismiss, setActiveAmountDismiss] = useState<(() => void) | null>(null);
 
   const [customSubs, setCustomSubs] = useState<Record<string, { label: string }[]>>({
     needs: [], wants: [], savings: [],
@@ -300,6 +350,28 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const scrollViewRef = useRef<GHScrollView>(null);
   const outerTapRef = useRef<any>(null);
   const openSwipeRef = useRef<Swipeable | null>(null);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, e => setKeyboardHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+      setActiveAmountDismiss(null);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  const handleAmountFocusChange = useCallback((focused: boolean, dismiss?: () => void) => {
+    if (focused && dismiss) {
+      setActiveAmountDismiss(() => dismiss);
+    } else {
+      setActiveAmountDismiss(null);
+    }
+  }, []);
 
   const handleSwipeOpen = useCallback((ref: Swipeable) => {
     if (openSwipeRef.current && openSwipeRef.current !== ref) {
@@ -337,14 +409,27 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
 
   const displayIncome = fromMonthly(income, cadence);
 
-  const commitIncome = () => {
-    const v = parseFloat(incomeDraft.replace(/[^0-9.]/g, ''));
-    if (Number.isFinite(v) && v > 0) setIncome(toMonthly(v, cadence));
-    setEditingIncome(false);
+  const openIncomeSheet = () => {
+    setIncomeDraft(String(displayIncome));
+    setIncomeSheetOpen(true);
   };
 
-  const updateBudget = (key: string, v: number) =>
+  const commitIncome = () => {
+    const v = parseAmountDraft(incomeDraft);
+    if (v === null || v <= 0) return;
+    setIncome(toMonthly(v, cadence));
+    setIncomeSheetOpen(false);
+  };
+
+  const markBudgetTouched = useCallback(() => {
+    setBudgetTouched(true);
+    setTemplatePromptVisible(false);
+  }, []);
+
+  const updateBudget = (key: string, v: number) => {
+    markBudgetTouched();
     setBudgets(b => ({ ...b, [key]: v }));
+  };
 
   const saveSnapshot = () => {
     prevActionSnapshot.current = {
@@ -357,6 +442,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   };
 
   const removeSub = (gKey: string, label: string, isCustom: boolean) => {
+    markBudgetTouched();
     saveSnapshot();
     if (isCustom) {
       setCustomSubs(prev => ({ ...prev, [gKey]: prev[gKey].filter(s => s.label !== label) }));
@@ -368,6 +454,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   };
 
   const removeBill = (bill: typeof UPCOMING_BILLS[number]) => {
+    markBudgetTouched();
     saveSnapshot();
     setRemovedBills(prev => new Set([...prev, bill.id]));
     showUndo(`Removed ${bill.name}`);
@@ -380,6 +467,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
       ...(customSubs[gKey] ?? []).map(s => s.label.toLowerCase()),
     ]);
     if (taken.has(label.toLowerCase())) return;
+    markBudgetTouched();
     setCustomSubs(prev => ({ ...prev, [gKey]: [...(prev[gKey] ?? []), { label }] }));
     setBudgets(b => ({ ...b, [bKey(gKey, label)]: 0 }));
     setAddingFor(null);
@@ -420,6 +508,11 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const savingsCol = gCol('savings');
 
   const activeTemplateName = BUDGET_TEMPLATES.find(t => t.id === activeTemplate)?.label;
+  const balanceDotColor = isOver ? OVER_DOT : HERO_AVAIL;
+  const balanceLabel = `$${fmtMoney(Math.abs(remaining))} ${isOver ? 'over budget' : 'under budget'}`;
+  const needsShare = totalBudgeted > 0 ? needsTotal / totalBudgeted : 0;
+  const wantsShare = totalBudgeted > 0 ? wantsTotal / totalBudgeted : 0;
+  const savingsShare = totalBudgeted > 0 ? savingsTotal / totalBudgeted : 0;
 
   const showUndo = useCallback((label: string) => {
     if (undoTimer.current) clearTimeout(undoTimer.current);
@@ -443,6 +536,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   }, []);
 
   const applyTemplate = (template: BudgetTemplate) => {
+    markBudgetTouched();
     saveSnapshot();
     const next: Record<string, number> = { ...budgets };
     SPEND_GROUPS.forEach(g => {
@@ -565,108 +659,127 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
             )}
           >
 
-            {/* Hero — read-only; shows budgeted vs income */}
-            <View style={[styles.hero, { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }]}>
-              <View>
-                <View style={styles.heroAmountRow}>
-                  <Text style={[TYPE.display, { color: pWallpaper.text }, shadow]}>
-                    ${Math.round(totalBudgeted).toLocaleString()}
-                  </Text>
-                  <Text style={[TYPE.bodySm, { color: pWallpaper.text }, shadow]}>
-                    of ${income.toLocaleString()}/mo
-                  </Text>
-                </View>
-              </View>
-
-              <Host matchContents>
-                <Picker
-                  selection={activeTemplate ?? ''}
-                  onSelectionChange={(val) => {
-                    const t = BUDGET_TEMPLATES.find(t => t.id === val);
-                    if (t) applyTemplate(t);
-                  }}
-                  modifiers={[
-                    pickerStyle('menu'),
-                    tint(pWallpaper.text),
-                    fixedSize({ horizontal: true, vertical: false }),
-                  ]}
-                >
-                  <SwiftText modifiers={[tag('')]}>{activeTemplateName ?? 'Template'}</SwiftText>
-                  {BUDGET_TEMPLATES.map(t => (
-                    <SwiftText key={t.id} modifiers={[tag(t.id)]}>{t.label}</SwiftText>
-                  ))}
-                </Picker>
-              </Host>
-            </View>
-
             <View
               style={styles.sectionStack}
               onLayout={e => { barYRef.current = e.nativeEvent.layout.y; }}
             >
-              {/* Allocation card — bar, legend, and income editing in one place */}
+              {/* Budget breakdown hero */}
               <View onLayout={e => { barHeightRef.current = e.nativeEvent.layout.height; }}>
                 <SectionCard dark={theme.dark}>
-                  <View style={styles.allocationCardInner}>
-                    {allocationContent(p.text, p.trackBg)}
-
-                    {/* Income row — edit inline, cadence via native action sheet */}
-                    <View style={[styles.incomeInline, { borderTopColor: p.hairline }]}>
-                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Text style={[TYPE.captionEm, { color: p.textTer }]}>Income</Text>
-                        {editingIncome ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2 }}>
-                            <Text style={[TYPE.bodySmEm, { color: p.textSec }]}>$</Text>
-                            <TextInput value={incomeDraft} onChangeText={setIncomeDraft}
-                              onBlur={commitIncome} onSubmitEditing={commitIncome}
-                              keyboardType="decimal-pad" autoFocus selectTextOnFocus
-                              style={[TYPE.body, {
-                                color: p.text,
-                                borderBottomWidth: 1.5,
-                                borderBottomColor: theme.accent.dot,
-                                paddingVertical: 1,
-                                minWidth: 60,
-                              }]}
-                            />
-                          </View>
-                        ) : (
-                          <TouchableOpacity
-                            onPress={() => { setIncomeDraft(String(displayIncome)); setEditingIncome(true); }}
-                            activeOpacity={0.75}
-                          >
-                            <View style={{ borderBottomWidth: 1, borderBottomColor: theme.accent.dot + '55', paddingBottom: 1 }}>
-                              <Text style={[TYPE.body, { color: p.text }]}>
-                                ${displayIncome.toLocaleString()}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        )}
+                  <View style={styles.breakdownInner}>
+                    <View style={[styles.balancePanel, { backgroundColor: p.trackBg }]}>
+                      <View style={styles.balanceAmountRow}>
+                        <View style={[styles.balanceDot, { backgroundColor: balanceDotColor }]} />
+                        <Text style={[TYPE.headline, { color: p.text }]}>
+                          {balanceLabel}
+                        </Text>
                       </View>
+                      <AllocationBar
+                        needsFrac={needsFrac} wantsFrac={wantsFrac} savingsFrac={savingsFrac}
+                        trackBg={p.hairline} needsCol={needsCol} wantsCol={wantsCol} savingsCol={savingsCol}
+                        height={9}
+                      />
+                      <View style={styles.barPctRow}>
+                        {[
+                          { label: 'Needs', pct: needsShare, color: needsCol },
+                          { label: 'Wants', pct: wantsShare, color: wantsCol },
+                          { label: 'Savings', pct: savingsShare, color: savingsCol },
+                        ].map(item => (
+                          <View key={item.label} style={styles.barPctItem}>
+                            <View style={[styles.barPctDot, { backgroundColor: item.color }]} />
+                            <Text style={[TYPE.label, { color: p.textSec }]}>
+                              {item.label} {fmtPct(item.pct)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
 
+                    <View style={[styles.comparisonStrip, { borderTopColor: p.hairline }]}>
+                      <TouchableOpacity
+                        onPress={openIncomeSheet}
+                        activeOpacity={0.65}
+                        style={styles.comparisonLine}
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit planned income"
+                        accessibilityHint="Opens income settings"
+                      >
+                        <Text numberOfLines={1} style={[TYPE.captionEm, { color: p.textSec }]}>Planned Income</Text>
+                        <View style={styles.comparisonValue}>
+                          <Text numberOfLines={1} style={[TYPE.captionEm, styles.comparisonValueText, { color: p.text }]}>
+                            ${fmtMoney(displayIncome)} / {cadence}
+                          </Text>
+                          <View style={styles.comparisonChevronSlot}>
+                            <Icon name="chevR" size={13} color={p.textTer} stroke={1.9} />
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                      <View style={[styles.comparisonLine, { borderTopColor: p.hairline, borderTopWidth: 1 }]}>
+                        <Text numberOfLines={1} style={[TYPE.captionEm, { color: p.textSec }]}>Planned Expenses</Text>
+                        <View style={styles.comparisonValue}>
+                          <Text numberOfLines={1} style={[TYPE.captionEm, styles.comparisonValueText, { color: p.text }]}>${fmtMoney(totalBudgeted)} / Mo</Text>
+                          <View style={styles.comparisonChevronSlot} />
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                </SectionCard>
+              </View>
+
+              {templatePromptVisible && !budgetTouched && (
+                <SectionCard dark={theme.dark}>
+                  <View style={styles.templatePrompt}>
+                    <View style={styles.templatePromptHead}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[TYPE.subsectionTitle, { color: p.text }]}>New to budgeting?</Text>
+                        <Text style={[TYPE.caption, styles.templatePromptCopy, { color: p.textSec }]}>
+                          Start with a recommended template, then tune the categories.
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => setTemplatePromptVisible(false)}
+                        pointerEvents="box-only"
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={[styles.templateDismiss, { backgroundColor: p.trackBg }]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Dismiss template suggestion"
+                      >
+                        <Icon name="close" size={13} color={p.textSec} stroke={1.8} />
+                      </Pressable>
+                    </View>
+                    <View style={[styles.templatePickerRow, { borderTopColor: p.hairline }]}>
+                      <Text style={[TYPE.captionEm, { color: p.textSec }]}>Recommended template</Text>
                       <Host matchContents>
                         <Picker
-                          selection={cadence}
-                          onSelectionChange={(val) => setCadence(val as Cadence)}
+                          selection={activeTemplate ?? ''}
+                          onSelectionChange={(val) => {
+                            const t = BUDGET_TEMPLATES.find(t => t.id === val);
+                            if (t) applyTemplate(t);
+                          }}
                           modifiers={[
                             pickerStyle('menu'),
                             tint(p.text),
                             fixedSize({ horizontal: true, vertical: false }),
                           ]}
                         >
-                          {CADENCES.map(c => (
-                            <SwiftText key={c.value} modifiers={[tag(c.value)]}>{c.label}</SwiftText>
+                          <SwiftText modifiers={[tag('')]}>{activeTemplateName ?? 'Choose'}</SwiftText>
+                          {BUDGET_TEMPLATES.map(t => (
+                            <SwiftText key={t.id} modifiers={[tag(t.id)]}>{t.label}</SwiftText>
                           ))}
                         </Picker>
                       </Host>
                     </View>
                   </View>
                 </SectionCard>
-              </View>
-
+              )}
 
               {/* Spending group cards */}
               {SPEND_GROUPS.map(g => {
                 const groupColor = gCol(g.key);
                 const groupTotal = Math.round(groupTotals[g.key] ?? 0);
+                const groupTarget = Math.round(income * g.targetPct);
+                const groupDelta = groupTotal - groupTarget;
+                const groupIsOver = groupDelta > 0;
                 const visibleOrigSubs = g.subs.filter(s => !removedSubs.has(bKey(g.key, s.label)));
                 const customs = customSubs[g.key] ?? [];
                 const groupBills = (billsByGroup[g.key] ?? []).filter(b => !removedBills.has(b.id));
@@ -674,9 +787,14 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                 return (
                   <SectionCard key={g.key} dark={theme.dark}>
                     <View style={styles.cardHead}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: groupColor }} />
-                        <Text style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={styles.groupTitleRow}>
+                          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: groupColor }} />
+                          <Text style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
+                        </View>
+                        <Text style={[TYPE.caption, { color: groupIsOver ? OVER_DOT : p.textSec }]}>
+                          {groupIsOver ? `Over by $${fmtMoney(groupDelta)}` : `Target ${fmtPct(g.targetPct)} · $${fmtMoney(groupTarget)}`}
+                        </Text>
                       </View>
                       <Text style={[TYPE.subsectionTitle, { color: groupColor }]}>${groupTotal.toLocaleString()}</Text>
                     </View>
@@ -691,8 +809,10 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                             </View>
                             <Text style={[TYPE.body, { flex: 1, color: p.text, minWidth: 0 }]}>{sub.label}</Text>
                             <AmountField theme={theme} dark={theme.dark}
+                              label={sub.label}
                               amount={budgets[bKey(g.key, sub.label)] ?? sub.budget}
                               onChange={v => updateBudget(bKey(g.key, sub.label), v)}
+                              onFocusChange={handleAmountFocusChange}
                             />
                           </View>
                         </SwipeRow>
@@ -709,8 +829,10 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                             </View>
                             <Text style={[TYPE.body, { flex: 1, color: p.text, minWidth: 0 }]}>{sub.label}</Text>
                             <AmountField theme={theme} dark={theme.dark}
+                              label={sub.label}
                               amount={budgets[bKey(g.key, sub.label)] ?? 0}
                               onChange={v => updateBudget(bKey(g.key, sub.label), v)}
+                              onFocusChange={handleAmountFocusChange}
                             />
                           </View>
                         </SwipeRow>
@@ -738,8 +860,10 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                                   </Text>
                                 </View>
                                 <AmountField theme={theme} dark={theme.dark}
+                                  label={bill.name}
                                   amount={budgets[billKey(g.key, bill.id)] ?? bill.amount}
                                   onChange={v => updateBudget(billKey(g.key, bill.id), v)}
+                                  onFocusChange={handleAmountFocusChange}
                                 />
                               </View>
                             </SwipeRow>
@@ -761,6 +885,38 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                   </SectionCard>
                 );
               })}
+
+              {(!templatePromptVisible || budgetTouched) && (
+                <SectionCard dark={theme.dark}>
+                  <View style={styles.bottomTemplateRow}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[TYPE.captionEm, { color: p.textSec }]}>Budget template</Text>
+                      <Text numberOfLines={1} style={[TYPE.bodySmEm, { color: p.text, marginTop: 2 }]}>
+                        {activeTemplateName ?? 'Manual setup'}
+                      </Text>
+                    </View>
+                    <Host matchContents>
+                      <Picker
+                        selection={activeTemplate ?? ''}
+                        onSelectionChange={(val) => {
+                          const t = BUDGET_TEMPLATES.find(t => t.id === val);
+                          if (t) applyTemplate(t);
+                        }}
+                        modifiers={[
+                          pickerStyle('menu'),
+                          tint(p.text),
+                          fixedSize({ horizontal: true, vertical: false }),
+                        ]}
+                      >
+                        <SwiftText modifiers={[tag('')]}>{activeTemplateName ?? 'Change'}</SwiftText>
+                        {BUDGET_TEMPLATES.map(t => (
+                          <SwiftText key={t.id} modifiers={[tag(t.id)]}>{t.label}</SwiftText>
+                        ))}
+                      </Picker>
+                    </Host>
+                  </View>
+                </SectionCard>
+              )}
 
             </View>
           </AnimatedGHScrollView>
@@ -789,31 +945,105 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
             </View>
           )}
 
+          {activeAmountDismiss && keyboardHeight > 0 && (
+            <View
+              pointerEvents="box-none"
+              style={styles.keyboardDismissWrap}
+            >
+              <Pressable
+                onPress={activeAmountDismiss}
+                pointerEvents="box-only"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={[styles.keyboardDismissButton, {
+                  backgroundColor: theme.dark ? 'rgba(235,225,255,0.16)' : 'rgba(255,255,255,0.94)',
+                  borderColor: theme.dark ? 'rgba(235,225,255,0.18)' : 'rgba(14,12,24,0.10)',
+                }]}
+              >
+                <Text style={[TYPE.bodySmEm, { color: theme.text }]}>Done</Text>
+              </Pressable>
+            </View>
+          )}
 
         </View>
         </TapGestureHandler>
       </KeyboardAvoidingView>
 
-      {/* Custom Done bar — floats above the keyboard, tracks its height */}
-      <Animated.View style={{
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: kbBottom,
-        opacity: kbVisible,
-        zIndex: 20,
-      }}>
-        <BlurView
-          intensity={theme.dark ? 68 : 92}
-          tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+      <Host style={{ width: 0, height: 0, position: 'absolute' }}>
+        <BottomSheet
+          isPresented={incomeSheetOpen}
+          onIsPresentedChange={(v) => { if (!v) setIncomeSheetOpen(false); }}
         >
-          <View style={[styles.doneBar, { borderTopColor: theme.hairline }]}>
-            <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={{ top: 12, bottom: 12, left: 20, right: 20 }}>
-              <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>Done</Text>
-            </TouchableOpacity>
-          </View>
-        </BlurView>
-      </Animated.View>
+          <Group modifiers={[
+            presentationDetents([INCOME_DETENT]),
+            presentationDragIndicator('visible'),
+            environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+          ]}>
+            <RNHostView>
+              <View style={[styles.incomeNativeSheet, {
+                backgroundColor: theme.dark ? 'rgba(14,12,26,0.92)' : 'rgba(255,255,255,0.52)',
+                paddingBottom: Math.max(insets.bottom, 16) + 12,
+              }]}>
+                <View style={styles.sheetHead}>
+                  <Text style={[TYPE.sectionTitle, { color: theme.text }]}>Income settings</Text>
+                  <Pressable onPress={() => setIncomeSheetOpen(false)}
+                    pointerEvents="box-only"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={[styles.sheetCloseBtn, { backgroundColor: theme.chipBg }]}
+                  >
+                    <Icon name="close" size={15} color={theme.textSec} stroke={1.8} />
+                  </Pressable>
+                </View>
+
+                <View style={[styles.sheetField, { backgroundColor: theme.chipBg }]}>
+                  <Text style={[TYPE.label, { color: theme.textTer }]}>Amount</Text>
+                  <View style={styles.sheetAmountRow}>
+                    <Text style={[TYPE.headline, { color: theme.textSec }]}>$</Text>
+                    <TextInput
+                      value={incomeDraft}
+                      onChangeText={setIncomeDraft}
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      style={[TYPE.headline, styles.sheetAmountInput, { color: theme.text }]}
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.sheetOptionRow, { borderTopColor: theme.hairline }]}>
+                  <Text style={[TYPE.body, { color: theme.text }]}>Cadence</Text>
+                  <Host matchContents>
+                    <Picker
+                      selection={cadence}
+                      onSelectionChange={(val) => {
+                        const next = val as Cadence;
+                        setCadence(next);
+                        setIncomeDraft(String(fromMonthly(income, next)));
+                      }}
+                      modifiers={[
+                        pickerStyle('menu'),
+                        tint(theme.text),
+                        fixedSize({ horizontal: true, vertical: false }),
+                      ]}
+                    >
+                      {CADENCES.map(c => (
+                        <SwiftText key={c.value} modifiers={[tag(c.value)]}>{c.label}</SwiftText>
+                      ))}
+                    </Picker>
+                  </Host>
+                </View>
+
+                <Pressable onPress={commitIncome}
+                  pointerEvents="box-only"
+                  style={[styles.sheetSaveBtn, { backgroundColor: theme.text }]}
+                >
+                  <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save income</Text>
+                </Pressable>
+              </View>
+            </RNHostView>
+          </Group>
+        </BottomSheet>
+      </Host>
+
     </View>
   );
 }
@@ -834,21 +1064,73 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderBottomWidth: 1,
   },
-  allocationCardInner: {
-    gap: 12,
+  breakdownInner: {
+    gap: 14,
   },
-  hero: {
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 24,
+  comparisonStrip: {
+    paddingTop: 14,
   },
-  heroAmountRow: {
+  comparisonLine: {
+    minHeight: 34,
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 7,
+  },
+  balancePanel: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    gap: 11,
+  },
+  balanceAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  balanceDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  comparisonValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: 126,
+    flexShrink: 0,
+  },
+  comparisonValueText: {
+    flex: 1,
+    textAlign: 'right',
+  },
+  comparisonChevronSlot: {
+    width: 18,
+    alignItems: 'flex-end',
+  },
+  barPctRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  barPctItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  barPctDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    flexShrink: 0,
   },
   sectionStack: {
     paddingHorizontal: 16,
+    paddingTop: 10,
     paddingBottom: 0,
     gap: 16,
   },
@@ -866,8 +1148,15 @@ const styles = StyleSheet.create({
   cardHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 14,
     marginBottom: 14,
+  },
+  groupTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
   },
   legendRow: {
     flexDirection: 'row',
@@ -876,12 +1165,87 @@ const styles = StyleSheet.create({
   legendItem: {
     alignItems: 'center',
   },
-  incomeInline: {
+  templatePrompt: {
+    gap: 14,
+  },
+  templatePromptHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  templatePromptCopy: {
+    marginTop: 5,
+  },
+  templateDismiss: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  templatePickerRow: {
+    borderTopWidth: 1,
+    paddingTop: 12,
+    minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  bottomTemplateRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  incomeNativeSheet: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    gap: 16,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sheetCloseBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetField: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 7,
+  },
+  sheetAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  sheetAmountInput: {
+    flex: 1,
+    paddingVertical: 0,
+  },
+  sheetOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderTopWidth: 1,
-    paddingTop: 10,
+    paddingTop: 14,
+  },
+  sheetSaveBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    paddingVertical: 15,
   },
   undoToast: {
     flexDirection: 'row',
@@ -913,11 +1277,46 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
     borderTopWidth: 1,
   },
+  amountField: {
+    width: 92,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
+  },
   amountInput: {
-    paddingVertical: 4,
-    minWidth: 60,
+    width: 72,
+    height: 30,
+    paddingVertical: 0,
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: -0.2,
     textAlign: 'right',
-    borderBottomWidth: 1.5,
+    includeFontPadding: false,
+  },
+  amountError: {
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  keyboardDismissWrap: {
+    position: 'absolute',
+    right: 16,
+    bottom: 10,
+    zIndex: 30,
+    alignItems: 'flex-end',
+  },
+  keyboardDismissButton: {
+    minWidth: 66,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
   addCatBtn: {
     flexDirection: 'row',
@@ -932,13 +1331,5 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingTop: 12,
     borderTopWidth: 1,
-  },
-  doneBar: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
 });

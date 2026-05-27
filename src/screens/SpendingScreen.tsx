@@ -1,426 +1,665 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, ScrollView, StyleSheet, Dimensions } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Animated,
+  ImageBackground,
+  Dimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+} from 'react-native';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, getCardStyle, OVER_DOT, overBg, overText, catGroupColor } from '../theme';
-import { CATS, TRANSACTIONS, TREND, PERIOD_DATA } from '../data';
+import { Picker, Text as SwiftText, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
+import { pickerStyle, tag, tint, environment } from '@expo/ui/swift-ui/modifiers';
+
+import { useTheme } from '../ThemeProvider';
+import { Theme, catGroupColor, OVER_DOT } from '../theme';
+import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
+import { CATS, TRANSACTIONS, PERIOD_DATA, TREND } from '../data';
 import { Icon } from '../components/Icon';
-import { Segmented, SectionHeader } from '../components/shared';
-import { TrendChart } from '../components/TrendChart';
+import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { PieChart } from '../components/PieChart';
+import { FinanceBarChart, FinanceLineChart, FinanceDonut } from '../components/charts/FinanceCharts';
 import { TYPE } from '../typography';
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const CHART_W = SCREEN_W - 40;
-const PIE_SIZE = Math.min(SCREEN_W - 40, 280);
+
+const CARD_OUTER_PAD = 16;
+const CARD_INNER_PAD = 18;
+const CARD_W = SCREEN_W - CARD_OUTER_PAD * 2;
+const CHART_INNER_W = CARD_W - CARD_INNER_PAD * 2;
+const CHART_H = 188;
+
+const CHART_TYPES = ['Trend', 'Pace', 'Mix'] as const;
+
+const PERIODS = ['Week', 'Month', 'Year'] as const;
+type Period = (typeof PERIODS)[number];
+
+const BREAKDOWN_TABS = ['Category', 'Merchant'] as const;
+type BreakdownMode = (typeof BREAKDOWN_TABS)[number];
+
+// Mock date options per period — would be derived from real dates once wired up.
+// Index 0 is always the current/most-recent period.
+const DATE_OPTIONS: Record<Period, string[]> = {
+  Week: ['16–22 May', '9–15 May', '2–8 May', '25 Apr–1 May', '18–24 Apr'],
+  Month: ['May 2026', 'April 2026', 'March 2026', 'February 2026', 'January 2026'],
+  Year: ['2026', '2025', '2024'],
+};
 
 interface Props {
   theme: Theme;
   onOpenDrawer: () => void;
 }
 
-function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
+// ── Frosted section card (mirrors HomeScreen) ────────────────────
+function SectionCard({
+  children,
+  style,
+  dark,
+}: {
+  children: React.ReactNode;
+  style?: any;
+  dark: boolean;
+}) {
+  const borderColor = dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
+  return (
+    <BlurView
+      intensity={dark ? 70 : 100}
+      tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+      style={[styles.sectionCard, style]}
+    >
+      <View style={[styles.sectionCardBorder, { borderColor }]}>{children}</View>
+    </BlurView>
+  );
+}
+
+// ── Header icon button ───────────────────────────────────────────
+function IconBtn({
+  onPress,
+  children,
+  size = 40,
+  label,
+}: {
+  onPress?: () => void;
+  children: React.ReactNode;
+  size?: number;
+  label?: string;
+}) {
   return (
     <Pressable
       onPress={onPress}
       pointerEvents="box-only"
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={{
+        width: size,
+        height: size,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent',
+      }}
     >
       {children}
     </Pressable>
   );
 }
 
-const VS_LABEL: Record<string, string> = {
-  Week: 'vs last week',
-  Month: 'vs last month',
-  Year: 'vs last year',
-};
-
 export function SpendingScreen({ theme, onOpenDrawer }: Props) {
+  const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
-  const [period, setPeriod] = useState('Month');
-  const [selectedCat, setSelectedCat] = useState<string | null>(null);
-  const card = getCardStyle(theme);
+  const pWall = makeP(true);
+  const p = makeP(theme.dark);
+  const shadow = DARK_TEXT_SHADOW;
+
+  const [period, setPeriod] = useState<Period>('Week');
+  const [chartIdx, setChartIdx] = useState(0);
+  const [breakdown, setBreakdown] = useState<BreakdownMode>('Category');
+  // Selected index within each period's option list — remembered per period so
+  // switching Week ↔ Month doesn't reset the user's previous pick.
+  const [dateIdxByPeriod, setDateIdxByPeriod] = useState<Record<Period, number>>({
+    Week: 0,
+    Month: 0,
+    Year: 0,
+  });
+  const dateOptions = DATE_OPTIONS[period];
+  const dateIdx = dateIdxByPeriod[period];
+  const dateLabel = dateOptions[dateIdx] ?? dateOptions[0];
 
   const pd = PERIOD_DATA[period];
   const trendCfg = TREND[period];
 
-  const delta = pd.spent - pd.prevTotal;
-  const deltaPct = Math.round(Math.abs(delta / pd.prevTotal) * 100);
-  const isDown = delta <= 0;
-  const budgetPct = Math.round((pd.spent / pd.budget) * 100);
+  const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
 
-  const amountDisplay = pd.spent >= 1000
-    ? `$${(pd.spent / 1000).toFixed(1)}k`
-    : `$${pd.spent.toFixed(0)}`;
-
-  const movers = useMemo(() => {
-    const prevMap: Record<string, number> = {};
-    pd.prevByCat.forEach(p => { prevMap[p.cat] = p.value; });
-
-    const changes = pd.byCat
-      .filter(c => prevMap[c.cat] != null)
-      .map(c => ({
-        cat: c.cat,
-        current: c.value,
-        prev: prevMap[c.cat],
-        pctChange: ((c.value - prevMap[c.cat]) / prevMap[c.cat]) * 100,
-        absChange: c.value - prevMap[c.cat],
-      }))
-      .sort((a, b) => b.pctChange - a.pctChange);
-
-    return {
-      up: changes.length > 0 ? changes[0] : null,
-      down: changes.length > 1 ? changes[changes.length - 1] : null,
-    };
-  }, [pd]);
-
-  const topTx = useMemo(() =>
-    [...TRANSACTIONS].sort((a, b) => b.amount - a.amount).slice(0, 5),
-    [],
+  const total = useMemo(
+    () => pd.byCat.reduce((s, c) => s + c.value, 0),
+    [pd],
   );
 
+  type Row = { key: string; label: string; sub: string; icon: string; color: string; amount: number; pct: number };
+
+  const categoryRows: Row[] = useMemo(() => {
+    return pd.byCat
+      .slice()
+      .sort((a, b) => b.value - a.value)
+      .map(c => {
+        const cat = CATS[c.cat];
+        const txCount = TRANSACTIONS.filter(t => t.cat === c.cat).length;
+        return {
+          key: c.cat,
+          label: cat?.label ?? c.cat,
+          sub: `${txCount} ${txCount === 1 ? 'transaction' : 'transactions'}`,
+          icon: cat?.icon ?? 'tag',
+          color: catGroupColor(c.cat, theme.dark),
+          amount: c.value,
+          pct: total > 0 ? c.value / total : 0,
+        };
+      });
+  }, [pd, total, theme.dark]);
+
+  const merchantRows: Row[] = useMemo(() => {
+    const acc: Record<string, { merchant: string; cat: string; total: number; count: number }> = {};
+    TRANSACTIONS.forEach(t => {
+      if (!acc[t.merchant]) acc[t.merchant] = { merchant: t.merchant, cat: t.cat, total: 0, count: 0 };
+      acc[t.merchant].total += t.amount;
+      acc[t.merchant].count += 1;
+    });
+    const merchTotal = Object.values(acc).reduce((s, m) => s + m.total, 0);
+    return Object.values(acc)
+      .sort((a, b) => b.total - a.total)
+      .map(m => {
+        const cat = CATS[m.cat];
+        return {
+          key: m.merchant,
+          label: m.merchant,
+          sub: `${m.count} ${m.count === 1 ? 'transaction' : 'transactions'}`,
+          icon: cat?.icon ?? 'tag',
+          color: catGroupColor(m.cat, theme.dark),
+          amount: m.total,
+          pct: merchTotal > 0 ? m.total / merchTotal : 0,
+        };
+      });
+  }, [theme.dark]);
+
+  const rows = breakdown === 'Category' ? categoryRows : merchantRows;
+
+  const chartScrollRef = useRef<ScrollView>(null);
+  const onChartScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / CHART_INNER_W);
+    if (idx !== chartIdx && idx >= 0 && idx < CHART_TYPES.length) setChartIdx(idx);
+  };
+
+  const scrimTop = theme.dark ? 'rgba(8,6,20,0.55)' : 'rgba(8,6,20,0.30)';
+  const scrimMid = theme.dark ? 'rgba(8,6,20,0.34)' : 'rgba(8,6,20,0.30)';
+  const scrimLower = theme.dark ? 'rgba(8,6,20,0.68)' : 'rgba(8,6,20,0.20)';
+  const scrimBottom = theme.dark ? 'rgba(8,6,20,0.88)' : 'transparent';
+
+  const periodIdx = PERIODS.indexOf(period);
+  const breakdownIdx = BREAKDOWN_TABS.indexOf(breakdown);
+
+  // Hero: total spend formatted with subordinate cents + delta vs prev period.
+  const spendDisplay = (() => {
+    const v = pd.spent;
+    const whole = Math.floor(v).toLocaleString();
+    const cents = Math.round((v - Math.floor(v)) * 100).toString().padStart(2, '0');
+    return { whole: `$${whole}`, cents: `.${cents}` };
+  })();
+  const deltaPct = pd.prevTotal > 0 ? (pd.spent - pd.prevTotal) / pd.prevTotal : 0;
+  const deltaIsDown = deltaPct <= 0;
+  const deltaPctAbs = Math.round(Math.abs(deltaPct) * 100);
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
-
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <IconBtn onPress={onOpenDrawer}>
-          <Icon name="menu" size={22} color={theme.text} stroke={1.7} />
-        </IconBtn>
-        <Text style={[TYPE.pageTitle, { color: theme.text }]}>
-          Insights
-        </Text>
-        <ThemeToggle />
-      </View>
-
-      {/* Period selector — sticky below header */}
-      <View style={styles.segRow}>
-        <Segmented
-          value={period}
-          onChange={(p) => { setPeriod(p); setSelectedCat(null); }}
-          options={['Week', 'Month', 'Year']}
-          theme={theme}
+    <View style={{ flex: 1, backgroundColor: theme.dark ? '#000' : '#F8F6FF' }}>
+      <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
+        <LinearGradient
+          pointerEvents="none"
+          colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
+          locations={[0, 0.28, 0.60, 1]}
+          style={StyleSheet.absoluteFillObject}
         />
-      </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
-      >
+        {/* ─── Header ─────────────────────────────── */}
+        <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { opacity: headerBgOpacity }]}>
+            <BlurView
+              intensity={theme.dark ? 70 : 100}
+              tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.headerDivider,
+                { backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)' },
+              ]}
+            />
+          </Animated.View>
 
-        {/* ── Spend summary ──────────────────────────── */}
-        <View style={styles.summaryBlock}>
-          <Text style={[styles.eyebrow, { color: theme.textTer }]}>
-            {pd.spentLabel.replace('Spent ', '').toUpperCase()}
-          </Text>
-          <View style={styles.amountRow}>
-            <Text style={[styles.amountText, { color: theme.text }]}>{amountDisplay}</Text>
-            <View style={[
-              styles.deltaBadge,
-              { backgroundColor: isDown ? theme.accent.fill : overBg(theme.dark) },
-            ]}>
-              <Text style={[
-                styles.deltaText,
-                { color: isDown ? theme.accent.ink : overText(theme.dark) },
-              ]}>
-                {isDown ? '↓' : '↑'}{deltaPct}%
-              </Text>
-            </View>
+          <View style={styles.headerRow}>
+            <IconBtn onPress={onOpenDrawer} label="Open menu">
+              <HeaderIcon
+                name="menu"
+                wallpaperColor={pWall.text}
+                scrolledColor={p.text}
+                scrolledOpacity={iconScrolledOpacity}
+              />
+            </IconBtn>
+            <ThemeToggle />
           </View>
-          <Text style={[styles.budgetCtx, { color: theme.textSec }]}>
-            ${pd.remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} of ${pd.budget.toLocaleString()} remaining · {budgetPct}% used
-          </Text>
         </View>
 
-        {/* ── Trend chart ────────────────────────────── */}
-        <View style={{ paddingHorizontal: 20, marginBottom: 36 }}>
-          <Text style={[styles.eyebrow, { color: theme.textTer, marginBottom: 10 }]}>
-            {trendCfg.span.toUpperCase()}
-          </Text>
-          <TrendChart
-            data={trendCfg.data}
-            theme={theme}
-            width={CHART_W}
-            height={148}
-            budget={trendCfg.budget}
-          />
-        </View>
-
-        {/* ── By category (pie chart) ─────────────────── */}
-        <View style={{ paddingHorizontal: 20, marginBottom: 28 }}>
-          <SectionHeader title="By category" theme={theme} />
-          <PieChart
-            data={pd.byCat}
-            theme={theme}
-            size={PIE_SIZE}
-            selected={selectedCat}
-            onSelect={setSelectedCat}
-          />
-
-          {/* Expanded category detail */}
-          {selectedCat && (() => {
-            const cat = CATS[selectedCat];
-            const catData = pd.byCat.find(c => c.cat === selectedCat);
-            const value = catData?.value ?? 0;
-            const budget = cat?.budget ?? 0;
-            const pct = Math.round((value / budget) * 100);
-            const over = value > budget;
-            const groupColor = catGroupColor(selectedCat, theme.dark);
-            const catTxs = TRANSACTIONS.filter(tx => tx.cat === selectedCat);
-
-            return (
-              <View style={[card, { overflow: 'hidden', marginTop: 16 }]}>
-                {/* Category header row */}
-                <View style={[styles.catRow, { borderBottomWidth: 1, borderBottomColor: theme.sep }]}>
-                  <View style={[styles.catIconWrap, { backgroundColor: groupColor + '22' }]}>
-                    <Icon name={cat?.icon ?? 'tag'} size={14} color={groupColor} stroke={1.6} />
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <View style={styles.catLabelRow}>
-                      <Text style={[styles.catLabel, { color: theme.text }]}>{cat?.label}</Text>
-                      <Text style={[styles.catAmount, { color: theme.text }]}>${value.toFixed(0)}</Text>
+        <Animated.ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
+          showsVerticalScrollIndicator={false}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          scrollEventThrottle={16}
+        >
+          {/* ─── Date range title (native iOS dropdown) ────── */}
+          <View style={styles.dateBlock}>
+            <Host matchContents>
+              <Menu
+                label={
+                  <RNHostView>
+                    <View style={styles.dateLabelRow}>
+                      <Text style={[styles.dateTitle, { color: pWall.text }, shadow]}>
+                        {dateLabel}
+                      </Text>
+                      <Icon name="chevDown" size={22} color={pWall.text} stroke={2.2} />
                     </View>
-                    <View style={[styles.progressTrack, { backgroundColor: theme.hairline }]}>
-                      <View style={[styles.progressFill, {
-                        width: `${Math.min(pct, 100)}%` as any,
-                        backgroundColor: over ? OVER_DOT : groupColor,
-                      }]} />
-                    </View>
-                  </View>
-                  <View style={[styles.pctBadge, { backgroundColor: over ? overBg(theme.dark) : theme.chipBg }]}>
-                    <Text style={[TYPE.labelLg, { color: over ? overText(theme.dark) : theme.textSec }]}>
-                      {pct}%
-                    </Text>
-                  </View>
+                  </RNHostView>
+                }
+              >
+                <Picker
+                  selection={dateIdx}
+                  onSelectionChange={(val) => {
+                    const next = Number(val);
+                    setDateIdxByPeriod(prev => ({ ...prev, [period]: next }));
+                  }}
+                  modifiers={[pickerStyle('inline'), tint(theme.accent.dot)]}
+                >
+                  {dateOptions.map((opt, idx) => (
+                    <SwiftText key={opt} modifiers={[tag(idx)]}>
+                      {opt}
+                    </SwiftText>
+                  ))}
+                </Picker>
+              </Menu>
+            </Host>
+          </View>
+
+          {/* ─── Native Week/Month/Year segmented ── */}
+          <View style={styles.segmentWrap}>
+            <Host matchContents>
+              <Picker
+                selection={periodIdx}
+                onSelectionChange={(val) => {
+                  const next = PERIODS[Number(val)];
+                  if (next) setPeriod(next);
+                }}
+                modifiers={[
+                  pickerStyle('segmented'),
+                  tint(theme.accent.dot),
+                  environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                ]}
+              >
+                {PERIODS.map((label, idx) => (
+                  <SwiftText key={label} modifiers={[tag(idx)]}>
+                    {label}
+                  </SwiftText>
+                ))}
+              </Picker>
+            </Host>
+          </View>
+
+          {/* ─── Sections ─────────────────────────── */}
+          <View style={styles.sectionStack}>
+
+            {/* Chart pager */}
+            <SectionCard dark={theme.dark}>
+              <View style={styles.chartTopRow}>
+                <Text style={[styles.chartTitle, { color: p.text }]}>Overview</Text>
+                <View
+                  style={[
+                    styles.chartTypePill,
+                    {
+                      backgroundColor: theme.dark
+                        ? 'rgba(255,255,255,0.08)'
+                        : 'rgba(14,12,24,0.06)',
+                    },
+                  ]}
+                >
+                  <Text style={[TYPE.captionEm, { color: p.text }]}>{CHART_TYPES[chartIdx]}</Text>
                 </View>
+              </View>
 
-                {/* Transactions in this category */}
-                {catTxs.length === 0 ? (
-                  <View style={{ padding: 16 }}>
-                    <Text style={[TYPE.bodySm, { color: theme.textSec }]}>No transactions this period</Text>
-                  </View>
-                ) : catTxs.map((tx, i) => (
+              <View style={styles.chartHero}>
+                <Text style={[styles.chartHeroAmount, { color: p.text }]}>
+                  {spendDisplay.whole}
+                  <Text style={[styles.chartHeroCents, { color: p.text }]}>{spendDisplay.cents}</Text>
+                </Text>
+                <View style={styles.chartHeroSubRow}>
+                  <Text style={[styles.chartHeroLabel, { color: p.textSec }]}>Total spend</Text>
                   <View
-                    key={tx.id}
                     style={[
-                      styles.txRow,
-                      { borderBottomWidth: i < catTxs.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
+                      styles.deltaBadge,
+                      {
+                        backgroundColor: deltaIsDown
+                          ? (theme.dark ? 'rgba(122,205,138,0.16)' : 'rgba(58,135,80,0.10)')
+                          : (theme.dark ? 'rgba(212,82,42,0.18)' : 'rgba(212,82,42,0.12)'),
+                      },
                     ]}
                   >
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={[styles.catLabel, { color: theme.text }]} numberOfLines={1}>
-                        {tx.merchant}
-                      </Text>
-                      <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
-                        {tx.date} · {tx.time}
-                      </Text>
-                    </View>
-                    <Text style={[TYPE.body, { color: theme.text }]}>
-                      ${tx.amount.toFixed(2)}
+                    <Text
+                      style={[
+                        styles.deltaText,
+                        {
+                          color: deltaIsDown
+                            ? (theme.dark ? '#7ACD8A' : '#3A8750')
+                            : OVER_DOT,
+                        },
+                      ]}
+                    >
+                      {deltaIsDown ? '▼' : '▲'} {deltaPctAbs}%
                     </Text>
                   </View>
-                ))}
+                  <Text style={[styles.chartHeroVs, { color: p.textTer }]}>vs prev</Text>
+                </View>
               </View>
-            );
-          })()}
-        </View>
 
-        {/* ── Biggest movers ─────────────────────────── */}
-        <View style={{ paddingHorizontal: 20, marginBottom: 28 }}>
-          <SectionHeader title="Biggest movers" theme={theme} />
-          <View style={[card, { overflow: 'hidden' }]}>
-            {[movers.up, movers.down].filter(Boolean).map((m, i, arr) => {
-              if (!m) return null;
-              const cat = CATS[m.cat];
-              const groupColor = catGroupColor(m.cat, theme.dark);
-              const isUp = m.pctChange >= 0;
-              const absPct = Math.abs(Math.round(m.pctChange));
-              const absAmt = Math.abs(m.absChange).toFixed(0);
-              return (
+              <ScrollView
+                ref={chartScrollRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                onScroll={onChartScroll}
+                onMomentumScrollEnd={onChartScroll}
+                scrollEventThrottle={16}
+                snapToInterval={CHART_INNER_W}
+                decelerationRate="fast"
+                disableIntervalMomentum
+                bounces={false}
+              >
+                {/* 1. Trend — spend per bin with budget reference */}
+                <View style={[styles.chartSlide, { width: CHART_INNER_W }]}>
+                  <FinanceBarChart
+                    data={trendCfg.data}
+                    budget={trendCfg.budget}
+                    theme={theme}
+                    width={CHART_INNER_W}
+                    height={CHART_H}
+                  />
+                </View>
+
+                {/* 2. Pace — cumulative spend vs ideal pace line */}
+                <View style={[styles.chartSlide, { width: CHART_INNER_W }]}>
+                  <FinanceLineChart
+                    data={trendCfg.data}
+                    budget={trendCfg.budget}
+                    theme={theme}
+                    width={CHART_INNER_W}
+                    height={CHART_H}
+                  />
+                </View>
+
+                {/* 3. Mix — category composition donut */}
                 <View
-                  key={m.cat}
                   style={[
-                    styles.moverRow,
-                    { borderBottomWidth: i < arr.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
+                    styles.chartSlide,
+                    { width: CHART_INNER_W, alignItems: 'center', justifyContent: 'center' },
                   ]}
                 >
-                  <View style={[styles.catIconWrap, { backgroundColor: groupColor + '22' }]}>
-                    <Icon name={cat?.icon ?? 'tag'} size={14} color={groupColor} stroke={1.6} />
+                  <FinanceDonut
+                    data={pd.byCat}
+                    theme={theme}
+                    size={Math.min(CHART_H - 8, 168)}
+                  />
+                </View>
+              </ScrollView>
+
+              <View style={styles.dotsRow}>
+                {CHART_TYPES.map((_, i) => {
+                  const active = i === chartIdx;
+                  return (
+                    <View
+                      key={i}
+                      style={[
+                        styles.dot,
+                        {
+                          backgroundColor: active ? p.text : p.hairlineStrong,
+                          width: active ? 18 : 6,
+                          opacity: active ? 0.9 : 0.7,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            </SectionCard>
+
+            {/* Breakdown — Category / Merchant */}
+            <SectionCard dark={theme.dark}>
+              <View style={styles.breakdownTabsWrap}>
+                <Host matchContents>
+                  <Picker
+                    selection={breakdownIdx}
+                    onSelectionChange={(val) => {
+                      const next = BREAKDOWN_TABS[Number(val)];
+                      if (next) setBreakdown(next);
+                    }}
+                    modifiers={[
+                      pickerStyle('segmented'),
+                      tint(theme.accent.dot),
+                      environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                    ]}
+                  >
+                    {BREAKDOWN_TABS.map((label, idx) => (
+                      <SwiftText key={label} modifiers={[tag(idx)]}>
+                        {label}
+                      </SwiftText>
+                    ))}
+                  </Picker>
+                </Host>
+              </View>
+
+              {rows.map((r, i) => (
+                <View
+                  key={r.key}
+                  style={[
+                    styles.row,
+                    {
+                      borderBottomWidth: i < rows.length - 1 ? 1 : 0,
+                      borderBottomColor: p.hairline,
+                    },
+                  ]}
+                >
+                  <View style={[styles.rowIcon, { backgroundColor: r.color }]}>
+                    <Icon name={r.icon} size={18} color="#FBF8FF" stroke={1.6} />
                   </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={[styles.catLabel, { color: theme.text }]}>{cat?.label}</Text>
-                    <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
-                      ${absAmt} {isUp ? 'more' : 'less'} {VS_LABEL[period]}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      style={[styles.rowTitle, { color: p.text }]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {r.label}
                     </Text>
+                    <Text style={[styles.rowSub, { color: p.textSec }]}>{r.sub}</Text>
                   </View>
-                  <View style={[
-                    styles.moverBadge,
-                    { backgroundColor: isUp ? overBg(theme.dark) : theme.accent.fill },
-                  ]}>
-                    <Text style={[
-                      styles.moverPct,
-                      { color: isUp ? overText(theme.dark) : theme.accent.ink },
-                    ]}>
-                      {isUp ? '↑' : '↓'}{absPct}%
+                  <View style={styles.rowRight}>
+                    <Text style={[styles.rowAmt, { color: p.text }]}>
+                      ${r.amount.toFixed(r.amount >= 100 ? 0 : 2)}
+                    </Text>
+                    <Text style={[styles.rowPct, { color: p.textSec }]}>
+                      {Math.round(r.pct * 100)}%
                     </Text>
                   </View>
                 </View>
-              );
-            })}
+              ))}
+            </SectionCard>
           </View>
-        </View>
-
-        {/* ── Top transactions ───────────────────────── */}
-        <View style={{ paddingHorizontal: 20 }}>
-          <SectionHeader title="Top transactions" theme={theme} />
-          <View style={[card, { overflow: 'hidden' }]}>
-            {topTx.map((tx, i) => {
-              const cat = CATS[tx.cat];
-              const groupColor = catGroupColor(tx.cat, theme.dark);
-              return (
-                <View
-                  key={tx.id}
-                  style={[
-                    styles.txRow,
-                    { borderBottomWidth: i < topTx.length - 1 ? 1 : 0, borderBottomColor: theme.sep },
-                  ]}
-                >
-                  <View style={[styles.catIconWrap, { backgroundColor: groupColor + '22' }]}>
-                    <Icon name={cat?.icon ?? 'tag'} size={14} color={groupColor} stroke={1.6} />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12, minWidth: 0 }}>
-                    <Text style={[styles.catLabel, { color: theme.text }]} numberOfLines={1}>
-                      {tx.merchant}
-                    </Text>
-                    <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
-                      {cat?.label} · {tx.date}
-                    </Text>
-                  </View>
-                  <Text style={[TYPE.body, { color: theme.text }]}>
-                    ${tx.amount.toFixed(2)}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
-      </ScrollView>
+        </Animated.ScrollView>
+      </ImageBackground>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
+  headerWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    zIndex: 10,
+    overflow: 'hidden',
+  },
+  headerDivider: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+  },
+  dateBlock: {
+    paddingHorizontal: 24,
+    paddingTop: 6,
+    paddingBottom: 18,
+  },
+  dateLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dateTitle: {
+    fontSize: 32,
+    fontWeight: '700',
+    letterSpacing: -1.0,
+    lineHeight: 38,
+  },
+  segmentWrap: {
+    paddingHorizontal: CARD_OUTER_PAD,
+    marginBottom: 22,
+  },
+  sectionStack: {
+    paddingHorizontal: CARD_OUTER_PAD,
+    gap: 22,
+  },
+  sectionCard: {
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  sectionCardBorder: {
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: CARD_INNER_PAD,
+    paddingTop: 18,
+    paddingBottom: 14,
+  },
+  chartTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    marginBottom: 4,
   },
-  segRow: {
-    alignItems: 'center',
-    paddingBottom: 20,
+  chartTitle: {
+    ...TYPE.bodySmEm,
+    opacity: 0.7,
+    letterSpacing: 0.2,
   },
-  summaryBlock: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 36,
-  },
-  eyebrow: {
-    ...TYPE.label,
-    letterSpacing: 0.8,
-    marginBottom: 10,
-  },
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  amountText: {
-    ...TYPE.displayXl,
-  },
-  deltaBadge: {
-    paddingHorizontal: 10,
+  chartTypePill: {
+    paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 100,
-    alignSelf: 'center',
-    marginTop: 2,
   },
-  deltaText: {
-    ...TYPE.bodySmEm,
+  chartHero: {
+    marginBottom: 14,
   },
-  budgetCtx: {
-    ...TYPE.bodySm,
+  chartHeroAmount: {
+    fontSize: 34,
+    fontWeight: '700',
+    letterSpacing: -1.0,
+    lineHeight: 38,
   },
-  catRow: {
+  chartHeroCents: {
+    fontSize: 18,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+    opacity: 0.65,
+  },
+  chartHeroSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 12,
+    gap: 8,
+    marginTop: 4,
   },
-  catIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+  chartHeroLabel: {
+    ...TYPE.bodySm,
+  },
+  chartHeroVs: {
+    ...TYPE.caption,
+  },
+  deltaBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 100,
+  },
+  deltaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: -0.1,
+  },
+  chartSlide: {
+    height: CHART_H,
+    justifyContent: 'center',
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  dot: {
+    height: 6,
+    borderRadius: 3,
+  },
+  breakdownTabsWrap: {
+    marginBottom: 6,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+  },
+  rowIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  catLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: 7,
-  },
-  catLabel: {
-    ...TYPE.bodySmEm,
-  },
-  catAmount: {
-    ...TYPE.bodySmEm,
-  },
-  progressTrack: {
-    height: 3,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  pctBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 100,
-    minWidth: 38,
-    alignItems: 'center',
+  rowTitle: { ...TYPE.body },
+  rowSub: { ...TYPE.caption, marginTop: 2 },
+  rowRight: {
+    alignItems: 'flex-end',
     flexShrink: 0,
   },
-  moverRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  moverBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 100,
-    flexShrink: 0,
-  },
-  moverPct: {
-    ...TYPE.bodySmEm,
-  },
-  txRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-  },
+  rowAmt: { ...TYPE.body },
+  rowPct: { ...TYPE.caption, marginTop: 2 },
 });
