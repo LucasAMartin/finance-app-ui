@@ -8,19 +8,45 @@ const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
 const DETENT_LARGE: PresentationDetent = 'large';
 const DETENTS: PresentationDetent[] = [DETENT_DEFAULT, DETENT_LARGE];
 
-import { CATS } from '../data';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import type { Transaction } from '../repositories/types';
+import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
+import type { Category, GroupKey, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { Money } from './shared';
-import { Theme, catGroupColor, catPastel, CAT_TO_GROUP, GROUP_COLORS, OVER_DOT } from '../theme';
+import { Theme, catPastel, GROUP_COLORS, OVER_DOT } from '../theme';
 import { TYPE } from '../typography';
 
-const EXPENSE_GROUPS = [
-  { key: 'needs',   label: 'Needs',   icon: 'home',    cats: ['groceries', 'transport', 'bills'],     defaultCat: 'groceries' },
-  { key: 'wants',   label: 'Wants',   icon: 'sparkle', cats: ['dining', 'shopping', 'entertainment'], defaultCat: 'dining'    },
-  { key: 'savings', label: 'Savings', icon: 'wallet',  cats: [],                                      defaultCat: 'savings'   },
-];
+const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
+  needs: { label: 'Needs', icon: 'home' },
+  wants: { label: 'Wants', icon: 'sparkle' },
+  savings: { label: 'Savings', icon: 'wallet' },
+};
+
+const dateDraftFromIso = (iso?: string) => {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const timeDraftFromIso = (iso?: string) => {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+const parseOccurredAtDraft = (dateDraft: string, timeDraft: string, fallback?: string) => {
+  const mDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateDraft.trim());
+  const mTime = /^(\d{1,2}):(\d{2})$/.exec(timeDraft.trim());
+  if (!mDate || !mTime) return fallback;
+  const year = Number(mDate[1]);
+  const month = Number(mDate[2]) - 1;
+  const day = Number(mDate[3]);
+  const hour = Number(mTime[1]);
+  const minute = Number(mTime[2]);
+  if (hour > 23 || minute > 59) return fallback;
+  const d = new Date(year, month, day, hour, minute, 0, 0);
+  return Number.isNaN(d.getTime()) ? fallback : d.toISOString();
+};
 
 export function TxSheet({
   tx,
@@ -31,8 +57,10 @@ export function TxSheet({
   theme: Theme;
   onClose: () => void;
 }) {
-  const { transactionsRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const lastTx = useRef<Transaction | null>(null);
   if (tx) lastTx.current = tx;
@@ -43,6 +71,8 @@ export function TxSheet({
   const [editMerchant, setEditMerchant] = useState('');
   const [editNote, setEditNote] = useState('');
   const [editAmt, setEditAmt] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
   const editAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -52,6 +82,8 @@ export function TxSheet({
       setEditMerchant(tx.merchant);
       setEditNote(tx.note ?? '');
       setEditAmt(tx.amount.toFixed(2));
+      setEditDate(dateDraftFromIso(tx.occurredAt));
+      setEditTime(timeDraftFromIso(tx.occurredAt));
     }
   }, [tx]);
 
@@ -80,8 +112,13 @@ export function TxSheet({
       cat: editCat,
       merchant: editMerchant.trim() || t.merchant,
       note: editNote,
-      occurredAt: t.occurredAt,
+      occurredAt: parseOccurredAtDraft(editDate, editTime, t.occurredAt),
       recurring: t.recurring,
+      type: t.type ?? 'expense',
+      recurringRuleId: t.recurringRuleId,
+      visibility: t.visibility ?? 'shared',
+      createdByUserId: t.createdByUserId,
+      updatedByUserId: 'local',
       meta: t.meta,
     });
     onClose();
@@ -131,7 +168,7 @@ export function TxSheet({
                         paddingBottom: Math.max(insets.bottom, 16) + 12,
                       }}
                     >
-                      <SheetBody tx={t} transactions={transactions} theme={theme} isExpanded={isExpanded} />
+                      <SheetBody tx={t} transactions={transactions} theme={theme} isExpanded={isExpanded} cats={cats} categories={categories} />
                       {!isExpanded && (
                         <Pressable
                           onPress={() => setDetent(DETENT_LARGE)}
@@ -159,6 +196,12 @@ export function TxSheet({
                             setEditNote={setEditNote}
                             editAmt={editAmt}
                             setEditAmt={setEditAmt}
+                            editDate={editDate}
+                            setEditDate={setEditDate}
+                            editTime={editTime}
+                            setEditTime={setEditTime}
+                            cats={cats}
+                            categories={categories}
                             onSave={saveEdit}
                             onDelete={deleteTx}
                           />
@@ -180,15 +223,19 @@ function SheetBody({
   transactions,
   theme,
   isExpanded,
+  cats,
+  categories,
 }: {
   tx: Transaction;
   transactions: Transaction[];
   theme: Theme;
   isExpanded: boolean;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
 }) {
-  const cat = CATS[tx.cat];
+  const cat = cats[tx.cat];
   const color = catPastel(tx.cat, theme.dark);
-  const groupColor = catGroupColor(tx.cat, theme.dark);
+  const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const catTotal = transactions.filter(x => x.cat === tx.cat).reduce((s, x) => s + x.amount, 0);
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
@@ -240,16 +287,27 @@ function SheetBody({
 
 function EditSection({
   theme, editCat, setEditCat, editMerchant, setEditMerchant,
-  editNote, setEditNote, editAmt, setEditAmt, onSave, onDelete,
+  editNote, setEditNote, editAmt, setEditAmt, editDate, setEditDate,
+  editTime, setEditTime, cats, categories, onSave, onDelete,
 }: {
   theme: Theme;
   editCat: string; setEditCat: (v: string) => void;
   editMerchant: string; setEditMerchant: (v: string) => void;
   editNote: string; setEditNote: (v: string) => void;
   editAmt: string; setEditAmt: (v: string) => void;
+  editDate: string; setEditDate: (v: string) => void;
+  editTime: string; setEditTime: (v: string) => void;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
   onSave: () => void;
   onDelete: () => void;
 }) {
+  const grouped = (['needs', 'wants', 'savings'] as GroupKey[]).map(key => ({
+    key,
+    ...GROUP_META[key],
+    cats: categories.filter(cat => cat.group === key && !cat.archived),
+  }));
+
   return (
     <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
       <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
@@ -265,6 +323,28 @@ function EditSection({
               style={[S.fieldInput, { color: theme.text }]}
             />
           </View>
+        </View>
+        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Date</Text>
+          <TextInput
+            value={editDate}
+            onChangeText={setEditDate}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={theme.textTer}
+            keyboardType="numbers-and-punctuation"
+            style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+          />
+        </View>
+        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Time</Text>
+          <TextInput
+            value={editTime}
+            onChangeText={setEditTime}
+            placeholder="HH:MM"
+            placeholderTextColor={theme.textTer}
+            keyboardType="numbers-and-punctuation"
+            style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+          />
         </View>
         <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Merchant</Text>
@@ -291,14 +371,15 @@ function EditSection({
       {/* Category picker */}
       <Text style={[S.editTitle, { color: theme.textTer, marginTop: 20 }]}>Category</Text>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        {EXPENSE_GROUPS.map(g => {
-          const activeGroup = CAT_TO_GROUP[editCat] ?? (editCat === 'savings' ? 'savings' : undefined);
+        {grouped.map(g => {
+          const activeGroup = categoryGroupFor(editCat, categories);
           const isActive = activeGroup === g.key;
           const color = theme.dark ? GROUP_COLORS[g.key].dark : GROUP_COLORS[g.key].light;
+          const defaultCat = g.cats[0]?.id ?? editCat;
           return (
             <View key={g.key} style={{ flex: 1 }}>
               <Pressable
-                onPress={() => setEditCat(g.defaultCat)}
+                onPress={() => setEditCat(defaultCat)}
                 pointerEvents="box-only"
                 style={[S.groupHeader, {
                   backgroundColor: isActive ? color + '20' : theme.surface,
@@ -318,13 +399,13 @@ function EditSection({
                 </Text>
               </Pressable>
               <View style={S.subcatList}>
-                {g.cats.map(catId => {
-                  const c = CATS[catId];
-                  const isActiveCat = editCat === catId;
+                {g.cats.map(cat => {
+                  const c = cats[cat.id] ?? cat;
+                  const isActiveCat = editCat === cat.id;
                   return (
                     <Pressable
-                      key={catId}
-                      onPress={() => setEditCat(catId)}
+                      key={cat.id}
+                      onPress={() => setEditCat(cat.id)}
                       pointerEvents="box-only"
                       style={[S.subcatRow, { backgroundColor: isActiveCat ? theme.text : 'transparent' }]}
                     >

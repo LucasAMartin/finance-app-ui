@@ -16,9 +16,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BottomSheet, Group, Host, RNHostView, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
 import { presentationDetents, presentationDragIndicator, pickerStyle, tag, tint, fixedSize, environment } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CATS } from '../data';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import type { Bill, Transaction } from '../repositories/types';
+import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import type { Bill, Category, Transaction } from '../repositories/types';
+import { upcomingBillsFromRecurring } from '../selectors/finance';
 
 const CALENDAR_YEAR  = 2026;
 const CALENDAR_MONTH = 4; // 0-indexed → May
@@ -35,7 +36,7 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
 import { Collapsible } from '../components/Collapsible';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
-import { Theme, catGroupColor, GROUP_COLORS, cautionBg, cautionText, flagBg } from '../theme';
+import { Theme, GROUP_COLORS, cautionBg, cautionText, flagBg } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim } from '../wallpaperPalette';
 import { TYPE } from '../typography';
 import { useTheme } from '../ThemeProvider';
@@ -82,12 +83,6 @@ const MONTH_NAMES = [
 ];
 
 
-const EXPENSE_GROUPS = [
-  { key: 'needs',   label: 'Needs',   cats: ['groceries', 'transport', 'bills']         },
-  { key: 'wants',   label: 'Wants',   cats: ['dining', 'shopping', 'entertainment']     },
-  { key: 'savings', label: 'Savings', cats: [] as string[]                              },
-];
-
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -122,9 +117,12 @@ interface Props {
 }
 
 export function ActivityScreen({ theme, onOpenDrawer }: Props) {
-  const { transactionsRepo, billsRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
-  const upcomingBills = useRepositoryList(billsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const recurringRules = useRepositoryList(recurringRulesRepo);
+  const cats = useMemo(() => categoryMap(categories), [categories]);
+  const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
   const insets = useSafeAreaInsets();
   const { wallpaper } = useTheme();
 
@@ -197,7 +195,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
       }
       if (query) {
         const q = query.toLowerCase();
-        return t.merchant.toLowerCase().includes(q) || CATS[t.cat].label.toLowerCase().includes(q);
+        return t.merchant.toLowerCase().includes(q) || (cats[t.cat]?.label ?? t.cat).toLowerCase().includes(q);
       }
       return true;
     });
@@ -206,7 +204,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     else if (sortBy === 'date-asc')    result.reverse();
     else if (sortBy === 'cat')         result.sort((a, b) => a.cat.localeCompare(b.cat) || a.merchant.localeCompare(b.merchant));
     return result;
-  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth, transactions]);
+  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth, transactions, cats]);
 
   const grouped = useMemo(() => {
     const g: Record<string, { txs: Transaction[]; total: number }> = {};
@@ -227,11 +225,11 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
       if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
       if (query) {
         const q = query.toLowerCase();
-        return t.merchant.toLowerCase().includes(q) || CATS[t.cat].label.toLowerCase().includes(q);
+        return t.merchant.toLowerCase().includes(q) || (cats[t.cat]?.label ?? t.cat).toLowerCase().includes(q);
       }
       return true;
     }),
-    [catFilter, query, transactions],
+    [catFilter, query, transactions, cats],
   );
 
   const calBills = useMemo(
@@ -357,6 +355,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                     marks={calMarks}
                     selectedDay={selectedDay}
                     today={todayDom(transactions)}
+                    categories={categories}
                     onSelectDay={(day) => {
                       setSelectedDay(day);
                       if (day !== null) setDateFilter(null);
@@ -502,8 +501,8 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                     </View>
                   )}
                   {catFilter.map(catId => {
-                    const cat = CATS[catId];
-                    const groupColor = catGroupColor(catId, theme.dark);
+                    const cat = cats[catId];
+                    const groupColor = categoryGroupColor(catId, categories, theme.dark);
                     return (
                       <View key={catId} style={[S.filterPill, { backgroundColor: groupColor + '30' }]}>
                         <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
@@ -536,12 +535,14 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                           key={tx.id}
                           tx={tx}
                           theme={theme}
+                          cats={cats}
+                          categories={categories}
                           onPress={() => setSheetTx(tx)}
                           last={i === dayDetail.txs.length - 1 && dayDetail.bills.length === 0}
                         />
                       ))}
                       {dayDetail.bills.map((bill, i) => (
-                        <BillRow key={bill.id} bill={bill} theme={theme} last={i === dayDetail.bills.length - 1} />
+                        <BillRow key={bill.id} bill={bill} theme={theme} categories={categories} last={i === dayDetail.bills.length - 1} />
                       ))}
                     </View>
                   )}
@@ -555,7 +556,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                   />
                 ) : (
                   dayKeys.map(day => (
-                    <DayGroup key={day} day={day} group={grouped[day]} theme={theme} onPress={setSheetTx} />
+                    <DayGroup key={day} day={day} group={grouped[day]} theme={theme} cats={cats} categories={categories} onPress={setSheetTx} />
                   ))
                 )
               )}
@@ -572,6 +573,8 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
           catFilter={catFilter}
           dateFilter={dateFilter}
           sortBy={sortBy}
+          categories={categories}
+          cats={cats}
           setCatFilter={setCatFilter}
           setDateFilter={handleSetDateFilter}
           setSortBy={setSortBy}
@@ -587,13 +590,15 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
 
 function FilterSheet({
   visible, theme, catFilter, dateFilter, sortBy,
-  setCatFilter, setDateFilter, setSortBy, clearDay, onClose,
+  categories, cats, setCatFilter, setDateFilter, setSortBy, clearDay, onClose,
 }: {
   visible: boolean;
   theme: Theme;
   catFilter: string[];
   dateFilter: DateFilter;
   sortBy: SortOrder;
+  categories: Category[];
+  cats: Record<string, { label: string; icon: string; budget: number }>;
   setCatFilter: (c: string[]) => void;
   setDateFilter: (d: DateFilter) => void;
   setSortBy: (s: SortOrder) => void;
@@ -673,6 +678,11 @@ function FilterSheet({
   })();
 
   const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
+  const groupedCategories = (['needs', 'wants', 'savings'] as const).map(key => ({
+    key,
+    label: key === 'needs' ? 'Needs' : key === 'wants' ? 'Wants' : 'Savings',
+    cats: categories.filter(cat => cat.group === key).map(cat => cat.id),
+  })).filter(g => g.cats.length > 0);
 
   return (
     <Host style={{ width: 0, height: 0, position: 'absolute' }}>
@@ -775,7 +785,7 @@ function FilterSheet({
                 </Collapsible>
 
                 {/* ── Category rows ─────────────────────────────── */}
-                {EXPENSE_GROUPS.filter(g => g.cats.length > 0).map(g => {
+                {groupedCategories.map(g => {
                   const groupColor = theme.dark ? GROUP_COLORS[g.key].dark : GROUP_COLORS[g.key].light;
                   return (
                     <View key={g.key}>
@@ -793,7 +803,7 @@ function FilterSheet({
                         </Text>
                       ) : (
                         g.cats.map((catId, ci) => {
-                          const c      = CATS[catId];
+                          const c      = cats[catId];
                           const active = catFilter.includes(catId);
                           return (
                             <TouchableOpacity
@@ -1014,11 +1024,13 @@ function MiniCalendar({
 // ─── DayGroup ────────────────────────────────────────────────────────────────
 
 function DayGroup({
-  day, group, theme, onPress,
+  day, group, theme, cats, categories, onPress,
 }: {
   day: string;
   group: { txs: Transaction[]; total: number };
   theme: Theme;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
   onPress: (tx: Transaction) => void;
 }) {
   const p     = makeP(theme.dark);
@@ -1039,6 +1051,8 @@ function DayGroup({
             <TxRow
               tx={tx}
               theme={theme}
+              cats={cats}
+              categories={categories}
               onPress={() => onPress(tx)}
               last={i === txs.length - 1}
             />
@@ -1110,13 +1124,18 @@ function SwipeRow({ children, theme }: { children: React.ReactNode; theme: Theme
 // ─── TxRow ───────────────────────────────────────────────────────────────────
 
 function TxRow({
-  tx, theme, onPress, last,
+  tx, theme, cats, categories, onPress, last,
 }: {
-  tx: Transaction; theme: Theme; onPress: () => void; last: boolean;
+  tx: Transaction;
+  theme: Theme;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
+  onPress: () => void;
+  last: boolean;
 }) {
   const p          = makeP(theme.dark);
-  const cat        = CATS[tx.cat];
-  const groupColor = catGroupColor(tx.cat, theme.dark);
+  const cat        = cats[tx.cat];
+  const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
 
   return (
     <TouchableOpacity
@@ -1146,9 +1165,9 @@ function TxRow({
 
 // ─── BillRow ─────────────────────────────────────────────────────────────────
 
-function BillRow({ bill, theme, last }: { bill: Bill; theme: Theme; last: boolean }) {
+function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; categories: Category[]; last: boolean }) {
   const p          = makeP(theme.dark);
-  const groupColor = catGroupColor(bill.cat, theme.dark);
+  const groupColor = categoryGroupColor(bill.cat, categories, theme.dark);
   return (
     <View style={[S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}>
       <View style={[S.billIcon, { borderColor: groupColor }]}>

@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Picker, Text as SwiftText, Host } from '@expo/ui/swift-ui';
 import { pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
-import { Theme, catGroupColor } from '../theme';
+import { Theme } from '../theme';
+import { categoryGroupColor } from '../repositories/categoryUtils';
+import type { Category } from '../repositories/types';
 import { Icon } from './Icon';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -37,6 +39,7 @@ interface Props {
   marks: Record<number, CalDayMark>;
   selectedDay: number | null;
   today: number | null;
+  categories?: Category[];
   onSelectDay: (day: number | null) => void;
   onViewMonthChange?: (year: number, month: number) => void;
   onCollapse?: () => void;
@@ -62,6 +65,7 @@ function resolveColors(theme: Theme, override?: CalOverrideColors) {
 
 export function TransactionCalendar({
   theme, year, month, marks, selectedDay, today,
+  categories = [],
   onSelectDay, onViewMonthChange, overrideColors,
 }: Props) {
   const clr = resolveColors(theme, overrideColors);
@@ -172,8 +176,8 @@ export function TransactionCalendar({
                 const isSelected = day === selectedDay;
                 const isToday    = day === today;
 
-                const txDotColors   = [...new Set((mark?.txCats   ?? []).map(c => catGroupColor(c, theme.dark)))].slice(0, MAX_DOTS);
-                const billDotColors = [...new Set((mark?.billCats ?? []).map(c => catGroupColor(c, theme.dark)))].slice(0, Math.max(0, MAX_DOTS - txDotColors.length));
+                const txDotColors   = [...new Set((mark?.txCats   ?? []).map(c => categoryGroupColor(c, categories, theme.dark)))].slice(0, MAX_DOTS);
+                const billDotColors = [...new Set((mark?.billCats ?? []).map(c => categoryGroupColor(c, categories, theme.dark)))].slice(0, Math.max(0, MAX_DOTS - txDotColors.length));
 
                 return (
                   <Pressable
@@ -254,4 +258,3 @@ const styles = StyleSheet.create({
     width: 7, height: 7, borderRadius: 3.5,
   },
 });
-

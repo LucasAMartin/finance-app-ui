@@ -1,10 +1,28 @@
 import { AccentKey, CardStyle } from '../theme';
 
+export type GroupKey = 'needs' | 'wants' | 'savings';
+export type TransactionType = 'expense' | 'income';
+export type Visibility = 'shared' | 'private';
+
+export interface Category {
+  id: string;
+  label: string;
+  icon: string;
+  group: GroupKey;
+  defaultBudget: number;
+  sortOrder: number;
+  archived?: boolean;
+  createdByUserId?: string;
+  updatedByUserId?: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface Transaction {
   id: string;
   merchant: string;
   cat: string;
   amount: number;
+  type?: TransactionType;
   note: string;
   date: string;
   time: string;
@@ -12,6 +30,10 @@ export interface Transaction {
   fullDate: string;
   occurredAt?: string;
   recurring?: boolean;
+  recurringRuleId?: string;
+  visibility?: Visibility;
+  createdByUserId?: string;
+  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -19,9 +41,14 @@ export interface CreateTransactionInput {
   merchant: string;
   cat: string;
   amount: number;
+  type?: TransactionType;
   note?: string;
   occurredAt?: string;
   recurring?: boolean;
+  recurringRuleId?: string;
+  visibility?: Visibility;
+  createdByUserId?: string;
+  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -29,11 +56,15 @@ export type UpdateTransactionInput = Partial<CreateTransactionInput>;
 
 export interface Income {
   id: string;
+  kind?: 'regular' | 'irregular';
   amount: number;
   source: string;
-  cadence: 'weekly' | 'biweekly' | 'monthly' | 'annual';
+  cadence: 'weekly' | 'biweekly' | 'monthly' | 'annual' | 'oneTime';
   startDate: string;
   endDate?: string;
+  receivedAt?: string;
+  createdByUserId?: string;
+  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -54,12 +85,39 @@ export interface Bill {
 export interface Budget {
   id: string;
   month: string;
-  group?: 'needs' | 'wants' | 'savings';
+  group?: GroupKey;
   category?: string;
   label?: string;
   icon?: string;
   amount: number;
   spent?: number;
+  meta?: Record<string, unknown>;
+}
+
+export interface RecurringRule {
+  id: string;
+  merchant: string;
+  cat: string;
+  amount: number;
+  cadence: 'weekly' | 'monthly' | 'annual' | 'customMonthly';
+  startDate: string;
+  nextDueDate: string;
+  dayOfMonth?: number;
+  monthOfYear?: number;
+  estimate?: boolean;
+  active: boolean;
+  createdByUserId?: string;
+  updatedByUserId?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface Attachment {
+  id: string;
+  transactionId: string;
+  localUri: string;
+  type: 'receipt' | 'note' | 'other';
+  createdAt: string;
+  cloudAssetId?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -89,6 +147,9 @@ export type IncomeRepo = Repository<Income>;
 export type BillsRepo = Repository<Bill>;
 export type BudgetsRepo = Repository<Budget>;
 export type SettingsRepo = Repository<AppSettings, AppSettings, Partial<Omit<AppSettings, 'id'>>>;
+export type CategoriesRepo = Repository<Category>;
+export type RecurringRulesRepo = Repository<RecurringRule>;
+export type AttachmentsRepo = Repository<Attachment>;
 
 export interface Repositories {
   transactionsRepo: TransactionsRepo;
@@ -96,9 +157,13 @@ export interface Repositories {
   billsRepo: BillsRepo;
   budgetsRepo: BudgetsRepo;
   settingsRepo: SettingsRepo;
+  categoriesRepo: CategoriesRepo;
+  recurringRulesRepo: RecurringRulesRepo;
+  attachmentsRepo: AttachmentsRepo;
 }
 
 export interface SpendSub {
+  cat: string;
   label: string;
   icon: string;
   spent: number;
@@ -106,7 +171,7 @@ export interface SpendSub {
 }
 
 export interface SpendGroup {
-  key: 'needs' | 'wants' | 'savings';
+  key: GroupKey;
   label: string;
   targetPct: number;
   subs: SpendSub[];

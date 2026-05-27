@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Platform,
+  ScrollView,
   ImageBackground,
   Animated,
   Easing,
@@ -19,14 +20,16 @@ const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, GROUP_COLORS, catGroupColor, OVER_DOT, HERO_AVAIL, CAT_TO_GROUP } from '../theme';
+import { Theme, GROUP_COLORS, OVER_DOT, HERO_AVAIL } from '../theme';
 import { Icon } from '../components/Icon';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TYPE } from '../typography';
 import { makeP, DARK_TEXT_SHADOW, makeScrim } from '../wallpaperPalette';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import type { Bill, SpendGroup } from '../repositories/types';
-import { monthlyIncome, spendGroups } from '../selectors/finance';
+import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
+import type { Bill, Category, GroupKey, SpendGroup, SpendSub } from '../repositories/types';
+import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
+import { CATEGORY_ICON_OPTIONS, inferCategoryIcon } from '../categoryIcons';
 import {
   BottomSheet,
   Group,
@@ -50,6 +53,7 @@ import { useTheme } from '../ThemeProvider';
 interface Props {
   theme: Theme;
   onOpenDrawer: () => void;
+  incomeSheetToken?: number;
 }
 
 type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
@@ -61,6 +65,8 @@ const CADENCES: { value: Cadence; label: string }[] = [
 ];
 
 const INCOME_DETENT: PresentationDetent = { fraction: 0.42 };
+const CATEGORY_DETENT: PresentationDetent = { fraction: 0.74 };
+const CURRENT_MONTH = '2026-05';
 
 interface BudgetTemplate {
   id: string; label: string; subtitle: string;
@@ -75,16 +81,26 @@ const BUDGET_TEMPLATES: BudgetTemplate[] = [
 
 const bKey = (gKey: string, label: string) => `${gKey}:${label}`;
 const billKey = (gKey: string, billId: string) => `bill:${gKey}:${billId}`;
+const ruleIdFromBillId = (billId: string) => billId.startsWith('bill-') ? billId.slice(5) : billId;
 
-const initBudgets = (groups: SpendGroup[], bills: Bill[]): Record<string, number> => {
+const initBudgets = (groups: SpendGroup[], bills: Bill[], categories: Category[]): Record<string, number> => {
   const out: Record<string, number> = {};
   groups.forEach(g => g.subs.forEach(s => { out[bKey(g.key, s.label)] = s.budget; }));
   bills.forEach(bill => {
-    const gKey = CAT_TO_GROUP[bill.cat] ?? 'wants';
+    const gKey = categoryGroupFor(bill.cat, categories);
     out[billKey(gKey, bill.id)] = bill.amount;
   });
   return out;
 };
+
+const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
+  needs: { label: 'Needs', icon: 'home' },
+  wants: { label: 'Wants', icon: 'sparkle' },
+  savings: { label: 'Savings', icon: 'wallet' },
+};
+
+const slugify = (label: string) =>
+  label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'category';
 
 const toMonthly = (v: number, c: Cadence): number => {
   switch (c) {
@@ -299,17 +315,28 @@ function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, w
   );
 }
 
-export function BudgetScreen({ theme, onOpenDrawer }: Props) {
-  const { transactionsRepo, incomeRepo, billsRepo, budgetsRepo } = useRepositories();
+export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Props) {
+  const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
-  const upcomingBills = useRepositoryList(billsRepo);
   const budgetRecords = useRepositoryList(budgetsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const recurringRules = useRepositoryList(recurringRulesRepo);
+  const upcomingBills = useMemo(
+    () => upcomingBillsFromRecurring(recurringRules, categories),
+    [recurringRules, categories],
+  );
   const visibleSpendGroups = useMemo(
-    () => spendGroups(transactions, budgetRecords),
-    [transactions, budgetRecords],
+    () => spendGroups(transactions, budgetRecords, categories),
+    [transactions, budgetRecords, categories],
   );
   const initialIncome = useMemo(() => monthlyIncome(incomes), [incomes]);
+  const irregularIncomeThisMonth = useMemo(() => (
+    incomes
+      .filter(item => item.kind === 'irregular')
+      .filter(item => (item.receivedAt ?? item.startDate).slice(0, 7) === CURRENT_MONTH)
+      .reduce((sum, item) => sum + item.amount, 0)
+  ), [incomes]);
   const insets = useSafeAreaInsets();
   const { wallpaper } = useTheme();
   const pWallpaper = makeP(true);
@@ -341,9 +368,10 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   // ── Budget state ──────────────────────────────────────────────
   const [income, setIncome] = useState(initialIncome);
   const [cadence, setCadence] = useState<Cadence>('Mo');
+  const [incomeKind, setIncomeKind] = useState<'regular' | 'irregular'>('regular');
   const [incomeSheetOpen, setIncomeSheetOpen] = useState(false);
   const [incomeDraft, setIncomeDraft] = useState('');
-  const [budgets, setBudgets] = useState<Record<string, number>>(() => initBudgets(visibleSpendGroups, upcomingBills));
+  const [budgets, setBudgets] = useState<Record<string, number>>(() => initBudgets(visibleSpendGroups, upcomingBills, categories));
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
   const [templatePromptVisible, setTemplatePromptVisible] = useState(true);
   const [budgetTouched, setBudgetTouched] = useState(false);
@@ -358,10 +386,22 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const [removedSubs, setRemovedSubs] = useState<Set<string>>(new Set());
   const [removedBills, setRemovedBills] = useState<Set<string>>(new Set());
   const [addingFor, setAddingFor] = useState<string | null>(null);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [categoryLabelDraft, setCategoryLabelDraft] = useState('');
+  const [categoryIconDraft, setCategoryIconDraft] = useState('tag');
+  const [categoryGroupDraft, setCategoryGroupDraft] = useState<GroupKey>('needs');
 
   const scrollViewRef = useRef<GHScrollView>(null);
   const outerTapRef = useRef<any>(null);
   const openSwipeRef = useRef<Swipeable | null>(null);
+
+  useEffect(() => {
+    setIncome(initialIncome);
+  }, [initialIncome]);
+
+  useEffect(() => {
+    setBudgets(initBudgets(visibleSpendGroups, upcomingBills, categories));
+  }, [visibleSpendGroups, upcomingBills, categories]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -412,33 +452,55 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const billsByGroup = useMemo(() => {
     const map: Record<string, Bill[]> = {};
     upcomingBills.forEach(bill => {
-      const gKey = CAT_TO_GROUP[bill.cat] ?? 'wants';
+      const gKey = categoryGroupFor(bill.cat, categories);
       if (!map[gKey]) map[gKey] = [];
       map[gKey].push(bill);
     });
     return map;
-  }, [upcomingBills]);
+  }, [upcomingBills, categories]);
 
   const displayIncome = fromMonthly(income, cadence);
 
   const openIncomeSheet = () => {
+    setIncomeKind('regular');
     setIncomeDraft(String(displayIncome));
     setIncomeSheetOpen(true);
   };
 
+  useEffect(() => {
+    if (incomeSheetToken > 0) openIncomeSheet();
+  }, [incomeSheetToken]);
+
   const commitIncome = () => {
     const v = parseAmountDraft(incomeDraft);
     if (v === null || v <= 0) return;
+    if (incomeKind === 'irregular') {
+      incomeRepo.create({
+        kind: 'irregular',
+        amount: v,
+        source: 'Irregular income',
+        cadence: 'oneTime',
+        startDate: new Date().toISOString().slice(0, 10),
+        receivedAt: new Date().toISOString(),
+        createdByUserId: 'local',
+        updatedByUserId: 'local',
+      });
+      setIncomeSheetOpen(false);
+      return;
+    }
     const monthly = toMonthly(v, cadence);
-    const primary = incomes[0];
+    const primary = incomes.find(item => (item.kind ?? 'regular') === 'regular');
     if (primary) {
-      incomeRepo.update(primary.id, { amount: monthly });
+      incomeRepo.update(primary.id, { amount: monthly, kind: 'regular', cadence: 'monthly', updatedByUserId: 'local' });
     } else {
       incomeRepo.create({
+        kind: 'regular',
         amount: monthly,
         source: 'Primary income',
         cadence: 'monthly',
         startDate: new Date().toISOString().slice(0, 10),
+        createdByUserId: 'local',
+        updatedByUserId: 'local',
       });
     }
     setIncome(monthly);
@@ -453,20 +515,30 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const syncBudgetRecord = (key: string, v: number) => {
     if (key.startsWith('bill:')) {
       const [, , billId] = key.split(':');
-      if (billId) billsRepo.update(billId, { amount: v });
+      if (billId) recurringRulesRepo.update(ruleIdFromBillId(billId), { amount: v, updatedByUserId: 'local' });
       return;
     }
     const [groupKey, label] = key.split(':') as [SpendGroup['key'] | undefined, string | undefined];
     if (!groupKey || !label) return;
-    const existing = budgetRecords.find(b => b.group === groupKey && b.label === label && b.month === '2026-05');
+    const sub = visibleSpendGroups.find(g => g.key === groupKey)?.subs.find(s => s.label === label);
+    const existing = budgetRecords.find(b => (
+      (sub?.cat && b.category === sub.cat) || (b.group === groupKey && b.label === label)
+    ) && b.month === CURRENT_MONTH);
     if (existing) {
-      budgetsRepo.update(existing.id, { amount: v });
+      budgetsRepo.update(existing.id, {
+        amount: v,
+        group: groupKey,
+        category: sub?.cat,
+        label,
+        icon: sub?.icon ?? 'tag',
+      });
     } else {
       budgetsRepo.create({
-        month: '2026-05',
+        month: CURRENT_MONTH,
         group: groupKey,
+        category: sub?.cat,
         label,
-        icon: visibleSpendGroups.find(g => g.key === groupKey)?.subs.find(s => s.label === label)?.icon ?? 'tag',
+        icon: sub?.icon ?? 'tag',
         amount: v,
       });
     }
@@ -488,25 +560,21 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     };
   };
 
-  const removeSub = (gKey: string, label: string, isCustom: boolean) => {
+  const removeSub = (gKey: string, sub: Pick<SpendSub, 'cat' | 'label'>) => {
+    const label = sub.label;
     markBudgetTouched();
-    saveSnapshot();
-    if (isCustom) {
-      setCustomSubs(prev => ({ ...prev, [gKey]: prev[gKey].filter(s => s.label !== label) }));
-      const existing = budgetRecords.find(b => b.group === gKey && b.label === label && b.month === '2026-05');
-      if (existing) budgetsRepo.delete(existing.id);
-      setBudgets(b => { const n = { ...b }; delete n[bKey(gKey, label)]; return n; });
-    } else {
-      setRemovedSubs(prev => new Set([...prev, bKey(gKey, label)]));
-    }
-    showUndo(`Removed ${label}`);
+    categoriesRepo.delete(sub.cat);
+    budgetRecords
+      .filter(b => (b.category === sub.cat || (b.group === gKey && b.label === label)) && b.month === CURRENT_MONTH)
+      .forEach(budget => budgetsRepo.delete(budget.id));
+    setBudgets(b => { const n = { ...b }; delete n[bKey(gKey, label)]; return n; });
   };
 
   const removeBill = (bill: Bill) => {
     markBudgetTouched();
-    saveSnapshot();
     setRemovedBills(prev => new Set([...prev, bill.id]));
-    showUndo(`Removed ${bill.name}`);
+    const ruleId = typeof bill.meta?.recurringRuleId === 'string' ? bill.meta.recurringRuleId : ruleIdFromBillId(bill.id);
+    recurringRulesRepo.delete(ruleId);
   };
 
   const addSub = (gKey: string, label: string) => {
@@ -517,17 +585,87 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     ]);
     if (taken.has(label.toLowerCase())) return;
     markBudgetTouched();
-    budgetsRepo.create({
-      month: '2026-05',
-      group: gKey as SpendGroup['key'],
+    const icon = inferCategoryIcon(label);
+    const created = categoriesRepo.create({
       label,
-      icon: 'tag',
+      icon,
+      group: gKey as GroupKey,
+      defaultBudget: 0,
+      sortOrder: Math.max(0, ...categories.map(cat => cat.sortOrder)) + 10,
+      createdByUserId: 'local',
+      updatedByUserId: 'local',
+    });
+    budgetsRepo.create({
+      month: CURRENT_MONTH,
+      group: gKey as GroupKey,
+      category: created.id,
+      label,
+      icon,
       amount: 0,
       meta: { custom: true },
     });
-    setCustomSubs(prev => ({ ...prev, [gKey]: [...(prev[gKey] ?? []), { label }] }));
     setBudgets(b => ({ ...b, [bKey(gKey, label)]: 0 }));
     setAddingFor(null);
+  };
+
+  const openCategoryEditor = (catId: string) => {
+    const category = categories.find(cat => cat.id === catId);
+    if (!category) return;
+    setEditingCategory(category);
+    setCategoryLabelDraft(category.label);
+    setCategoryIconDraft(category.icon);
+    setCategoryGroupDraft(category.group);
+  };
+
+  const closeCategoryEditor = () => {
+    setEditingCategory(null);
+    setCategoryLabelDraft('');
+    setCategoryIconDraft('tag');
+    setCategoryGroupDraft('needs');
+  };
+
+  const saveCategoryEdit = () => {
+    if (!editingCategory) return;
+    const label = categoryLabelDraft.trim();
+    if (!label) return;
+    const duplicate = categories.some(cat => (
+      cat.id !== editingCategory.id &&
+      !cat.archived &&
+      cat.label.toLowerCase() === label.toLowerCase()
+    ));
+    if (duplicate) return;
+    categoriesRepo.update(editingCategory.id, {
+      label,
+      icon: categoryIconDraft,
+      group: categoryGroupDraft,
+      defaultBudget: budgets[bKey(editingCategory.group, editingCategory.label)] ?? editingCategory.defaultBudget,
+      updatedByUserId: 'local',
+    });
+    budgetRecords
+      .filter(b => b.category === editingCategory.id || (b.group === editingCategory.group && b.label === editingCategory.label))
+      .forEach(budget => budgetsRepo.update(budget.id, {
+        group: categoryGroupDraft,
+        category: editingCategory.id,
+        label,
+        icon: categoryIconDraft,
+      }));
+    setBudgets(prev => {
+      const next = { ...prev };
+      const oldKey = bKey(editingCategory.group, editingCategory.label);
+      const nextKey = bKey(categoryGroupDraft, label);
+      if (oldKey in next && oldKey !== nextKey) {
+        next[nextKey] = next[oldKey];
+        delete next[oldKey];
+      }
+      return next;
+    });
+    closeCategoryEditor();
+  };
+
+  const deleteEditingCategory = () => {
+    if (!editingCategory) return;
+    removeSub(editingCategory.group, { cat: editingCategory.id, label: editingCategory.label });
+    closeCategoryEditor();
   };
 
   const groupTotals = useMemo(() => {
@@ -544,7 +682,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
       t[g.key] = orig + custom + bills;
     });
     return t;
-  }, [budgets, removedSubs, customSubs, removedBills, billsByGroup]);
+  }, [budgets, removedSubs, customSubs, removedBills, billsByGroup, visibleSpendGroups]);
 
   const needsTotal    = groupTotals.needs    ?? 0;
   const wantsTotal    = groupTotals.wants    ?? 0;
@@ -602,7 +740,10 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
       const subSum = g.subs.reduce((s, sub) => s + sub.budget, 0);
       g.subs.forEach(sub => {
         const ratio = subSum > 0 ? sub.budget / subSum : 1 / g.subs.length;
-        next[bKey(g.key, sub.label)] = Math.round(target * ratio);
+        const amount = Math.round(target * ratio);
+        const key = bKey(g.key, sub.label);
+        next[key] = amount;
+        syncBudgetRecord(key, amount);
       });
     });
     setBudgets(next);
@@ -771,6 +912,17 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                           </View>
                         </View>
                       </TouchableOpacity>
+                      {irregularIncomeThisMonth > 0 && (
+                        <View style={[styles.comparisonLine, { borderTopColor: p.hairline, borderTopWidth: 1 }]}>
+                          <Text numberOfLines={1} style={[TYPE.captionEm, { color: p.textSec }]}>Extra Income</Text>
+                          <View style={styles.comparisonValue}>
+                            <Text numberOfLines={1} style={[TYPE.captionEm, styles.comparisonValueText, { color: p.text }]}>
+                              ${fmtMoney(irregularIncomeThisMonth)} / Mo
+                            </Text>
+                            <View style={styles.comparisonChevronSlot} />
+                          </View>
+                        </View>
+                      )}
                       <View style={[styles.comparisonLine, { borderTopColor: p.hairline, borderTopWidth: 1 }]}>
                         <Text numberOfLines={1} style={[TYPE.captionEm, { color: p.textSec }]}>Planned Expenses</Text>
                         <View style={styles.comparisonValue}>
@@ -859,12 +1011,18 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                     {visibleOrigSubs.map((sub, si) => {
                       const isLast = si === visibleOrigSubs.length - 1 && customs.length === 0 && groupBills.length === 0 && addingFor !== g.key;
                       return (
-                        <SwipeRow key={sub.label} onRemove={() => removeSub(g.key, sub.label, false)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
+                        <SwipeRow key={sub.cat} onRemove={() => removeSub(g.key, sub)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                           <View style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}>
-                            <View style={[styles.rowIcon, { backgroundColor: groupColor }]}>
-                              <Icon name={sub.icon} size={15} color="#FBF8FF" stroke={1.6} />
-                            </View>
-                            <Text style={[TYPE.body, { flex: 1, color: p.text, minWidth: 0 }]}>{sub.label}</Text>
+                            <TouchableOpacity
+                              onPress={() => openCategoryEditor(sub.cat)}
+                              activeOpacity={0.68}
+                              style={styles.rowCategoryButton}
+                            >
+                              <View style={[styles.rowIcon, { backgroundColor: groupColor }]}>
+                                <Icon name={sub.icon} size={15} color="#FBF8FF" stroke={1.6} />
+                              </View>
+                              <Text style={[TYPE.body, { flex: 1, color: p.text, minWidth: 0 }]}>{sub.label}</Text>
+                            </TouchableOpacity>
                             <AmountField theme={theme} dark={theme.dark}
                               label={sub.label}
                               amount={budgets[bKey(g.key, sub.label)] ?? sub.budget}
@@ -879,7 +1037,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                     {customs.map((sub, ci) => {
                       const isLast = ci === customs.length - 1 && groupBills.length === 0 && addingFor !== g.key;
                       return (
-                        <SwipeRow key={sub.label} onRemove={() => removeSub(g.key, sub.label, true)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
+                        <SwipeRow key={sub.label} onRemove={() => removeSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                           <View style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}>
                             <View style={[styles.rowIcon, { backgroundColor: theme.dark ? 'rgba(180,160,240,0.18)' : 'rgba(14,12,24,0.08)' }]}>
                               <Icon name="tag" size={14} color={groupColor} stroke={1.5} />
@@ -907,7 +1065,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                           return (
                             <SwipeRow key={bill.id} onRemove={() => removeBill(bill)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                               <View style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}>
-                                <View style={[styles.rowIcon, { backgroundColor: catGroupColor(bill.cat, theme.dark) }]}>
+                                <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(bill.cat, categories, theme.dark) }]}>
                                   <Icon name={bill.icon} size={15} color="#FBF8FF" stroke={1.6} />
                                 </View>
                                 <View style={{ flex: 1, minWidth: 0 }}>
@@ -1066,34 +1224,61 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
                   </View>
                 </View>
 
-                <View style={[styles.sheetOptionRow, { borderTopColor: theme.hairline }]}>
-                  <Text style={[TYPE.body, { color: theme.text }]}>Cadence</Text>
-                  <Host matchContents>
-                    <Picker
-                      selection={cadence}
-                      onSelectionChange={(val) => {
-                        const next = val as Cadence;
-                        setCadence(next);
-                        setIncomeDraft(String(fromMonthly(income, next)));
-                      }}
-                      modifiers={[
-                        pickerStyle('menu'),
-                        tint(theme.text),
-                        fixedSize({ horizontal: true, vertical: false }),
-                      ]}
-                    >
-                      {CADENCES.map(c => (
-                        <SwiftText key={c.value} modifiers={[tag(c.value)]}>{c.label}</SwiftText>
-                      ))}
-                    </Picker>
-                  </Host>
+                <View style={[styles.incomeTypeRow, { backgroundColor: theme.chipBg }]}>
+                  {(['regular', 'irregular'] as const).map(kind => {
+                    const active = incomeKind === kind;
+                    return (
+                      <Pressable
+                        key={kind}
+                        onPress={() => {
+                          setIncomeKind(kind);
+                          setIncomeDraft(kind === 'regular' ? String(displayIncome) : '');
+                        }}
+                        pointerEvents="box-only"
+                        style={[styles.incomeTypeButton, {
+                          backgroundColor: active ? theme.text : 'transparent',
+                        }]}
+                      >
+                        <Text style={[TYPE.captionEm, { color: active ? theme.bg : theme.textSec }]}>
+                          {kind === 'regular' ? 'Regular' : 'One-time'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
+
+                {incomeKind === 'regular' && (
+                  <View style={[styles.sheetOptionRow, { borderTopColor: theme.hairline }]}>
+                    <Text style={[TYPE.body, { color: theme.text }]}>Cadence</Text>
+                    <Host matchContents>
+                      <Picker
+                        selection={cadence}
+                        onSelectionChange={(val) => {
+                          const next = val as Cadence;
+                          setCadence(next);
+                          setIncomeDraft(String(fromMonthly(income, next)));
+                        }}
+                        modifiers={[
+                          pickerStyle('menu'),
+                          tint(theme.text),
+                          fixedSize({ horizontal: true, vertical: false }),
+                        ]}
+                      >
+                        {CADENCES.map(c => (
+                          <SwiftText key={c.value} modifiers={[tag(c.value)]}>{c.label}</SwiftText>
+                        ))}
+                      </Picker>
+                    </Host>
+                  </View>
+                )}
 
                 <Pressable onPress={commitIncome}
                   pointerEvents="box-only"
                   style={[styles.sheetSaveBtn, { backgroundColor: theme.text }]}
                 >
-                  <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save income</Text>
+                  <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>
+                    {incomeKind === 'regular' ? 'Save income' : 'Log income'}
+                  </Text>
                 </Pressable>
               </View>
             </RNHostView>
@@ -1101,7 +1286,154 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
         </BottomSheet>
       </Host>
 
+      <CategoryEditSheet
+        theme={theme}
+        category={editingCategory}
+        label={categoryLabelDraft}
+        icon={categoryIconDraft}
+        group={categoryGroupDraft}
+        onLabelChange={setCategoryLabelDraft}
+        onIconChange={setCategoryIconDraft}
+        onGroupChange={setCategoryGroupDraft}
+        onClose={closeCategoryEditor}
+        onSave={saveCategoryEdit}
+        onDelete={deleteEditingCategory}
+      />
+
     </View>
+  );
+}
+
+function CategoryEditSheet({
+  theme,
+  category,
+  label,
+  icon,
+  group,
+  onLabelChange,
+  onIconChange,
+  onGroupChange,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  theme: Theme;
+  category: Category | null;
+  label: string;
+  icon: string;
+  group: GroupKey;
+  onLabelChange: (v: string) => void;
+  onIconChange: (v: string) => void;
+  onGroupChange: (v: GroupKey) => void;
+  onClose: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Host style={{ width: 0, height: 0, position: 'absolute' }}>
+      <BottomSheet
+        isPresented={category !== null}
+        onIsPresentedChange={(v) => { if (!v) onClose(); }}
+      >
+        <Group modifiers={[
+          presentationDetents([CATEGORY_DETENT]),
+          presentationDragIndicator('visible'),
+          environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+        ]}>
+          <RNHostView>
+            <View style={[styles.categorySheet, { backgroundColor: theme.surface, paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
+              <View style={styles.sheetHead}>
+                <Text style={[TYPE.sectionTitle, { color: theme.text }]}>Category</Text>
+                <Pressable
+                  onPress={onClose}
+                  pointerEvents="box-only"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={[styles.sheetCloseBtn, { backgroundColor: theme.chipBg }]}
+                >
+                  <Icon name="close" size={15} color={theme.textSec} stroke={1.8} />
+                </Pressable>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <View style={[styles.sheetField, { backgroundColor: theme.chipBg }]}>
+                  <Text style={[TYPE.label, { color: theme.textTer }]}>Name</Text>
+                  <TextInput
+                    value={label}
+                    onChangeText={(next) => {
+                      onLabelChange(next);
+                      if (icon === category?.icon) onIconChange(inferCategoryIcon(next));
+                    }}
+                    placeholder="Category name"
+                    placeholderTextColor={theme.textTer}
+                    style={[TYPE.subsectionTitle, styles.categoryNameInput, { color: theme.text }]}
+                  />
+                </View>
+
+                <Text style={[TYPE.labelLg, styles.categorySheetLabel, { color: theme.textTer }]}>Group</Text>
+                <View style={styles.categoryGroupGrid}>
+                  {(Object.keys(GROUP_META) as GroupKey[]).map(key => {
+                    const active = group === key;
+                    const color = theme.dark ? GROUP_COLORS[key].dark : GROUP_COLORS[key].light;
+                    return (
+                      <Pressable
+                        key={key}
+                        onPress={() => onGroupChange(key)}
+                        pointerEvents="box-only"
+                        style={[styles.categoryGroupButton, {
+                          backgroundColor: active ? color : theme.chipBg,
+                          borderColor: active ? color : theme.hairline,
+                        }]}
+                      >
+                        <Icon name={GROUP_META[key].icon} size={14} color={active ? theme.bg : theme.textSec} stroke={1.6} />
+                        <Text style={[TYPE.captionEm, { color: active ? theme.bg : theme.textSec }]}>
+                          {GROUP_META[key].label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text style={[TYPE.labelLg, styles.categorySheetLabel, { color: theme.textTer }]}>Icon</Text>
+                <View style={styles.iconGrid}>
+                  {CATEGORY_ICON_OPTIONS.map(option => {
+                    const active = icon === option;
+                    return (
+                      <Pressable
+                        key={option}
+                        onPress={() => onIconChange(option)}
+                        pointerEvents="box-only"
+                        style={[styles.iconGridButton, {
+                          backgroundColor: active ? theme.text : theme.chipBg,
+                          borderColor: active ? theme.text : theme.hairline,
+                        }]}
+                      >
+                        <Icon name={option} size={17} color={active ? theme.bg : theme.textSec} stroke={1.55} />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Pressable
+                  onPress={onSave}
+                  pointerEvents="box-only"
+                  style={[styles.sheetSaveBtn, { backgroundColor: theme.text, marginTop: 18 }]}
+                >
+                  <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save category</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onDelete}
+                  pointerEvents="box-only"
+                  style={styles.categoryDeleteButton}
+                >
+                  <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </RNHostView>
+        </Group>
+      </BottomSheet>
+    </Host>
   );
 }
 
@@ -1291,6 +1623,19 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 0,
   },
+  incomeTypeRow: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    padding: 4,
+    gap: 4,
+  },
+  incomeTypeButton: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sheetOptionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1317,6 +1662,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingVertical: 12,
+  },
+  rowCategoryButton: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   rowIcon: {
     width: 32,
@@ -1388,5 +1740,49 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingTop: 12,
     borderTopWidth: 1,
+  },
+  categorySheet: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  categoryNameInput: {
+    paddingVertical: 0,
+  },
+  categorySheetLabel: {
+    marginTop: 18,
+    marginBottom: 10,
+  },
+  categoryGroupGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  categoryGroupButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  iconGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  iconGridButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryDeleteButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
   },
 });

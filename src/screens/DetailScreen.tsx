@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, getCardStyle, catGroupColor, OVER_DOT } from '../theme';
-import { CATS } from '../data';
+import { Theme, getCardStyle, OVER_DOT } from '../theme';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
@@ -15,8 +15,10 @@ interface Props {
 }
 
 export function DetailScreen({ tx, theme, onBack }: Props) {
-  const { transactionsRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const card = getCardStyle(theme);
   if (!tx) return null;
@@ -42,6 +44,11 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
       cat: currentTx.cat,
       occurredAt: currentTx.occurredAt,
       recurring: currentTx.recurring,
+      type: currentTx.type ?? 'expense',
+      recurringRuleId: currentTx.recurringRuleId,
+      visibility: currentTx.visibility ?? 'shared',
+      createdByUserId: currentTx.createdByUserId,
+      updatedByUserId: 'local',
       meta: currentTx.meta,
     });
     setEditing(false);
@@ -52,9 +59,9 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
     onBack();
   };
 
-  const cat = CATS[currentTx.cat];
+  const cat = cats[currentTx.cat];
   const catTotal = transactions.filter(t => t.cat === currentTx.cat).reduce((s, t) => s + t.amount, 0);
-  const catBudget = CATS[currentTx.cat]?.budget ?? 0;
+  const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.round((catTotal / catBudget) * 100) : 0;
 
   return (
@@ -90,7 +97,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
 
       {/* Hero */}
       <View style={styles.hero}>
-        <View style={[styles.catIcon, { backgroundColor: catGroupColor(currentTx.cat, theme.dark) }]}>
+        <View style={[styles.catIcon, { backgroundColor: categoryGroupColor(currentTx.cat, categories, theme.dark) }]}>
           <Icon name={cat?.icon} size={22} color="#fff" stroke={1.5} />
         </View>
         <Text style={{ fontSize: 22, fontWeight: '700', letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 14 }}>
@@ -138,20 +145,6 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           ))}
         </View>
 
-        {/* Account card */}
-        <View style={[card, { padding: 14, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-          <View style={[styles.visaChip, { backgroundColor: theme.text }]}>
-            <Text style={{ color: theme.bg, fontSize: 10, fontWeight: '700' }}>VISA</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>Chase Sapphire</Text>
-            <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 1 }}>•••• 4429</Text>
-          </View>
-          <View style={[styles.postedBadge, { backgroundColor: theme.chipBg }]}>
-            <Text style={{ fontSize: 11, color: theme.textSec, fontWeight: '500' }}>Posted</Text>
-          </View>
-        </View>
-
         {/* Action buttons */}
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
           {(editing
@@ -177,7 +170,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           <View style={[styles.catBar, { backgroundColor: theme.hairline }]}>
             <View style={[styles.catBarFill, {
               width: `${Math.min(catPct, 100)}%` as any,
-              backgroundColor: catGroupColor(currentTx.cat, theme.dark),
+              backgroundColor: categoryGroupColor(currentTx.cat, categories, theme.dark),
             }]} />
           </View>
           <Text style={{ fontSize: 11, color: theme.textTer, marginTop: 5 }}>

@@ -16,13 +16,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Picker, Text as SwiftText, Host, Menu, Button, RNHostView } from '@expo/ui/swift-ui';
 import { pickerStyle, tag, tint, fixedSize } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, catGroupColor, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
+import { Theme, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
-import { CATS } from '../data';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import type { Transaction } from '../repositories/types';
-import { monthBudgets, monthlyIncome, spendGroups } from '../selectors/finance';
+import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import type { Category, Transaction } from '../repositories/types';
+import { monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
@@ -161,15 +161,20 @@ interface Props {
   onOpenDrawer: () => void;
   onAddVoice: () => void;
   onAddManual: () => void;
+  onAddRecurring: () => void;
+  onLogIncome: () => void;
   onOpenTheme: () => void;
 }
 
-export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onOpenTheme }: Props) {
-  const { transactionsRepo, billsRepo, incomeRepo, budgetsRepo } = useRepositories();
+export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme }: Props) {
+  const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
-  const upcomingBills = useRepositoryList(billsRepo);
   const incomes = useRepositoryList(incomeRepo);
   const budgets = useRepositoryList(budgetsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const recurringRules = useRepositoryList(recurringRulesRepo);
+  const cats = useMemo(() => categoryMap(categories), [categories]);
+  const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
   const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
   // pWallpaper: hero, header, quick-actions — always on the wallpaper, always white.
@@ -187,7 +192,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
   const [monthIdx, setMonthIdx] = useState(0);
   const visibleMonthBudgets = useMemo(() => monthBudgets(transactions, budgets), [transactions, budgets]);
-  const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets), [transactions, budgets]);
+  const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets, categories), [transactions, budgets, categories]);
   const income = useMemo(() => monthlyIncome(incomes), [incomes]);
   const mb = visibleMonthBudgets[monthIdx] ?? visibleMonthBudgets[0];
 
@@ -197,14 +202,6 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
   const handleEditTheme = () => {
     onOpenTheme();
-  };
-
-  const handleAddRecurring = () => {
-    // TODO: wire to a recurring-expense sheet once the flow is designed.
-  };
-
-  const handleLogIncome = () => {
-    // TODO: wire to an income-entry sheet once the flow is designed.
   };
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
@@ -381,13 +378,13 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
               accent={{ fill: theme.accent.fill, ink: theme.accent.ink }}
             />
             <QuickAction icon="keypad"   label="Manual"   onPress={onAddManual}     dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction icon="plus"     label="Income"   onPress={handleLogIncome} dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction icon="plus"     label="Income"   onPress={onLogIncome} dark={theme.dark} p={pWallpaper} shadow={shadow} />
             <MoreMenuButton
               dark={theme.dark}
               p={pWallpaper}
               shadow={shadow}
               onEditTheme={handleEditTheme}
-              onAddRecurring={handleAddRecurring}
+              onAddRecurring={onAddRecurring}
             />
           </View>
 
@@ -430,7 +427,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                       accessible
                       accessibilityLabel={a11y}
                     >
-                      <View style={[styles.rowIcon, { backgroundColor: catGroupColor(b.cat, theme.dark) }]}
+                      <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(b.cat, categories, theme.dark) }]}
                         accessibilityElementsHidden importantForAccessibility="no">
                         <Icon name={b.icon} size={16} color="#FBF8FF" stroke={1.6} />
                       </View>
@@ -471,7 +468,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                       {groups[key].map((tx, i, arr) => (
                         <TxRow key={tx.id} tx={tx}
                           onPress={() => setSheetTx(tx)} last={i === arr.length - 1}
-                          dark={theme.dark} p={p} />
+                          dark={theme.dark} p={p} cats={cats} categories={categories} />
                       ))}
                     </View>
                   )
@@ -579,15 +576,17 @@ function ActivitySkeleton({ dark }: { dark: boolean }) {
 
 // ── TxRow ─────────────────────────────────────────────────────────
 const TxRow = React.memo(function TxRow({
-  tx, onPress, last, dark, p,
+  tx, onPress, last, dark, p, cats, categories,
 }: {
   tx: Transaction;
   onPress: () => void;
   last: boolean;
   dark: boolean;
   p: P;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
 }) {
-  const cat = CATS[tx.cat];
+  const cat = cats[tx.cat];
   const a11yLabel = `${tx.merchant}, ${cat?.label ?? 'transaction'}, ${tx.time}, $${tx.amount.toFixed(2)}`;
   return (
     <TouchableOpacity
@@ -598,7 +597,7 @@ const TxRow = React.memo(function TxRow({
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
     >
-      <View style={[styles.rowIcon, { backgroundColor: catGroupColor(tx.cat, dark) }]}
+      <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(tx.cat, categories, dark) }]}
         accessibilityElementsHidden importantForAccessibility="no">
         <Icon name={cat?.icon} size={16} color="#FBF8FF" stroke={1.6} />
       </View>

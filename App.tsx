@@ -22,6 +22,7 @@ import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { TabBar } from './src/components/TabBar';
 import { VoiceSheet } from './src/components/VoiceSheet';
+import { RecurringSheet } from './src/components/RecurringSheet';
 import { Drawer } from './src/components/Drawer';
 
 type Screen = 'home' | 'spending' | 'activity' | 'budget';
@@ -63,6 +64,8 @@ function AppInner() {
   const [screen, setScreen] = useState<Screen>('home');
   const [adding, setAdding] = useState(false);
   const [addingMode, setAddingMode] = useState<'voice' | 'manual'>('voice');
+  const [recurringOpen, setRecurringOpen] = useState(false);
+  const [incomeSheetToken, setIncomeSheetToken] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
@@ -140,6 +143,7 @@ function AppInner() {
     else if (id === 'budget')   navigate('budget');
     else if (id === 'spending') navigate('spending');
     else if (id === 'activity') navigate('activity');
+    else if (id === 'settings') setThemeOpen(true);
   };
 
   const backdropOpacity = drawerAnim.interpolate({
@@ -160,6 +164,11 @@ function AppInner() {
             onOpenDrawer={openDrawer}
             onAddVoice={() => openAdd('voice')}
             onAddManual={() => openAdd('manual')}
+            onAddRecurring={() => setRecurringOpen(true)}
+            onLogIncome={() => {
+              navigate('budget');
+              setIncomeSheetToken(t => t + 1);
+            }}
             onOpenTheme={() => setThemeOpen(true)}
           />
         </AnimatedScreen>
@@ -173,7 +182,7 @@ function AppInner() {
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.budget} active={screen === 'budget'}>
-          <BudgetScreen theme={theme} onOpenDrawer={openDrawer} />
+          <BudgetScreen theme={theme} onOpenDrawer={openDrawer} incomeSheetToken={incomeSheetToken} />
         </AnimatedScreen>
 
         <TabBar
@@ -218,6 +227,12 @@ function AppInner() {
           visible={adding}
           initialMode={addingMode}
           onClose={() => setAdding(false)}
+        />
+
+        <RecurringSheet
+          theme={theme}
+          visible={recurringOpen}
+          onClose={() => setRecurringOpen(false)}
         />
 
         <ThemeScreen

@@ -1,0 +1,53 @@
+export const CATEGORY_ICON_OPTIONS = [
+  'cart',
+  'fork',
+  'car',
+  'bag',
+  'doc',
+  'film',
+  'home',
+  'wallet',
+  'receipt',
+  'cards',
+  'repeat',
+  'tag',
+  'sparkle',
+  'cup',
+  'cal',
+  'note',
+  'chart',
+  'profile',
+  'search',
+  'bell',
+  'settings',
+  'filter',
+  'keypad',
+  'split',
+  'pencil',
+  'sun',
+  'moon',
+  'ellipsis',
+] as const;
+
+const ICON_KEYWORDS: Array<{ icon: string; words: string[] }> = [
+  { icon: 'cart', words: ['grocery', 'groceries', 'market', 'food', 'supermarket'] },
+  { icon: 'fork', words: ['dining', 'restaurant', 'lunch', 'dinner', 'coffee', 'cafe', 'bar'] },
+  { icon: 'car', words: ['transport', 'gas', 'lyft', 'uber', 'car', 'parking', 'train', 'bus'] },
+  { icon: 'bag', words: ['shopping', 'clothes', 'store', 'retail', 'amazon'] },
+  { icon: 'doc', words: ['bill', 'utility', 'utilities', 'electric', 'insurance', 'phone'] },
+  { icon: 'film', words: ['movie', 'music', 'spotify', 'netflix', 'entertainment', 'show'] },
+  { icon: 'home', words: ['rent', 'mortgage', 'housing', 'home'] },
+  { icon: 'wallet', words: ['savings', 'saving', 'fund', 'retirement', 'investment'] },
+  { icon: 'repeat', words: ['subscription', 'recurring', 'monthly'] },
+  { icon: 'receipt', words: ['receipt', 'invoice'] },
+  { icon: 'cards', words: ['card', 'credit', 'payment'] },
+  { icon: 'cup', words: ['coffee', 'tea', 'drink'] },
+  { icon: 'cal', words: ['calendar', 'event', 'appointment'] },
+  { icon: 'note', words: ['note', 'book', 'school'] },
+  { icon: 'chart', words: ['business', 'work', 'income'] },
+];
+
+export function inferCategoryIcon(label: string): string {
+  const lower = label.toLowerCase();
+  return ICON_KEYWORDS.find(entry => entry.words.some(word => lower.includes(word)))?.icon ?? 'tag';
+}

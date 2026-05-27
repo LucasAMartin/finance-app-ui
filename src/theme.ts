@@ -139,9 +139,12 @@ export const CAT_TO_GROUP: Record<string, 'needs' | 'wants' | 'savings'> = {
   groceries:     'needs',
   transport:     'needs',
   bills:         'needs',
+  housing:       'needs',
   dining:        'wants',
   shopping:      'wants',
   entertainment: 'wants',
+  'emergency-fund': 'savings',
+  retirement:    'savings',
 };
 
 export function catGroupColor(cat: string, dark: boolean): string {

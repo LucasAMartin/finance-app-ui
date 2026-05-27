@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, Animated } from 'react-native';
-import { Theme, CAT_TO_GROUP, GROUP_COLORS } from '../theme';
-import { CATS } from '../data';
+import { Theme, GROUP_COLORS } from '../theme';
 import { Icon } from './Icon';
 import { getCardStyle } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRepositories } from '../repositories/RepositoryProvider';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
+import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
 import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
@@ -17,11 +18,11 @@ const VOICE_DETENT_DEFAULT: PresentationDetent = { fraction: 0.52 };
 const VOICE_DETENT_LARGE: PresentationDetent = 'large';
 const VOICE_DETENTS: PresentationDetent[] = [VOICE_DETENT_DEFAULT, VOICE_DETENT_LARGE];
 
-const EXPENSE_GROUPS = [
-  { key: 'needs',   label: 'Needs',   icon: 'home',    cats: ['groceries', 'transport', 'bills'],     defaultCat: 'groceries' },
-  { key: 'wants',   label: 'Wants',   icon: 'sparkle', cats: ['dining', 'shopping', 'entertainment'], defaultCat: 'dining'    },
-  { key: 'savings', label: 'Savings', icon: 'wallet',  cats: [],                                      defaultCat: 'savings'   },
-];
+const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
+  needs: { label: 'Needs', icon: 'home' },
+  wants: { label: 'Wants', icon: 'sparkle' },
+  savings: { label: 'Savings', icon: 'wallet' },
+};
 
 const BAR_COUNT = 24;
 // Bell-curve sine pattern for the idle waveform silhouette
@@ -38,7 +39,9 @@ interface VoiceSheetProps {
 }
 
 export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: VoiceSheetProps) {
-  const { transactionsRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo } = useRepositories();
+  const categories = useRepositoryList(categoriesRepo);
+  const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
 
   const [detent, setDetent] = useState<PresentationDetent>(VOICE_DETENT_DEFAULT);
@@ -106,7 +109,7 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
   useEffect(() => {
     if (visible) {
       setManualAmt('0');
-      setManualCat('groceries');
+      setManualCat(categories[0]?.id ?? 'groceries');
       setManualMerchant('');
       setManualNote('');
       setParsedAmtStr('');
@@ -126,7 +129,7 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
       stopRings();
     }
     return () => { stopWave(); stopRings(); };
-  }, [visible]);
+  }, [visible, categories]);
 
   useEffect(() => {
     if (voice.listening) {
@@ -141,7 +144,10 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
     setMode(m => (m === 'listening' ? (finalText ? 'parsed' : 'idle') : m));
     if (finalText) {
       const result = parseVoiceExpense(finalText);
-      setParsed(result);
+      setParsed({
+        ...result,
+        cat: cats[result.cat] ? result.cat : categories[0]?.id ?? 'groceries',
+      });
       setParsedAmtStr(result.amount > 0 ? result.amount.toFixed(2) : '');
     }
   }, [voice.listening]);
@@ -176,7 +182,7 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
     const amount = mode === 'manual' ? parseFloat(manualAmt) : parsed.amount;
     if (!Number.isFinite(amount) || amount <= 0) return;
     const cat = mode === 'manual' ? manualCat : parsed.cat;
-    const merchant = (mode === 'manual' ? manualMerchant : parsed.merchant).trim() || CATS[cat]?.label || 'Expense';
+    const merchant = (mode === 'manual' ? manualMerchant : parsed.merchant).trim() || cats[cat]?.label || 'Expense';
     const note = mode === 'manual' ? manualNote : parsedNote;
     transactionsRepo.create({
       amount,
@@ -184,6 +190,10 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
       merchant,
       note,
       occurredAt: new Date().toISOString(),
+      type: 'expense',
+      visibility: 'shared',
+      createdByUserId: 'local',
+      updatedByUserId: 'local',
     });
     voice.abort();
     onClose();
@@ -387,6 +397,8 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
                     <CategoryPicker
                       theme={theme}
                       activeCat={parsed.cat}
+                      categories={categories}
+                      cats={cats}
                       onChange={cat => setParsed(p => ({ ...p, cat }))}
                     />
                   </View>
@@ -437,6 +449,8 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
                       <CategoryPicker
                         theme={theme}
                         activeCat={manualCat}
+                        categories={categories}
+                        cats={cats}
                         onChange={setManualCat}
                       />
                     </View>
@@ -479,17 +493,35 @@ export function VoiceSheet({ theme, visible, onClose, initialMode = 'voice' }: V
   );
 }
 
-function CategoryPicker({ theme, activeCat, onChange }: { theme: Theme; activeCat: string; onChange: (cat: string) => void }) {
+function CategoryPicker({
+  theme,
+  activeCat,
+  categories,
+  cats,
+  onChange,
+}: {
+  theme: Theme;
+  activeCat: string;
+  categories: Category[];
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  onChange: (cat: string) => void;
+}) {
+  const grouped = (['needs', 'wants', 'savings'] as GroupKey[]).map(key => ({
+    key,
+    ...GROUP_META[key],
+    cats: categories.filter(cat => cat.group === key && !cat.archived),
+  }));
   return (
     <View style={{ flexDirection: 'row', gap: 7 }}>
-      {EXPENSE_GROUPS.map(g => {
-        const activeGroup = CAT_TO_GROUP[activeCat] ?? (activeCat === 'savings' ? 'savings' : undefined);
+      {grouped.map(g => {
+        const activeGroup = categoryGroupFor(activeCat, categories);
         const isActive = activeGroup === g.key;
         const color = theme.dark ? GROUP_COLORS[g.key].dark : GROUP_COLORS[g.key].light;
+        const defaultCat = g.cats[0]?.id ?? activeCat;
         return (
           <View key={g.key} style={{ flex: 1 }}>
             <Pressable
-              onPress={() => onChange(g.defaultCat)}
+              onPress={() => onChange(defaultCat)}
               pointerEvents="box-only"
               style={[S.groupHeader, {
                 backgroundColor: isActive ? color + '20' : theme.chipBg,
@@ -506,13 +538,13 @@ function CategoryPicker({ theme, activeCat, onChange }: { theme: Theme; activeCa
               </Text>
             </Pressable>
             <View style={S.subcatList}>
-              {g.cats.map(catId => {
-                const c = CATS[catId];
-                const isActiveCat = activeCat === catId;
+              {g.cats.map(cat => {
+                const c = cats[cat.id] ?? cat;
+                const isActiveCat = activeCat === cat.id;
                 return (
                   <Pressable
-                    key={catId}
-                    onPress={() => onChange(catId)}
+                    key={cat.id}
+                    onPress={() => onChange(cat.id)}
                     pointerEvents="box-only"
                     style={[S.subcatRow, { backgroundColor: isActiveCat ? theme.text : 'transparent' }]}
                   >

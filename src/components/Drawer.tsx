@@ -42,10 +42,8 @@ const SECTIONS: DrawerSection[] = [
     ],
   },
   {
-    title: 'Account',
+    title: 'Preferences',
     items: [
-      { id: 'cards',      label: 'Cards',          icon: 'cards' },
-      { id: 'statements', label: 'Statements',     icon: 'doc' },
       { id: 'settings',   label: 'Settings',       icon: 'settings' },
     ],
   },

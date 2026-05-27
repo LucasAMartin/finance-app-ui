@@ -1,20 +1,21 @@
-import type { AppSettings, Bill, Budget, Income, SpendGroup, Transaction, MonthBudget } from './repositories/types';
+import type { AppSettings, Bill, Budget, Category, Income, RecurringRule, SpendGroup, Transaction, MonthBudget } from './repositories/types';
 import type { PeriodData, TrendConfig } from './selectors/types';
 
-export interface Category {
-  label: string;
-  icon: string;
-  budget: number;
-}
+export const SEED_CATEGORIES: Category[] = [
+  { id: 'groceries',     label: 'Groceries',     icon: 'cart', group: 'needs',   defaultBudget: 500, sortOrder: 10 },
+  { id: 'transport',     label: 'Transport',     icon: 'car',  group: 'needs',   defaultBudget: 360, sortOrder: 20 },
+  { id: 'bills',         label: 'Bills',         icon: 'doc',  group: 'needs',   defaultBudget: 500, sortOrder: 30 },
+  { id: 'housing',       label: 'Housing',       icon: 'home', group: 'needs',   defaultBudget: 1350, sortOrder: 40 },
+  { id: 'dining',        label: 'Dining',        icon: 'fork', group: 'wants',   defaultBudget: 440, sortOrder: 50 },
+  { id: 'shopping',      label: 'Shopping',      icon: 'bag',  group: 'wants',   defaultBudget: 300, sortOrder: 60 },
+  { id: 'entertainment', label: 'Entertainment', icon: 'film', group: 'wants',   defaultBudget: 180, sortOrder: 70 },
+  { id: 'emergency-fund', label: 'Emergency fund', icon: 'tag', group: 'savings', defaultBudget: 650, sortOrder: 80 },
+  { id: 'retirement',    label: 'Retirement',    icon: 'repeat', group: 'savings', defaultBudget: 415, sortOrder: 90 },
+];
 
-export const CATS: Record<string, Category> = {
-  groceries:     { label: 'Groceries',     icon: 'cart',    budget: 400 },
-  dining:        { label: 'Dining',        icon: 'fork',    budget: 350 },
-  transport:     { label: 'Transport',     icon: 'car',     budget: 200 },
-  shopping:      { label: 'Shopping',      icon: 'bag',     budget: 250 },
-  bills:         { label: 'Bills',         icon: 'doc',     budget: 500 },
-  entertainment: { label: 'Entertainment', icon: 'film',    budget: 150 },
-};
+export const CATS: Record<string, { label: string; icon: string; budget: number }> = Object.fromEntries(
+  SEED_CATEGORIES.map(cat => [cat.id, { label: cat.label, icon: cat.icon, budget: cat.defaultBudget }]),
+);
 
 export const SEED_TRANSACTIONS: Transaction[] = [
   { id:'t1', merchant:'Whole Foods',  cat:'groceries',     amount:84.20,  note:'Weekly shop',        date:'Today',     time:'5:42 PM',  when:'today',     fullDate:'May 13', occurredAt: '2026-05-13T17:42:00-07:00' },
@@ -35,6 +36,12 @@ export const SEED_BILLS: Bill[] = [
   { id: 'b1', name: 'Rent',    merchant: 'Rent',    icon: 'home', cat: 'bills',         amount: 1200,  dueDate: 'May 28', daysUntil: 14, recurring: true },
   { id: 'b2', name: 'Spotify', merchant: 'Spotify', icon: 'film', cat: 'entertainment', amount: 10.99, dueDate: 'May 30', daysUntil: 16, recurring: true },
   { id: 'b3', name: 'PG&E',    merchant: 'PG&E',    icon: 'doc',  cat: 'bills',         amount: 95,    dueDate: 'Jun 8',  daysUntil: 25, recurring: true, estimate: true },
+];
+
+export const SEED_RECURRING_RULES: RecurringRule[] = [
+  { id: 'r1', merchant: 'Rent',    cat: 'housing',       amount: 1200,  cadence: 'customMonthly', startDate: '2026-05-01', nextDueDate: '2026-05-28', dayOfMonth: 28, active: true },
+  { id: 'r2', merchant: 'Spotify', cat: 'entertainment', amount: 10.99, cadence: 'customMonthly', startDate: '2026-05-01', nextDueDate: '2026-05-30', dayOfMonth: 30, active: true },
+  { id: 'r3', merchant: 'PG&E',    cat: 'bills',         amount: 95,    cadence: 'customMonthly', startDate: '2026-05-01', nextDueDate: '2026-06-08', dayOfMonth: 8, active: true, estimate: true },
 ];
 
 // Last 7 days sparkline data
@@ -151,10 +158,10 @@ export const SEED_SPEND_GROUPS: SpendGroup[] = [
     label: 'Needs',
     targetPct: 0.5,
     subs: [
-      { label: 'Housing',        icon: 'home', spent: 1350, budget: 1350 },
-      { label: 'Groceries',      icon: 'cart', spent: 412,  budget: 500  },
-      { label: 'Transportation', icon: 'car',  spent: 286,  budget: 360  },
-      { label: 'Utilities',      icon: 'doc',  spent: 198,  budget: 240  },
+      { cat: 'housing', label: 'Housing',        icon: 'home', spent: 1350, budget: 1350 },
+      { cat: 'groceries', label: 'Groceries',      icon: 'cart', spent: 412,  budget: 500  },
+      { cat: 'transport', label: 'Transportation', icon: 'car',  spent: 286,  budget: 360  },
+      { cat: 'bills', label: 'Utilities',      icon: 'doc',  spent: 198,  budget: 240  },
     ],
   },
   {
@@ -162,9 +169,9 @@ export const SEED_SPEND_GROUPS: SpendGroup[] = [
     label: 'Wants',
     targetPct: 0.3,
     subs: [
-      { label: 'Dining',        icon: 'fork', spent: 318, budget: 440 },
-      { label: 'Shopping',      icon: 'bag',  spent: 240, budget: 300 },
-      { label: 'Entertainment', icon: 'film', spent: 142, budget: 180 },
+      { cat: 'dining', label: 'Dining',        icon: 'fork', spent: 318, budget: 440 },
+      { cat: 'shopping', label: 'Shopping',      icon: 'bag',  spent: 240, budget: 300 },
+      { cat: 'entertainment', label: 'Entertainment', icon: 'film', spent: 142, budget: 180 },
     ],
   },
   {
@@ -172,8 +179,8 @@ export const SEED_SPEND_GROUPS: SpendGroup[] = [
     label: 'Savings',
     targetPct: 0.2,
     subs: [
-      { label: 'Emergency fund', icon: 'tag',    spent: 600, budget: 650 },
-      { label: 'Retirement',     icon: 'repeat', spent: 415, budget: 415 },
+      { cat: 'emergency-fund', label: 'Emergency fund', icon: 'tag',    spent: 600, budget: 650 },
+      { cat: 'retirement', label: 'Retirement',     icon: 'repeat', spent: 415, budget: 415 },
     ],
   },
 ];
@@ -195,6 +202,7 @@ export const SEED_INCOME: Income[] = [
     id: 'income-primary',
     amount: DEFAULT_MONTHLY_INCOME,
     source: 'Primary income',
+    kind: 'regular',
     cadence: 'monthly',
     startDate: '2026-05-01',
   },
@@ -205,6 +213,7 @@ export const SEED_BUDGETS: Budget[] = SEED_SPEND_GROUPS.flatMap(group =>
     id: `budget-2026-05-${group.key}-${sub.label.toLowerCase().replace(/\s+/g, '-')}`,
     month: '2026-05',
     group: group.key,
+    category: sub.cat,
     label: sub.label,
     icon: sub.icon,
     amount: sub.budget,

@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Theme, catPastel } from '../theme';
-import { CATS } from '../data';
 
 export interface PieSlice {
   cat: string;
@@ -14,6 +13,7 @@ interface PieChartProps {
   theme: Theme;
   size?: number;
   selected: string | null;
+  cats?: Record<string, { label: string; icon: string; budget: number }>;
   onSelect: (cat: string | null) => void;
 }
 
@@ -44,7 +44,7 @@ function slicePath(
   ].join(' ');
 }
 
-export function PieChart({ data, theme, size = 240, selected, onSelect }: PieChartProps) {
+export function PieChart({ data, theme, size = 240, selected, cats = {}, onSelect }: PieChartProps) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (!total) return null;
 
@@ -75,7 +75,7 @@ export function PieChart({ data, theme, size = 240, selected, onSelect }: PieCha
     ? `$${sel.value.toFixed(0)}`
     : `$${total.toFixed(0)}`;
   const centerSub = sel
-    ? (CATS[selected!]?.label ?? selected!)
+    ? (cats[selected!]?.label ?? selected!)
     : 'Total';
 
   return (
@@ -126,7 +126,7 @@ export function PieChart({ data, theme, size = 240, selected, onSelect }: PieCha
       >
         {slices.map((s) => {
           const isSel = s.cat === selected;
-          const cat = CATS[s.cat];
+          const cat = cats[s.cat];
           return (
             <TouchableOpacity
               key={s.cat}

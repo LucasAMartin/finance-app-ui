@@ -5,9 +5,10 @@ import {
   Theme,
   catPastel,
   OVER_DOT,
-  CAT_TO_GROUP,
   GROUP_COLORS,
 } from '../../theme';
+import { categoryGroupFor } from '../../repositories/categoryUtils';
+import type { Category, GroupKey } from '../../repositories/types';
 import type { TrendPoint } from '../../selectors/types';
 
 const fmtMoney = (v: number) =>
@@ -213,13 +214,15 @@ export function FinanceDonut({
   data,
   theme,
   size,
+  categories = [],
 }: {
   data: { cat: string; value: number }[];
   theme: Theme;
   size: number;
+  categories?: Category[];
 }) {
   const GROUPS: Array<{
-    key: 'needs' | 'wants' | 'savings';
+    key: GroupKey;
     label: string;
     targetPct: number;
   }> = [
@@ -228,13 +231,13 @@ export function FinanceDonut({
     { key: 'savings', label: 'Savings', targetPct: 0.2 },
   ];
 
-  const groupTotals: Record<'needs' | 'wants' | 'savings', number> = {
+  const groupTotals: Record<GroupKey, number> = {
     needs: 0,
     wants: 0,
     savings: 0,
   };
   data.forEach(d => {
-    const g = CAT_TO_GROUP[d.cat] ?? 'wants';
+    const g = categoryGroupFor(d.cat, categories);
     groupTotals[g] += d.value;
   });
 

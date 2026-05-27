@@ -8,21 +8,12 @@ import {
   SEED_TRANSACTIONS,
   SEED_TREND,
 } from '../data';
-import type { Budget, Income, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
+import type { Bill, Budget, Category, GroupKey, Income, RecurringRule, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
 import type { PeriodData, TrendConfig } from './types';
 
 export type Period = 'Week' | 'Month' | 'Year';
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
-
-const subCategory: Record<string, string | undefined> = {
-  Groceries: 'groceries',
-  Transportation: 'transport',
-  Dining: 'dining',
-  Shopping: 'shopping',
-  Entertainment: 'entertainment',
-  Utilities: 'bills',
-};
 
 const seedCatTotals = SEED_TRANSACTIONS.reduce<Record<string, number>>((acc, tx) => {
   acc[tx.cat] = (acc[tx.cat] ?? 0) + tx.amount;
@@ -35,7 +26,16 @@ function categoryTotal(transactions: Transaction[], cat: string | undefined): nu
 }
 
 export function monthlyIncome(incomes: Income[]): number {
-  return incomes[0]?.amount ?? DEFAULT_MONTHLY_INCOME;
+  const regular = incomes.filter(income => (income.kind ?? 'regular') === 'regular');
+  const total = regular.reduce((sum, income) => {
+    switch (income.cadence) {
+      case 'weekly': return sum + Math.round(income.amount * 52 / 12);
+      case 'biweekly': return sum + Math.round(income.amount * 26 / 12);
+      case 'annual': return sum + Math.round(income.amount / 12);
+      default: return sum + income.amount;
+    }
+  }, 0);
+  return total > 0 ? total : DEFAULT_MONTHLY_INCOME;
 }
 
 export function currentMonthlyBudget(budgets: Budget[]): number {
@@ -95,23 +95,44 @@ export function spark7d(_transactions: Transaction[], _today = new Date()): numb
 
 export function groupSpent(
   transactions: Transaction[],
-  groupKey: SpendGroup['key'],
+  groupKey: GroupKey,
   budgets: Budget[] = [],
+  categories: Category[] = [],
 ): SpendGroup | undefined {
-  return spendGroups(transactions, budgets).find(group => group.key === groupKey);
+  return spendGroups(transactions, budgets, categories).find(group => group.key === groupKey);
 }
 
-export function spendGroups(transactions: Transaction[], budgets: Budget[] = []): SpendGroup[] {
-  return SEED_SPEND_GROUPS.map(group => ({
-    ...group,
-    subs: group.subs.map(sub => {
-      const budget = budgets.find(b => b.group === group.key && b.label === sub.label);
-      const cat = subCategory[sub.label];
-      const baselineSpent = sub.spent - (cat ? (seedCatTotals[cat] ?? 0) : 0);
+export function spendGroups(transactions: Transaction[], budgets: Budget[] = [], categories: Category[] = []): SpendGroup[] {
+  const activeCategories = categories.length > 0
+    ? categories.filter(cat => !cat.archived)
+    : SEED_SPEND_GROUPS.flatMap(g => g.subs.map((sub, idx) => ({
+      id: sub.cat,
+      label: sub.label,
+      icon: sub.icon,
+      group: g.key,
+      defaultBudget: sub.budget,
+      sortOrder: idx,
+    } as Category)));
+
+  const groupLabels: Record<GroupKey, string> = { needs: 'Needs', wants: 'Wants', savings: 'Savings' };
+  const targetPct: Record<GroupKey, number> = { needs: 0.5, wants: 0.3, savings: 0.2 };
+  return (['needs', 'wants', 'savings'] as GroupKey[]).map(groupKey => ({
+    key: groupKey,
+    label: groupLabels[groupKey],
+    targetPct: targetPct[groupKey],
+    subs: activeCategories
+      .filter(cat => cat.group === groupKey)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label))
+      .map(cat => {
+      const budget = budgets.find(b => (b.category === cat.id || b.label === cat.label) && b.month === '2026-05');
+      const seedSub = SEED_SPEND_GROUPS.flatMap(g => g.subs).find(sub => sub.cat === cat.id);
+      const baselineSpent = (seedSub?.spent ?? 0) - (seedCatTotals[cat.id] ?? 0);
       return {
-        ...sub,
-        budget: budget?.amount ?? sub.budget,
-        spent: roundMoney(baselineSpent + categoryTotal(transactions, cat)),
+        cat: cat.id,
+        label: cat.label,
+        icon: cat.icon,
+        budget: budget?.amount ?? cat.defaultBudget,
+        spent: roundMoney(baselineSpent + categoryTotal(transactions, cat.id)),
       };
     }),
   }));
@@ -123,6 +144,53 @@ export function monthSpent(
   budgets: Budget[] = [],
 ): MonthBudget | undefined {
   return monthBudgets(_transactions, budgets).find(month => month.key === monthKey);
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function upcomingBillsFromRecurring(rules: RecurringRule[], categories: Category[], today = new Date()): Bill[] {
+  const categoryMap = Object.fromEntries(categories.map(cat => [cat.id, cat]));
+  return rules
+    .filter(rule => rule.active)
+    .map(rule => {
+      const due = nextDueDate(rule, today);
+      const daysUntil = Math.max(0, Math.ceil((startOfDay(due).getTime() - startOfDay(today).getTime()) / 86_400_000));
+      const cat = categoryMap[rule.cat];
+      return {
+        id: `bill-${rule.id}`,
+        name: rule.merchant,
+        merchant: rule.merchant,
+        icon: cat?.icon ?? 'repeat',
+        cat: rule.cat,
+        amount: rule.amount,
+        dueDate: `${MONTHS[due.getMonth()]} ${due.getDate()}`,
+        daysUntil,
+        recurring: true,
+        estimate: rule.estimate,
+        meta: { recurringRuleId: rule.id },
+      };
+    })
+    .sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function nextDueDate(rule: RecurringRule, today: Date): Date {
+  const due = new Date(rule.nextDueDate);
+  if (due >= startOfDay(today)) return due;
+
+  const next = new Date(due);
+  while (next < startOfDay(today)) {
+    if (rule.cadence === 'weekly') next.setDate(next.getDate() + 7);
+    else if (rule.cadence === 'annual') next.setFullYear(next.getFullYear() + 1);
+    else {
+      next.setMonth(next.getMonth() + 1);
+      if (rule.dayOfMonth) next.setDate(Math.min(rule.dayOfMonth, 28));
+    }
+  }
+  return next;
 }
 
 export function monthBudgets(transactions: Transaction[], budgets: Budget[] = []): MonthBudget[] {

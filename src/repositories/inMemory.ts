@@ -1,15 +1,20 @@
 import {
   SEED_BILLS,
   SEED_BUDGETS,
+  SEED_CATEGORIES,
   SEED_INCOME,
+  SEED_RECURRING_RULES,
   SEED_SETTINGS,
   SEED_TRANSACTIONS,
 } from '../data';
 import type {
   AppSettings,
+  Attachment,
   Bill,
   Budget,
+  Category,
   Income,
+  RecurringRule,
   Repositories,
   RepoListener,
   Repository,
@@ -76,5 +81,8 @@ export function createInMemoryRepositories(): Repositories {
     billsRepo: new InMemoryRepository<Bill>(SEED_BILLS),
     budgetsRepo: new InMemoryRepository<Budget>(SEED_BUDGETS),
     settingsRepo: new InMemoryRepository<AppSettings, AppSettings>([SEED_SETTINGS]),
+    categoriesRepo: new InMemoryRepository<Category>(SEED_CATEGORIES),
+    recurringRulesRepo: new InMemoryRepository<RecurringRule>(SEED_RECURRING_RULES),
+    attachmentsRepo: new InMemoryRepository<Attachment>([]),
   };
 }

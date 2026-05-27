@@ -18,10 +18,10 @@ import { Picker, Text as SwiftText, Host, Menu, RNHostView } from '@expo/ui/swif
 import { pickerStyle, tag, tint, environment } from '@expo/ui/swift-ui/modifiers';
 
 import { useTheme } from '../ThemeProvider';
-import { Theme, catGroupColor, OVER_DOT } from '../theme';
+import { Theme, OVER_DOT } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
-import { CATS } from '../data';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import { periodTotals, trendSeries } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
@@ -113,8 +113,10 @@ function IconBtn({
 }
 
 export function SpendingScreen({ theme, onOpenDrawer }: Props) {
-  const { transactionsRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const cats = useMemo(() => categoryMap(categories), [categories]);
   const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
   const pWall = makeP(true);
@@ -152,19 +154,19 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
       .slice()
       .sort((a, b) => b.value - a.value)
       .map(c => {
-        const cat = CATS[c.cat];
+        const cat = cats[c.cat];
         const txCount = transactions.filter(t => t.cat === c.cat).length;
         return {
           key: c.cat,
           label: cat?.label ?? c.cat,
           sub: `${txCount} ${txCount === 1 ? 'transaction' : 'transactions'}`,
           icon: cat?.icon ?? 'tag',
-          color: catGroupColor(c.cat, theme.dark),
+          color: categoryGroupColor(c.cat, categories, theme.dark),
           amount: c.value,
           pct: total > 0 ? c.value / total : 0,
         };
       });
-  }, [pd, total, theme.dark, transactions]);
+  }, [pd, total, theme.dark, transactions, cats, categories]);
 
   const merchantRows: Row[] = useMemo(() => {
     const acc: Record<string, { merchant: string; cat: string; total: number; count: number }> = {};
@@ -177,18 +179,18 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
     return Object.values(acc)
       .sort((a, b) => b.total - a.total)
       .map(m => {
-        const cat = CATS[m.cat];
+        const cat = cats[m.cat];
         return {
           key: m.merchant,
           label: m.merchant,
           sub: `${m.count} ${m.count === 1 ? 'transaction' : 'transactions'}`,
           icon: cat?.icon ?? 'tag',
-          color: catGroupColor(m.cat, theme.dark),
+          color: categoryGroupColor(m.cat, categories, theme.dark),
           amount: m.total,
           pct: merchTotal > 0 ? m.total / merchTotal : 0,
         };
       });
-  }, [theme.dark, transactions]);
+  }, [theme.dark, transactions, cats, categories]);
 
   const rows = breakdown === 'Category' ? categoryRows : merchantRows;
 
@@ -423,6 +425,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
                     data={pd.byCat}
                     theme={theme}
                     size={Math.min(CHART_H - 8, 168)}
+                    categories={categories}
                   />
                 </View>
               </ScrollView>

@@ -23,9 +23,14 @@ export function transactionFromStored(row: {
   merchant: string;
   cat: string;
   amount: number;
+  type?: Transaction['type'] | null;
   note?: string | null;
   occurredAt: string;
   recurring?: number | boolean | null;
+  recurringRuleId?: string | null;
+  visibility?: Transaction['visibility'] | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
   meta?: string | null;
 }): Transaction {
   return {
@@ -33,9 +38,14 @@ export function transactionFromStored(row: {
     merchant: row.merchant,
     cat: row.cat,
     amount: row.amount,
+    type: row.type ?? 'expense',
     note: row.note ?? '',
     occurredAt: row.occurredAt,
     recurring: Boolean(row.recurring),
+    recurringRuleId: row.recurringRuleId ?? undefined,
+    visibility: row.visibility ?? 'shared',
+    createdByUserId: row.createdByUserId ?? undefined,
+    updatedByUserId: row.updatedByUserId ?? undefined,
     meta: row.meta ? JSON.parse(row.meta) : undefined,
     ...deriveTransactionDisplay(row.occurredAt),
   };
@@ -46,9 +56,14 @@ export function normalizeTransactionInput(input: CreateTransactionInput | Update
     merchant: input.merchant?.trim() ?? undefined,
     cat: input.cat,
     amount: input.amount,
+    type: input.type,
     note: input.note?.trim() ?? '',
     occurredAt: input.occurredAt ?? new Date().toISOString(),
     recurring: input.recurring ?? false,
+    recurringRuleId: input.recurringRuleId,
+    visibility: input.visibility,
+    createdByUserId: input.createdByUserId,
+    updatedByUserId: input.updatedByUserId,
     meta: input.meta,
   };
 }
