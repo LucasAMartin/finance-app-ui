@@ -13,6 +13,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
 import { useAppFonts, patchTextWithInter } from './src/fonts';
+import { RepositoryProvider } from './src/repositories/RepositoryProvider';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { SpendingScreen } from './src/screens/SpendingScreen';
@@ -235,11 +236,13 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider defaultDark={true} defaultAccent="plum" defaultCardStyle="flat">
-        <SafeAreaProvider>
-          <AppInner />
-        </SafeAreaProvider>
-      </ThemeProvider>
+      <RepositoryProvider>
+        <ThemeProvider defaultDark={true} defaultAccent="plum" defaultCardStyle="flat">
+          <SafeAreaProvider>
+            <AppInner />
+          </SafeAreaProvider>
+        </ThemeProvider>
+      </RepositoryProvider>
     </GestureHandlerRootView>
   );
 }

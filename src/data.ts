@@ -1,3 +1,6 @@
+import type { AppSettings, Bill, Budget, Income, SpendGroup, Transaction, MonthBudget } from './repositories/types';
+import type { PeriodData, TrendConfig } from './selectors/types';
+
 export interface Category {
   label: string;
   icon: string;
@@ -13,53 +16,29 @@ export const CATS: Record<string, Category> = {
   entertainment: { label: 'Entertainment', icon: 'film',    budget: 150 },
 };
 
-export interface Transaction {
-  id: string;
-  merchant: string;
-  cat: string;
-  amount: number;
-  note: string;
-  date: string;
-  time: string;
-  when: 'today' | 'yesterday' | 'earlier';
-  fullDate: string;
-  recurring?: boolean;
-}
-
-export const TRANSACTIONS: Transaction[] = [
-  { id:'t1', merchant:'Whole Foods',  cat:'groceries',     amount:84.20,  note:'Weekly shop',        date:'Today',     time:'5:42 PM',  when:'today',     fullDate:'May 13' },
-  { id:'t2', merchant:'Blue Bottle',  cat:'dining',        amount:6.50,   note:'Cortado',            date:'Today',     time:'8:14 AM',  when:'today',     fullDate:'May 13' },
-  { id:'t3', merchant:'Lyft',         cat:'transport',     amount:14.80,  note:'Ride home',          date:'Yesterday', time:'11:02 PM', when:'yesterday', fullDate:'May 12' },
-  { id:'t4', merchant:'Nopa',         cat:'dining',        amount:62.40,  note:'Dinner with M',      date:'Yesterday', time:'8:30 PM',  when:'yesterday', fullDate:'May 12' },
-  { id:'t5', merchant:'Apple Store',  cat:'shopping',      amount:129.00, note:'USB-C cable + case', date:'May 9',     time:'2:18 PM',  when:'earlier',   fullDate:'May 9'  },
-  { id:'t6', merchant:'PG&E',         cat:'bills',         amount:92.18,  note:'Electric, April',    date:'May 8',     time:'9:00 AM',  when:'earlier',   fullDate:'May 8'  },
-  { id:'t7', merchant:'Spotify',      cat:'entertainment', amount:10.99,  note:'Monthly',            date:'May 7',     time:'6:30 AM',  when:'earlier',   fullDate:'May 7'  },
+export const SEED_TRANSACTIONS: Transaction[] = [
+  { id:'t1', merchant:'Whole Foods',  cat:'groceries',     amount:84.20,  note:'Weekly shop',        date:'Today',     time:'5:42 PM',  when:'today',     fullDate:'May 13', occurredAt: '2026-05-13T17:42:00-07:00' },
+  { id:'t2', merchant:'Blue Bottle',  cat:'dining',        amount:6.50,   note:'Cortado',            date:'Today',     time:'8:14 AM',  when:'today',     fullDate:'May 13', occurredAt: '2026-05-13T08:14:00-07:00' },
+  { id:'t3', merchant:'Lyft',         cat:'transport',     amount:14.80,  note:'Ride home',          date:'Yesterday', time:'11:02 PM', when:'yesterday', fullDate:'May 12', occurredAt: '2026-05-12T23:02:00-07:00' },
+  { id:'t4', merchant:'Nopa',         cat:'dining',        amount:62.40,  note:'Dinner with M',      date:'Yesterday', time:'8:30 PM',  when:'yesterday', fullDate:'May 12', occurredAt: '2026-05-12T20:30:00-07:00' },
+  { id:'t5', merchant:'Apple Store',  cat:'shopping',      amount:129.00, note:'USB-C cable + case', date:'May 9',     time:'2:18 PM',  when:'earlier',   fullDate:'May 9',  occurredAt: '2026-05-09T14:18:00-07:00' },
+  { id:'t6', merchant:'PG&E',         cat:'bills',         amount:92.18,  note:'Electric, April',    date:'May 8',     time:'9:00 AM',  when:'earlier',   fullDate:'May 8',  occurredAt: '2026-05-08T09:00:00-07:00' },
+  { id:'t7', merchant:'Spotify',      cat:'entertainment', amount:10.99,  note:'Monthly',            date:'May 7',     time:'6:30 AM',  when:'earlier',   fullDate:'May 7',  occurredAt: '2026-05-07T06:30:00-07:00' },
 ];
 
-export const MONTHLY_BUDGET = 2400;
+export const DEFAULT_MONTHLY_BUDGET = 2400;
 
 // ─────────────────────────────────────────────────────────────
 // Upcoming bills (forward-looking)
 // ─────────────────────────────────────────────────────────────
-export interface UpcomingBill {
-  id: string;
-  name: string;
-  icon: string;
-  cat: string;
-  amount: number;
-  dueDate: string;
-  daysUntil: number;
-  estimate?: boolean;
-}
-
-export const UPCOMING_BILLS: UpcomingBill[] = [
-  { id: 'b1', name: 'Rent',    icon: 'home', cat: 'bills',         amount: 1200,  dueDate: 'May 28', daysUntil: 14 },
-  { id: 'b2', name: 'Spotify', icon: 'film', cat: 'entertainment', amount: 10.99, dueDate: 'May 30', daysUntil: 16 },
-  { id: 'b3', name: 'PG&E',    icon: 'doc',  cat: 'bills',         amount: 95,    dueDate: 'Jun 8',  daysUntil: 25, estimate: true },
+export const SEED_BILLS: Bill[] = [
+  { id: 'b1', name: 'Rent',    merchant: 'Rent',    icon: 'home', cat: 'bills',         amount: 1200,  dueDate: 'May 28', daysUntil: 14, recurring: true },
+  { id: 'b2', name: 'Spotify', merchant: 'Spotify', icon: 'film', cat: 'entertainment', amount: 10.99, dueDate: 'May 30', daysUntil: 16, recurring: true },
+  { id: 'b3', name: 'PG&E',    merchant: 'PG&E',    icon: 'doc',  cat: 'bills',         amount: 95,    dueDate: 'Jun 8',  daysUntil: 25, recurring: true, estimate: true },
 ];
 
 // Last 7 days sparkline data
-export const SPARK_7D = [42, 18, 95, 38, 12, 28, 67];
+export const SEED_SPARK_7D = [42, 18, 95, 38, 12, 28, 67];
 
 // Current month context (May 2026)
 export const DAYS_REMAINING = 17;
@@ -69,20 +48,7 @@ export const DAYS_IN_MONTH = 31;
 // Per-period totals + category breakdown
 // Drives the Week/Month/Year toggle on Home.
 // ─────────────────────────────────────────────────────────────
-export interface PeriodData {
-  label: string;          // "this week" | "this month" | "this year"
-  spentLabel: string;     // "Spent this week" etc.
-  spent: number;
-  budget: number;
-  remaining: number;
-  expectedPct: number;    // 0–1, where we should be by now
-  remainingLabel: string; // "4 days left in week" etc.
-  byCat: { cat: string; value: number }[];
-  prevTotal: number;
-  prevByCat: { cat: string; value: number }[];
-}
-
-export const PERIOD_DATA: Record<string, PeriodData> = {
+export const SEED_PERIOD_DATA: Record<string, PeriodData> = {
   Week: {
     label: 'this week',
     spentLabel: 'Spent this week',
@@ -157,16 +123,7 @@ export const PERIOD_DATA: Record<string, PeriodData> = {
   },
 };
 
-export interface TrendPoint { label: string; v: number; }
-export interface TrendConfig {
-  data: TrendPoint[];
-  budget: number;
-  prev: number;
-  periodLabel: string;
-  span: string;
-}
-
-export const TREND: Record<string, TrendConfig> = {
+export const SEED_TREND: Record<string, TrendConfig> = {
   Week: {
     data: [{label:'M',v:84},{label:'T',v:62},{label:'W',v:28},{label:'T',v:41},{label:'F',v:95},{label:'S',v:38},{label:'S',v:12}],
     budget: 80, prev: 412, periodLabel: 'day', span: 'past 7 days',
@@ -186,22 +143,9 @@ export const TREND: Record<string, TrendConfig> = {
 // Each group has a target share of monthly income; subcategories
 // carry their own spent vs budget figures.
 // ─────────────────────────────────────────────────────────────
-export interface SpendSub {
-  label: string;
-  icon: string;
-  spent: number;
-  budget: number;
-}
-export interface SpendGroup {
-  key: 'needs' | 'wants' | 'savings';
-  label: string;
-  targetPct: number; // 0.5 / 0.3 / 0.2 — the 50/30/20 rule
-  subs: SpendSub[];
-}
+export const DEFAULT_MONTHLY_INCOME = 5200;
 
-export const MONTHLY_INCOME = 5200;
-
-export const SPEND_GROUPS: SpendGroup[] = [
+export const SEED_SPEND_GROUPS: SpendGroup[] = [
   {
     key: 'needs',
     label: 'Needs',
@@ -238,19 +182,39 @@ export const SPEND_GROUPS: SpendGroup[] = [
 // Month-by-month budget history — drives the home Budget switcher.
 // Index 0 is the current month; later indices step into the past.
 // ─────────────────────────────────────────────────────────────
-export interface MonthBudget {
-  key: string;
-  month: string;
-  spent: number;
-  budget: number;
-  expectedPct: number;     // 1 for completed months
-  remainingLabel: string;
-}
-
-export const MONTH_BUDGETS: MonthBudget[] = [
+export const SEED_MONTH_BUDGETS: MonthBudget[] = [
   { key: '2026-05', month: 'May',      spent: 400.07,  budget: 2400, expectedPct: 14 / 31, remainingLabel: '17 days remaining' },
   { key: '2026-04', month: 'April',    spent: 2180.50, budget: 2400, expectedPct: 1, remainingLabel: 'Month complete' },
   { key: '2026-03', month: 'March',    spent: 2540.00, budget: 2400, expectedPct: 1, remainingLabel: 'Month complete' },
   { key: '2026-02', month: 'February', spent: 1975.30, budget: 2300, expectedPct: 1, remainingLabel: 'Month complete' },
   { key: '2026-01', month: 'January',  spent: 2410.00, budget: 2400, expectedPct: 1, remainingLabel: 'Month complete' },
 ];
+
+export const SEED_INCOME: Income[] = [
+  {
+    id: 'income-primary',
+    amount: DEFAULT_MONTHLY_INCOME,
+    source: 'Primary income',
+    cadence: 'monthly',
+    startDate: '2026-05-01',
+  },
+];
+
+export const SEED_BUDGETS: Budget[] = SEED_SPEND_GROUPS.flatMap(group =>
+  group.subs.map(sub => ({
+    id: `budget-2026-05-${group.key}-${sub.label.toLowerCase().replace(/\s+/g, '-')}`,
+    month: '2026-05',
+    group: group.key,
+    label: sub.label,
+    icon: sub.icon,
+    amount: sub.budget,
+    spent: sub.spent,
+  })),
+);
+
+export const SEED_SETTINGS: AppSettings = {
+  id: 'settings',
+  themeDark: true,
+  accentKey: 'plum',
+  cardStyle: 'flat',
+};

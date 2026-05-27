@@ -13,15 +13,8 @@ import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, catGroupColor, OVER_DOT, cautionText } from '../theme';
 import { Skeleton } from '../components/Skeleton';
-import {
-  CATS,
-  TRANSACTIONS,
-  UPCOMING_BILLS,
-  SPEND_GROUPS,
-  MONTHLY_INCOME,
-  MONTH_BUDGETS,
-  Transaction,
-} from '../data';
+import { CATS } from '../data';
+import { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
 import { CategoryGroups } from '../components/CategoryGroups';
@@ -712,4 +705,3 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
 });
-

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, TouchableOpacity, View, Text, StyleSheet } from 'react-native';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
-import { SpendGroup } from '../data';
+import type { SpendGroup } from '../repositories/types';
 import { Icon } from './Icon';
 import { Collapsible } from './Collapsible';
 import { TYPE } from '../typography';

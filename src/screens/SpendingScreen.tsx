@@ -20,7 +20,9 @@ import { pickerStyle, tag, tint, environment } from '@expo/ui/swift-ui/modifiers
 import { useTheme } from '../ThemeProvider';
 import { Theme, catGroupColor, OVER_DOT } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
-import { CATS, TRANSACTIONS, PERIOD_DATA, TREND } from '../data';
+import { CATS } from '../data';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { periodTotals, trendSeries } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -111,6 +113,8 @@ function IconBtn({
 }
 
 export function SpendingScreen({ theme, onOpenDrawer }: Props) {
+  const { transactionsRepo } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
   const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
   const pWall = makeP(true);
@@ -131,8 +135,8 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
   const dateIdx = dateIdxByPeriod[period];
   const dateLabel = dateOptions[dateIdx] ?? dateOptions[0];
 
-  const pd = PERIOD_DATA[period];
-  const trendCfg = TREND[period];
+  const pd = useMemo(() => periodTotals(transactions, period), [transactions, period]);
+  const trendCfg = useMemo(() => trendSeries(transactions, period), [transactions, period]);
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
 
@@ -149,7 +153,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
       .sort((a, b) => b.value - a.value)
       .map(c => {
         const cat = CATS[c.cat];
-        const txCount = TRANSACTIONS.filter(t => t.cat === c.cat).length;
+        const txCount = transactions.filter(t => t.cat === c.cat).length;
         return {
           key: c.cat,
           label: cat?.label ?? c.cat,
@@ -160,11 +164,11 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
           pct: total > 0 ? c.value / total : 0,
         };
       });
-  }, [pd, total, theme.dark]);
+  }, [pd, total, theme.dark, transactions]);
 
   const merchantRows: Row[] = useMemo(() => {
     const acc: Record<string, { merchant: string; cat: string; total: number; count: number }> = {};
-    TRANSACTIONS.forEach(t => {
+    transactions.forEach(t => {
       if (!acc[t.merchant]) acc[t.merchant] = { merchant: t.merchant, cat: t.cat, total: 0, count: 0 };
       acc[t.merchant].total += t.amount;
       acc[t.merchant].count += 1;
@@ -184,7 +188,7 @@ export function SpendingScreen({ theme, onOpenDrawer }: Props) {
           pct: merchTotal > 0 ? m.total / merchTotal : 0,
         };
       });
-  }, [theme.dark]);
+  }, [theme.dark, transactions]);
 
   const rows = breakdown === 'Category' ? categoryRows : merchantRows;
 

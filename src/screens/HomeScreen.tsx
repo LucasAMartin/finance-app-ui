@@ -19,15 +19,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, catGroupColor, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
-import {
-  CATS,
-  TRANSACTIONS,
-  UPCOMING_BILLS,
-  SPEND_GROUPS,
-  MONTHLY_INCOME,
-  MONTH_BUDGETS,
-  Transaction,
-} from '../data';
+import { CATS } from '../data';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import type { Transaction } from '../repositories/types';
+import { monthBudgets, monthlyIncome, spendGroups } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
@@ -170,6 +165,11 @@ interface Props {
 }
 
 export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onOpenTheme }: Props) {
+  const { transactionsRepo, billsRepo, incomeRepo, budgetsRepo } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
+  const upcomingBills = useRepositoryList(billsRepo);
+  const incomes = useRepositoryList(incomeRepo);
+  const budgets = useRepositoryList(budgetsRepo);
   const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
   // pWallpaper: hero, header, quick-actions — always on the wallpaper, always white.
@@ -181,12 +181,15 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
 
   const groups = useMemo(() => {
     const g: Record<string, Transaction[]> = { today: [], yesterday: [], earlier: [] };
-    TRANSACTIONS.forEach(t => g[t.when].push(t));
+    transactions.forEach(t => g[t.when].push(t));
     return g;
-  }, []);
+  }, [transactions]);
 
   const [monthIdx, setMonthIdx] = useState(0);
-  const mb = MONTH_BUDGETS[monthIdx];
+  const visibleMonthBudgets = useMemo(() => monthBudgets(transactions, budgets), [transactions, budgets]);
+  const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets), [transactions, budgets]);
+  const income = useMemo(() => monthlyIncome(incomes), [incomes]);
+  const mb = visibleMonthBudgets[monthIdx] ?? visibleMonthBudgets[0];
 
   const [sheetTx, setSheetTx] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -332,7 +335,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                       fixedSize({ horizontal: true, vertical: false }),
                     ]}
                   >
-                    {MONTH_BUDGETS.map((m, idx) => (
+                    {visibleMonthBudgets.map((m, idx) => (
                       <SwiftText key={m.key} modifiers={[tag(idx)]}>
                         {m.month} {m.key.split('-')[0]}
                       </SwiftText>
@@ -402,7 +405,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
               {loading ? (
                 <CategorySkeleton dark={theme.dark} />
               ) : (
-                <HomeSpendGroups theme={theme} groups={SPEND_GROUPS} income={MONTHLY_INCOME} compact onMedia={theme.dark} />
+                <HomeSpendGroups theme={theme} groups={visibleSpendGroups} income={income} compact onMedia={theme.dark} />
               )}
             </SectionCard>
 
@@ -414,7 +417,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
               {loading ? (
                 <BillsSkeleton dark={theme.dark} />
               ) : (
-                UPCOMING_BILLS.map((b, i) => {
+                upcomingBills.map((b, i) => {
                   const amountStr = `${b.estimate ? '~' : ''}$${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}`;
                   const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
                   return (
@@ -422,7 +425,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                       key={b.id}
                       style={[
                         styles.billRow,
-                        { borderBottomWidth: i < UPCOMING_BILLS.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
+                        { borderBottomWidth: i < upcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
                       ]}
                       accessible
                       accessibilityLabel={a11y}

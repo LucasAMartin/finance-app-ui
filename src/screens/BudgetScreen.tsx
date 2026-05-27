@@ -20,11 +20,13 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, catGroupColor, OVER_DOT, HERO_AVAIL, CAT_TO_GROUP } from '../theme';
-import { SPEND_GROUPS, UPCOMING_BILLS, MONTHLY_INCOME } from '../data';
 import { Icon } from '../components/Icon';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TYPE } from '../typography';
 import { makeP, DARK_TEXT_SHADOW, makeScrim } from '../wallpaperPalette';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import type { Bill, SpendGroup } from '../repositories/types';
+import { monthlyIncome, spendGroups } from '../selectors/finance';
 import {
   BottomSheet,
   Group,
@@ -74,10 +76,10 @@ const BUDGET_TEMPLATES: BudgetTemplate[] = [
 const bKey = (gKey: string, label: string) => `${gKey}:${label}`;
 const billKey = (gKey: string, billId: string) => `bill:${gKey}:${billId}`;
 
-const initBudgets = (): Record<string, number> => {
+const initBudgets = (groups: SpendGroup[], bills: Bill[]): Record<string, number> => {
   const out: Record<string, number> = {};
-  SPEND_GROUPS.forEach(g => g.subs.forEach(s => { out[bKey(g.key, s.label)] = s.budget; }));
-  UPCOMING_BILLS.forEach(bill => {
+  groups.forEach(g => g.subs.forEach(s => { out[bKey(g.key, s.label)] = s.budget; }));
+  bills.forEach(bill => {
     const gKey = CAT_TO_GROUP[bill.cat] ?? 'wants';
     out[billKey(gKey, bill.id)] = bill.amount;
   });
@@ -298,6 +300,16 @@ function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, w
 }
 
 export function BudgetScreen({ theme, onOpenDrawer }: Props) {
+  const { transactionsRepo, incomeRepo, billsRepo, budgetsRepo } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
+  const incomes = useRepositoryList(incomeRepo);
+  const upcomingBills = useRepositoryList(billsRepo);
+  const budgetRecords = useRepositoryList(budgetsRepo);
+  const visibleSpendGroups = useMemo(
+    () => spendGroups(transactions, budgetRecords),
+    [transactions, budgetRecords],
+  );
+  const initialIncome = useMemo(() => monthlyIncome(incomes), [incomes]);
   const insets = useSafeAreaInsets();
   const { wallpaper } = useTheme();
   const pWallpaper = makeP(true);
@@ -327,11 +339,11 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const stickyOpacity  = stickyAnim.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.15, 1] });
 
   // ── Budget state ──────────────────────────────────────────────
-  const [income, setIncome] = useState(MONTHLY_INCOME);
+  const [income, setIncome] = useState(initialIncome);
   const [cadence, setCadence] = useState<Cadence>('Mo');
   const [incomeSheetOpen, setIncomeSheetOpen] = useState(false);
   const [incomeDraft, setIncomeDraft] = useState('');
-  const [budgets, setBudgets] = useState<Record<string, number>>(initBudgets);
+  const [budgets, setBudgets] = useState<Record<string, number>>(() => initBudgets(visibleSpendGroups, upcomingBills));
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
   const [templatePromptVisible, setTemplatePromptVisible] = useState(true);
   const [budgetTouched, setBudgetTouched] = useState(false);
@@ -398,14 +410,14 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const billsByGroup = useMemo(() => {
-    const map: Record<string, typeof UPCOMING_BILLS> = {};
-    UPCOMING_BILLS.forEach(bill => {
+    const map: Record<string, Bill[]> = {};
+    upcomingBills.forEach(bill => {
       const gKey = CAT_TO_GROUP[bill.cat] ?? 'wants';
       if (!map[gKey]) map[gKey] = [];
       map[gKey].push(bill);
     });
     return map;
-  }, []);
+  }, [upcomingBills]);
 
   const displayIncome = fromMonthly(income, cadence);
 
@@ -453,7 +465,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     showUndo(`Removed ${label}`);
   };
 
-  const removeBill = (bill: typeof UPCOMING_BILLS[number]) => {
+  const removeBill = (bill: Bill) => {
     markBudgetTouched();
     saveSnapshot();
     setRemovedBills(prev => new Set([...prev, bill.id]));
@@ -461,7 +473,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
   };
 
   const addSub = (gKey: string, label: string) => {
-    const origGroup = SPEND_GROUPS.find(g => g.key === gKey);
+    const origGroup = visibleSpendGroups.find(g => g.key === gKey);
     const taken = new Set([
       ...(origGroup?.subs.map(s => s.label.toLowerCase()) ?? []),
       ...(customSubs[gKey] ?? []).map(s => s.label.toLowerCase()),
@@ -475,7 +487,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
 
   const groupTotals = useMemo(() => {
     const t: Record<string, number> = {};
-    SPEND_GROUPS.forEach(g => {
+    visibleSpendGroups.forEach(g => {
       const orig = g.subs
         .filter(s => !removedSubs.has(bKey(g.key, s.label)))
         .reduce((s, sub) => s + (budgets[bKey(g.key, sub.label)] ?? 0), 0);
@@ -539,7 +551,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
     markBudgetTouched();
     saveSnapshot();
     const next: Record<string, number> = { ...budgets };
-    SPEND_GROUPS.forEach(g => {
+    visibleSpendGroups.forEach(g => {
       const pct = (template as any)[g.key] as number;
       const target = income * pct;
       const subSum = g.subs.reduce((s, sub) => s + sub.budget, 0);
@@ -774,7 +786,7 @@ export function BudgetScreen({ theme, onOpenDrawer }: Props) {
               )}
 
               {/* Spending group cards */}
-              {SPEND_GROUPS.map(g => {
+              {visibleSpendGroups.map(g => {
                 const groupColor = gCol(g.key);
                 const groupTotal = Math.round(groupTotals[g.key] ?? 0);
                 const groupTarget = Math.round(income * g.targetPct);

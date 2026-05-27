@@ -1,7 +1,7 @@
 import React from 'react';
 import Svg, { Path, Circle, Line, Text as SvgText, Rect, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Theme, OVER_DOT } from '../theme';
-import { TrendPoint } from '../data';
+import type { TrendPoint } from '../selectors/types';
 
 interface TrendChartProps {
   data: TrendPoint[];

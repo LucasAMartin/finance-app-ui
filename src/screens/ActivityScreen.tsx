@@ -16,10 +16,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BottomSheet, Group, Host, RNHostView, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
 import { presentationDetents, presentationDragIndicator, pickerStyle, tag, tint, fixedSize, environment } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  CATS, TRANSACTIONS, Transaction,
-  UPCOMING_BILLS, UpcomingBill,
-} from '../data';
+import { CATS } from '../data';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import type { Bill, Transaction } from '../repositories/types';
 
 const CALENDAR_YEAR  = 2026;
 const CALENDAR_MONTH = 4; // 0-indexed → May
@@ -99,11 +98,11 @@ function parseMonthDay(s: string): { month: number; day: number } | null {
   return month < 0 ? null : { month, day: parseInt(m[2], 10) };
 }
 
-const TODAY_DOM = (() => {
-  const t = TRANSACTIONS.find(tx => tx.when === 'today');
+const todayDom = (transactions: Transaction[]) => {
+  const t = transactions.find(tx => tx.when === 'today');
   const pd = t ? parseMonthDay(t.fullDate) : null;
   return pd ? pd.day : null;
-})();
+};
 
 function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() &&
@@ -123,6 +122,9 @@ interface Props {
 }
 
 export function ActivityScreen({ theme, onOpenDrawer }: Props) {
+  const { transactionsRepo, billsRepo } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
+  const upcomingBills = useRepositoryList(billsRepo);
   const insets = useSafeAreaInsets();
   const { wallpaper } = useTheme();
 
@@ -168,7 +170,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     calViewMonth !== CALENDAR_MONTH || calViewYear !== CALENDAR_YEAR;
 
   const filtered = useMemo(() => {
-    const result = TRANSACTIONS.filter(t => {
+    const result = transactions.filter(t => {
       if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
       if (isViewingNonDefaultMonth && dateFilter === null) {
         const pd = parseMonthDay(t.fullDate);
@@ -204,7 +206,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     else if (sortBy === 'date-asc')    result.reverse();
     else if (sortBy === 'cat')         result.sort((a, b) => a.cat.localeCompare(b.cat) || a.merchant.localeCompare(b.merchant));
     return result;
-  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth]);
+  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth, transactions]);
 
   const grouped = useMemo(() => {
     const g: Record<string, { txs: Transaction[]; total: number }> = {};
@@ -221,7 +223,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
 
   // ── Calendar marks ───────────────────────────────────────────────────────
   const calSource = useMemo(
-    () => TRANSACTIONS.filter(t => {
+    () => transactions.filter(t => {
       if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
       if (query) {
         const q = query.toLowerCase();
@@ -229,12 +231,12 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
       }
       return true;
     }),
-    [catFilter, query],
+    [catFilter, query, transactions],
   );
 
   const calBills = useMemo(
-    () => UPCOMING_BILLS.filter(b => catFilter.length === 0 || catFilter.includes(b.cat)),
-    [catFilter],
+    () => upcomingBills.filter(b => catFilter.length === 0 || catFilter.includes(b.cat)),
+    [catFilter, upcomingBills],
   );
 
   const calMarks = useMemo(() => {
@@ -354,7 +356,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                     month={calViewMonth}
                     marks={calMarks}
                     selectedDay={selectedDay}
-                    today={TODAY_DOM}
+                    today={todayDom(transactions)}
                     onSelectDay={(day) => {
                       setSelectedDay(day);
                       if (day !== null) setDateFilter(null);
@@ -1144,7 +1146,7 @@ function TxRow({
 
 // ─── BillRow ─────────────────────────────────────────────────────────────────
 
-function BillRow({ bill, theme, last }: { bill: UpcomingBill; theme: Theme; last: boolean }) {
+function BillRow({ bill, theme, last }: { bill: Bill; theme: Theme; last: boolean }) {
   const p          = makeP(theme.dark);
   const groupColor = catGroupColor(bill.cat, theme.dark);
   return (

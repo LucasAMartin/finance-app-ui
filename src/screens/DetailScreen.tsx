@@ -2,7 +2,9 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, catGroupColor } from '../theme';
-import { Transaction, CATS, TRANSACTIONS } from '../data';
+import { CATS } from '../data';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import type { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
 
@@ -13,11 +15,13 @@ interface Props {
 }
 
 export function DetailScreen({ tx, theme, onBack }: Props) {
+  const { transactionsRepo } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
   const insets = useSafeAreaInsets();
   const card = getCardStyle(theme);
   if (!tx) return null;
   const cat = CATS[tx.cat];
-  const catTotal = TRANSACTIONS.filter(t => t.cat === tx.cat).reduce((s, t) => s + t.amount, 0);
+  const catTotal = transactions.filter(t => t.cat === tx.cat).reduce((s, t) => s + t.amount, 0);
   const catBudget = CATS[tx.cat]?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.round((catTotal / catBudget) * 100) : 0;
 

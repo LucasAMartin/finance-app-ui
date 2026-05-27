@@ -8,7 +8,7 @@ import {
   CAT_TO_GROUP,
   GROUP_COLORS,
 } from '../../theme';
-import { TrendPoint } from '../../data';
+import type { TrendPoint } from '../../selectors/types';
 
 const fmtMoney = (v: number) =>
   v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`;

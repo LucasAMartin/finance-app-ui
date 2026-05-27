@@ -8,7 +8,9 @@ const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
 const DETENT_LARGE: PresentationDetent = 'large';
 const DETENTS: PresentationDetent[] = [DETENT_DEFAULT, DETENT_LARGE];
 
-import { CATS, TRANSACTIONS, Transaction } from '../data';
+import { CATS } from '../data';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import type { Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { Money } from './shared';
 import { Theme, catGroupColor, catPastel, CAT_TO_GROUP, GROUP_COLORS } from '../theme';
@@ -29,6 +31,8 @@ export function TxSheet({
   theme: Theme;
   onClose: () => void;
 }) {
+  const { transactionsRepo } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
   const insets = useSafeAreaInsets();
   const lastTx = useRef<Transaction | null>(null);
   if (tx) lastTx.current = tx;
@@ -105,7 +109,7 @@ export function TxSheet({
                         paddingBottom: Math.max(insets.bottom, 16) + 12,
                       }}
                     >
-                      <SheetBody tx={t} theme={theme} isExpanded={isExpanded} />
+                      <SheetBody tx={t} transactions={transactions} theme={theme} isExpanded={isExpanded} />
                       {!isExpanded && (
                         <Pressable
                           onPress={() => setDetent(DETENT_LARGE)}
@@ -148,11 +152,21 @@ export function TxSheet({
   );
 }
 
-function SheetBody({ tx, theme, isExpanded }: { tx: Transaction; theme: Theme; isExpanded: boolean }) {
+function SheetBody({
+  tx,
+  transactions,
+  theme,
+  isExpanded,
+}: {
+  tx: Transaction;
+  transactions: Transaction[];
+  theme: Theme;
+  isExpanded: boolean;
+}) {
   const cat = CATS[tx.cat];
   const color = catPastel(tx.cat, theme.dark);
   const groupColor = catGroupColor(tx.cat, theme.dark);
-  const catTotal = TRANSACTIONS.filter(x => x.cat === tx.cat).reduce((s, x) => s + x.amount, 0);
+  const catTotal = transactions.filter(x => x.cat === tx.cat).reduce((s, x) => s + x.amount, 0);
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
 
