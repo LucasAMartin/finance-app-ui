@@ -218,9 +218,12 @@ All tokens are defined once in `src/typography.ts` and applied via `import { TYP
 
 ## 4. Elevation
 
-Flat-first. Surfaces are distinguished by 1px hairline borders and tonal fill differences, not shadows. The default card variant uses `borderWidth: 1` with a hairline-opacity border and no shadow at rest.
+**Two surface modes coexist.** Flat-first is the default; the media wallpaper treatment is the current direction for the primary content screens.
 
-Elevation enters only for chrome that physically layers above content:
+- **Flat surfaces** (default): distinguished by 1px hairline borders and tonal fill differences, not shadows. The default card variant uses `borderWidth: 1` with a hairline-opacity border and no shadow at rest. Used for sheets, forms, and any surface sitting on a solid page background.
+- **Media wallpaper surfaces** (Home, Spending, History): these screens render over a full-bleed photographic `ImageBackground` with a `LinearGradient` scrim. Content sits in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). Here the blur is **structural, not decorative**: it is what makes content legible against the wallpaper and what separates a card from the photograph behind it. Text colors come from the `MEDIA` / wallpaper palette, not the flat-surface tokens.
+
+Elevation (shadow) enters only for chrome that physically layers above content:
 
 ### Shadow Vocabulary
 - **Tab bar ambient** (`shadowOffset: {0, 10}, shadowOpacity: 0.08, shadowRadius: 20` — light mode): The floating navigation pill separates from the content below. iOS wraps this in a BlurView (intensity 80); Android uses rgba(255,255,255,0.95) solid fill.
@@ -228,7 +231,7 @@ Elevation enters only for chrome that physically layers above content:
 - **TxSheet** (native SwiftUI bottom sheet elevation): Platform-managed. Not represented in app shadow tokens.
 
 ### Named Rules
-**The Flat Content Rule.** Transaction rows, category group lists, budget progress bars, and any data surface are always flat at rest. No data surface ever casts a shadow. If a surface can be scrolled past, it cannot cast a shadow.
+**The Flat Content Rule.** Data *contents* — transaction rows, category group lists, budget progress bars — are always flat at rest and never cast a shadow. On flat screens they sit on the solid surface; on media wallpaper screens they sit inside a frosted `SectionCard`. The frosted card itself is a structural container against the wallpaper, not a shadowed elevation: if a surface can be scrolled past, it still casts no shadow. Shadows remain reserved for floating chrome (tab bar, dropdowns).
 
 ## 5. Components
 
@@ -267,7 +270,7 @@ Grouped inside a chipBg-background container with radius 14. Each row: paddingVe
 - **Do** reserve the accent color (violet-dot, fill, ink) for action links, the mic button, and interactive indicators — and only those roles.
 - **Do** use over-ember (#D4522A) consistently for all over-budget signals: the amount, the label, and the budget bar fill.
 - **Do** use hero-avail (#5CC4BA) for the "Available" status and healthy budget bar on the hero — teal reads as growth against the deep violet hero.
-- **Do** let Inter carry the full visual hierarchy without introducing a second typeface.
+- **Do** let SF Pro (the system typeface) carry the full visual hierarchy without introducing a second typeface.
 - **Do** treat the 32px display as singular: exactly one per screen, for the primary budget figure.
 - **Do** apply the flat-first rule: data surfaces never cast shadows at rest.
 - **Do** tint dark mode surfaces with violet: bg #0F0B1C, surface #1A1530, surface2 #221D3C — not neutral gray.
@@ -277,7 +280,7 @@ Grouped inside a chipBg-background container with radius 14. Each row: paddingVe
 - **Don't** use navy and gold, golden amber for the wants group, neon on black, or any other finance-domain reflex palette. The wants-clay color exists specifically to break the amber/gold reflex.
 - **Don't** use gradient text (`background-clip: text`). Decorative, never meaningful.
 - **Don't** add side-stripe borders (border-left or border-right over 1px) to rows, cards, or callouts. Use a background tint, a leading icon, or nothing.
-- **Don't** apply glassmorphism decoratively. The tab bar's BlurView is structural (it visually separates chrome from content); blur used as card decoration is banned.
+- **Don't** apply glassmorphism decoratively on flat-surface screens. Blur is legitimate in exactly two roles: the tab bar's BlurView (chrome separating from content) and the frosted `SectionCard` on media wallpaper screens (structural legibility against a photographic background). Blur used as ornament anywhere else is banned.
 - **Don't** use the accent violet in charts or data visualization. Charts read spending groups, not accent preference. (Exception: shopping pastel is violet-adjacent by design.)
 - **Don't** shadow data rows, category cards, or list items. If it can be scrolled past, it stays flat.
 - **Don't** build complex navigation hierarchies or hide features behind nested menus. Busy professionals need clarity at a glance, not exploration. (From PRODUCT.md.)

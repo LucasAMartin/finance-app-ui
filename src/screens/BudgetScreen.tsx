@@ -39,6 +39,7 @@ import {
   RNHostView,
 } from '@expo/ui/swift-ui';
 import {
+  background,
   tint,
   pickerStyle,
   tag,
@@ -162,12 +163,12 @@ function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
   const swipeRef = useRef<Swipeable>(null);
 
   const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
-    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [72, 0] });
+    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
     return (
-      <Animated.View style={{ width: 72, transform: [{ translateX }] }}>
+      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
         <TouchableOpacity
           onPress={onRemove}
-          style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: OVER_DOT }}
+          style={{ flex: 1, marginLeft: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: OVER_DOT }}
         >
           <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
         </TouchableOpacity>
@@ -185,7 +186,7 @@ function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
       rightThreshold={30}
       activeOffsetX={[-15, 15]}
       failOffsetY={[-15, 15]}
-      onSwipeableOpen={() => onOpen(swipeRef.current!)}
+      onSwipeableWillOpen={() => onOpen(swipeRef.current!)}
       onSwipeableClose={onClose}
     >
       {children}
@@ -1192,10 +1193,11 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
             presentationDetents([INCOME_DETENT]),
             presentationDragIndicator('visible'),
             environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+            background(theme.surface),
           ]}>
             <RNHostView>
               <View style={[styles.incomeNativeSheet, {
-                backgroundColor: theme.dark ? 'rgba(14,12,26,0.92)' : 'rgba(255,255,255,0.52)',
+                backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.52)',
                 paddingBottom: Math.max(insets.bottom, 16) + 12,
               }]}>
                 <View style={styles.sheetHead}>
@@ -1340,6 +1342,7 @@ function CategoryEditSheet({
           presentationDetents([CATEGORY_DETENT]),
           presentationDragIndicator('visible'),
           environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+          background(theme.surface),
         ]}>
           <RNHostView>
             <View style={[styles.categorySheet, { backgroundColor: theme.surface, paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>

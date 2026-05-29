@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,23 +10,23 @@ import {
   ImageBackground,
   Animated,
 } from 'react-native';
+import { MenuView } from '@react-native-menu/menu';
+import { Swipeable, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
 import { useTheme } from '../ThemeProvider';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Picker, Text as SwiftText, Host, Menu, Button, RNHostView } from '@expo/ui/swift-ui';
-import { pickerStyle, tag, tint, fixedSize } from '@expo/ui/swift-ui/modifiers';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
-import type { Category, Transaction } from '../repositories/types';
-import { monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
+import type { Bill, Category, Transaction } from '../repositories/types';
+import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
-import { TxSheet } from '../components/TxSheet';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TYPE } from '../typography';
 
@@ -118,10 +118,14 @@ const QuickAction = React.forwardRef<View, {
   const iconColor = primary && accent
     ? accent.ink
     : dark ? p.text : '#0E0C18';
+  const handlePress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onPress();
+  };
   return (
     <View ref={ref} collapsable={false} style={styles.qa}>
       <Pressable
-        onPress={onPress}
+        onPress={handlePress}
         style={({ pressed }) => [styles.qaInner, { opacity: pressed ? 0.7 : 1 }]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         accessibilityRole="button"
@@ -164,9 +168,12 @@ interface Props {
   onAddRecurring: () => void;
   onLogIncome: () => void;
   onOpenTheme: () => void;
+  onOpenTx: (tx: Transaction) => void;
+  onDeleteTx: (tx: Transaction) => void;
+  onOpenBill: (bill: Bill) => void;
 }
 
-export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme }: Props) {
+export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
@@ -196,9 +203,48 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
   const income = useMemo(() => monthlyIncome(incomes), [incomes]);
   const mb = visibleMonthBudgets[monthIdx] ?? visibleMonthBudgets[0];
 
-  const [sheetTx, setSheetTx] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const openSwipeRef = useRef<Swipeable | null>(null);
+
+  const handleSwipeOpen = useCallback((ref: Swipeable) => {
+    if (openSwipeRef.current && openSwipeRef.current !== ref) {
+      openSwipeRef.current.close();
+    }
+    openSwipeRef.current = ref;
+  }, []);
+
+  const handleSwipeClose = useCallback(() => {
+    openSwipeRef.current = null;
+  }, []);
+
+  const dismissOpenSwipe = useCallback(() => {
+    openSwipeRef.current?.close();
+  }, []);
+
+  const markBillPaid = useCallback((bill: Bill) => {
+    const ruleId = bill.id.startsWith('bill-') ? bill.id.slice(5) : bill.id;
+    transactionsRepo.create({
+      merchant: bill.merchant,
+      cat: bill.cat,
+      amount: bill.amount,
+      recurring: true,
+      recurringRuleId: ruleId,
+      occurredAt: new Date().toISOString(),
+      type: 'expense',
+      visibility: 'shared',
+      createdByUserId: 'local',
+      updatedByUserId: 'local',
+    });
+    const rule = recurringRulesRepo.get(ruleId);
+    if (rule) {
+      recurringRulesRepo.update(ruleId, {
+        nextDueDate: advanceDueDate(rule),
+        meta: { ...rule.meta, partialPaid: undefined },
+      });
+    }
+  }, [transactionsRepo, recurringRulesRepo]);
 
   const handleEditTheme = () => {
     onOpenTheme();
@@ -210,6 +256,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
     const t = setTimeout(() => setLoading(false), 1100);
     return () => clearTimeout(t);
   }, []);
+
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -286,6 +333,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
           showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={dismissOpenSwipe}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true },
@@ -322,23 +370,24 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
               {loading ? (
                 <Skeleton width={88} height={13} radius={4} onMedia={theme.dark} />
               ) : (
-                <Host matchContents>
-                  <Picker
-                    selection={monthIdx}
-                    onSelectionChange={(val) => setMonthIdx(Number(val))}
-                    modifiers={[
-                      pickerStyle('menu'),
-                      tint(pWallpaper.text),
-                      fixedSize({ horizontal: true, vertical: false }),
-                    ]}
-                  >
-                    {visibleMonthBudgets.map((m, idx) => (
-                      <SwiftText key={m.key} modifiers={[tag(idx)]}>
-                        {m.month} {m.key.split('-')[0]}
-                      </SwiftText>
-                    ))}
-                  </Picker>
-                </Host>
+                <MenuView
+                  shouldOpenOnLongPress={false}
+                  themeVariant={theme.dark ? 'dark' : 'light'}
+                  actions={visibleMonthBudgets.map((m, idx) => ({
+                    id: String(idx),
+                    title: `${m.month} ${m.key.split('-')[0]}`,
+                    state: idx === monthIdx ? 'on' : 'off',
+                  }))}
+                  onPressAction={({ nativeEvent }) => setMonthIdx(Number(nativeEvent.event))}
+                  style={styles.monthPickerHost}
+                >
+                  <View style={styles.monthPickerBtn}>
+                    <Text style={[styles.monthPickerText, { color: pWallpaper.text }, shadow]}>
+                      {visibleMonthBudgets[monthIdx]?.month} {visibleMonthBudgets[monthIdx]?.key.split('-')[0]}
+                    </Text>
+                    <Icon name="chevDown" size={11} color={pWallpaper.text} stroke={2} />
+                  </View>
+                </MenuView>
               )}
             </View>
 
@@ -418,31 +467,40 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                   const amountStr = `${b.estimate ? '~' : ''}$${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}`;
                   const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
                   return (
-                    <View
+                    <SwipeBillRow
                       key={b.id}
-                      style={[
-                        styles.billRow,
-                        { borderBottomWidth: i < upcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
-                      ]}
-                      accessible
-                      accessibilityLabel={a11y}
+                      onPaid={() => markBillPaid(b)}
+                      onOpen={handleSwipeOpen}
+                      onClose={handleSwipeClose}
                     >
-                      <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(b.cat, categories, theme.dark) }]}
-                        accessibilityElementsHidden importantForAccessibility="no">
-                        <Icon name={b.icon} size={16} color="#FBF8FF" stroke={1.6} />
-                      </View>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={[styles.rowTitle, { color: p.text }]}>{b.name}</Text>
-                        <Text style={[styles.rowSub, { color: p.textSec }]}>
-                          {b.dueDate}
-                          {'  ·  '}
-                          <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : p.textSec }}>
-                            in {b.daysUntil} days
+                      <TouchableOpacity
+                        onPress={() => onOpenBill(b)}
+                        activeOpacity={0.6}
+                        delayPressIn={0}
+                        style={[
+                          styles.billRow,
+                          { borderBottomWidth: i < upcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
+                        ]}
+                        accessible
+                        accessibilityLabel={a11y}
+                      >
+                        <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(b.cat, categories, theme.dark) }]}
+                          accessibilityElementsHidden importantForAccessibility="no">
+                          <Icon name={b.icon} size={16} color="#FBF8FF" stroke={1.6} />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={[styles.rowTitle, { color: p.text }]}>{b.name}</Text>
+                          <Text style={[styles.rowSub, { color: p.textSec }]}>
+                            {b.dueDate}
+                            {'  ·  '}
+                            <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : p.textSec }}>
+                              in {b.daysUntil} days
+                            </Text>
                           </Text>
-                        </Text>
-                      </View>
-                      <Text style={[styles.rowAmt, { color: p.text }]}>{amountStr}</Text>
-                    </View>
+                        </View>
+                        <Text style={[styles.rowAmt, { color: p.text }]}>{amountStr}</Text>
+                      </TouchableOpacity>
+                    </SwipeBillRow>
                   );
                 })
               )}
@@ -466,9 +524,16 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                         {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
                       </Text>
                       {groups[key].map((tx, i, arr) => (
-                        <TxRow key={tx.id} tx={tx}
-                          onPress={() => setSheetTx(tx)} last={i === arr.length - 1}
-                          dark={theme.dark} p={p} cats={cats} categories={categories} />
+                        <SwipeTxRow
+                          key={tx.id}
+                          onDelete={() => onDeleteTx(tx)}
+                          onOpen={handleSwipeOpen}
+                          onClose={handleSwipeClose}
+                        >
+                          <TxRow tx={tx}
+                            onPress={() => onOpenTx(tx)} last={i === arr.length - 1}
+                            dark={theme.dark} p={p} cats={cats} categories={categories} />
+                        </SwipeTxRow>
                       ))}
                     </View>
                   )
@@ -479,7 +544,6 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
           </View>
         </Animated.ScrollView>
 
-        <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
       </ImageBackground>
     </View>
   );
@@ -574,6 +638,84 @@ function ActivitySkeleton({ dark }: { dark: boolean }) {
   );
 }
 
+// ── SwipeBillRow ──────────────────────────────────────────────────
+function SwipeBillRow({ children, onPaid, onOpen, onClose }: {
+  children: React.ReactNode;
+  onPaid: () => void;
+  onOpen: (ref: Swipeable) => void;
+  onClose: () => void;
+}) {
+  const swipeRef = useRef<Swipeable>(null);
+  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
+    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
+    return (
+      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
+        <TouchableOpacity
+          onPress={onPaid}
+          style={[styles.paidAction, { marginLeft: 6 }]}
+        >
+          <Icon name="check" size={18} color="#FBF8FF" stroke={2.2} />
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
+  return (
+    <Swipeable
+      ref={swipeRef}
+      renderRightActions={renderRightActions}
+      friction={1}
+      overshootRight={false}
+      rightThreshold={30}
+      activeOffsetX={[-15, 15]}
+      failOffsetY={[-15, 15]}
+      onSwipeableWillOpen={() => onOpen(swipeRef.current!)}
+      onSwipeableClose={onClose}
+    >
+      {children}
+    </Swipeable>
+  );
+}
+
+// ── SwipeTxRow ────────────────────────────────────────────────────
+function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
+  children: React.ReactNode;
+  onDelete: () => void;
+  onOpen: (ref: Swipeable) => void;
+  onClose: () => void;
+}) {
+  const swipeRef = useRef<Swipeable>(null);
+  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
+    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
+    return (
+      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
+        <TouchableOpacity
+          onPress={() => { swipeRef.current?.close(); onDelete(); }}
+          style={[styles.deleteAction, { marginLeft: 6 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Delete transaction"
+        >
+          <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
+  return (
+    <Swipeable
+      ref={swipeRef}
+      renderRightActions={renderRightActions}
+      friction={1}
+      overshootRight={false}
+      rightThreshold={30}
+      activeOffsetX={[-15, 15]}
+      failOffsetY={[-15, 15]}
+      onSwipeableWillOpen={() => onOpen(swipeRef.current!)}
+      onSwipeableClose={onClose}
+    >
+      {children}
+    </Swipeable>
+  );
+}
+
 // ── TxRow ─────────────────────────────────────────────────────────
 const TxRow = React.memo(function TxRow({
   tx, onPress, last, dark, p, cats, categories,
@@ -589,10 +731,9 @@ const TxRow = React.memo(function TxRow({
   const cat = cats[tx.cat];
   const a11yLabel = `${tx.merchant}, ${cat?.label ?? 'transaction'}, ${tx.time}, $${tx.amount.toFixed(2)}`;
   return (
-    <TouchableOpacity
+    <GHTouchableOpacity
       onPress={onPress}
       activeOpacity={0.6}
-      delayPressIn={0}
       style={[styles.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
@@ -606,15 +747,14 @@ const TxRow = React.memo(function TxRow({
         <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
       <Text style={[styles.rowAmt, { color: p.text }]}>${tx.amount.toFixed(2)}</Text>
-    </TouchableOpacity>
+    </GHTouchableOpacity>
   );
 });
 
 // ── MoreMenuButton ────────────────────────────────────────────────
-// Native iOS dropdown menu. The trigger is rendered as a QuickAction-
-// styled label embedded in the SwiftUI Menu via RNHostView; tapping it
-// opens the platform menu with Button rows. Same visual rhythm as the
-// other three quick-actions, but the dropdown itself is fully native.
+// Uses @react-native-menu/menu (UIKit UIMenu) — visually identical to
+// SwiftUI Menu but without the SwiftUI Host lifecycle bug that broke
+// off-screen menus on app foreground.
 function MoreMenuButton({
   dark, p, shadow, onEditTheme, onAddRecurring,
 }: {
@@ -628,23 +768,27 @@ function MoreMenuButton({
   const circleBorder = dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
   const iconColor    = dark ? p.text : '#0E0C18';
   return (
-    <Host style={styles.qa} matchContents>
-      <Menu
-        label={
-          <RNHostView>
-            <View style={styles.qaInner}>
-              <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
-                <Icon name="ellipsis" size={20} color={iconColor} stroke={1.7} />
-              </View>
-              <Text style={[styles.qaLabel, { color: p.text }, shadow]}>More</Text>
-            </View>
-          </RNHostView>
-        }
-      >
-        <Button label="Edit theme" systemImage="paintbrush" onPress={onEditTheme} />
-        <Button label="Add recurring expense" systemImage="arrow.triangle.2.circlepath" onPress={onAddRecurring} />
-      </Menu>
-    </Host>
+    <MenuView
+      shouldOpenOnLongPress={false}
+      themeVariant={dark ? 'dark' : 'light'}
+      actions={[
+        { id: 'theme',     title: 'Edit theme',             image: 'paintbrush',                       imageColor: dark ? '#FFFFFF' : '#000000' },
+        { id: 'recurring', title: 'Add recurring expense',  image: 'arrow.triangle.2.circlepath',      imageColor: dark ? '#FFFFFF' : '#000000' },
+      ]}
+      onPressAction={({ nativeEvent }) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if      (nativeEvent.event === 'theme')     onEditTheme();
+        else if (nativeEvent.event === 'recurring') onAddRecurring();
+      }}
+      style={styles.qa}
+    >
+      <View style={styles.qaInner}>
+        <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
+          <Icon name="ellipsis" size={20} color={iconColor} stroke={1.7} />
+        </View>
+        <Text style={[styles.qaLabel, { color: p.text }, shadow]}>More</Text>
+      </View>
+    </MenuView>
   );
 }
 
@@ -695,6 +839,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 14,
+    height: 30,
   },
   heroStatusGroup: {
     flexDirection: 'row',
@@ -728,6 +873,24 @@ const styles = StyleSheet.create({
   },
   qa: {
     flex: 1,
+  },
+  monthPickerHost: {
+    height: 30,
+    width: 130,
+  },
+  monthPickerBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 5,
+    paddingVertical: 4,
+    paddingLeft: 8,
+    paddingRight: 2,
+  },
+  monthPickerText: {
+    ...TYPE.onMediaStatusSub,
+    fontWeight: '500',
   },
   qaInner: {
     alignItems: 'center',
@@ -800,6 +963,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 14,
+  },
+  paidAction: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#34C759',
+  },
+  deleteAction: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: OVER_DOT,
   },
   txRow: {
     flexDirection: 'row',

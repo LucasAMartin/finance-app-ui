@@ -94,11 +94,16 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
       <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
 
       <Pressable
-        onPress={onAdd}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onAdd();
+        }}
         pointerEvents="box-only"
+        accessibilityRole="button"
+        accessibilityLabel="Add expense"
         style={[styles.tabBtn, { backgroundColor: theme.accent.fill }]}
       >
-        <Icon name="mic" size={22} color={theme.accent.ink} stroke={1.8} />
+        <Icon name="plus" size={24} color={theme.accent.ink} stroke={2} />
       </Pressable>
     </View>
   );

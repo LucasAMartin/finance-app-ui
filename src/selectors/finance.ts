@@ -8,10 +8,30 @@ import {
   SEED_TRANSACTIONS,
   SEED_TREND,
 } from '../data';
-import type { Bill, Budget, Category, GroupKey, Income, RecurringRule, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
+import type { Bill, Budget, Category, CreateTransactionInput, GroupKey, Income, RecurringRule, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
 import type { PeriodData, TrendConfig } from './types';
 
 export type Period = 'Week' | 'Month' | 'Year';
+
+// Snapshot a transaction back into a create-input so a deleted row can be
+// re-created verbatim for undo. The new row gets a fresh id (invisible to the
+// user); `occurredAt` carries the original date/time so derived fields rebuild.
+export function txToCreateInput(t: Transaction): CreateTransactionInput {
+  return {
+    merchant: t.merchant,
+    cat: t.cat,
+    amount: t.amount,
+    type: t.type ?? 'expense',
+    note: t.note,
+    occurredAt: t.occurredAt,
+    recurring: t.recurring,
+    recurringRuleId: t.recurringRuleId,
+    visibility: t.visibility,
+    createdByUserId: t.createdByUserId,
+    updatedByUserId: t.updatedByUserId,
+    meta: t.meta,
+  };
+}
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
 
@@ -156,13 +176,14 @@ export function upcomingBillsFromRecurring(rules: RecurringRule[], categories: C
       const due = nextDueDate(rule, today);
       const daysUntil = Math.max(0, Math.ceil((startOfDay(due).getTime() - startOfDay(today).getTime()) / 86_400_000));
       const cat = categoryMap[rule.cat];
+      const partialPaid = (rule.meta?.partialPaid as number | undefined) ?? 0;
       return {
         id: `bill-${rule.id}`,
         name: rule.merchant,
         merchant: rule.merchant,
         icon: cat?.icon ?? 'repeat',
         cat: rule.cat,
-        amount: rule.amount,
+        amount: Math.max(0, rule.amount - partialPaid),
         dueDate: `${MONTHS[due.getMonth()]} ${due.getDate()}`,
         daysUntil,
         recurring: true,
@@ -171,6 +192,19 @@ export function upcomingBillsFromRecurring(rules: RecurringRule[], categories: C
       };
     })
     .sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+export function advanceDueDate(rule: RecurringRule): string {
+  const d = new Date(rule.nextDueDate);
+  if (rule.cadence === 'weekly') {
+    d.setDate(d.getDate() + 7);
+  } else if (rule.cadence === 'annual') {
+    d.setFullYear(d.getFullYear() + 1);
+  } else {
+    d.setMonth(d.getMonth() + 1);
+    if (rule.dayOfMonth) d.setDate(Math.min(rule.dayOfMonth, 28));
+  }
+  return d.toISOString();
 }
 
 function startOfDay(d: Date) {

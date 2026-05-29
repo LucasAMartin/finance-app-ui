@@ -17,7 +17,7 @@ import { pickerStyle, tag, tint, environment } from '@expo/ui/swift-ui/modifiers
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
-import { Theme } from '../theme';
+import { AccentKey, CardStyle, Theme, makeTheme } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import {
   WALLPAPER_TABS,
@@ -38,6 +38,24 @@ const TILE_W = (SCREEN_W - GRID_HPAD * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_CO
 // Wider source images letterbox top/bottom via resizeMode="contain", which
 // keeps the whole image visible without cropping.
 const TILE_H = TILE_W * (19.5 / 9);
+const APPEARANCE_OPTIONS: Array<{ label: string; dark: boolean }> = [
+  { label: 'Dark', dark: true },
+  { label: 'Light', dark: false },
+];
+const CARD_STYLE_OPTIONS: Array<{ label: string; key: CardStyle }> = [
+  { label: 'Flat', key: 'flat' },
+  { label: 'Shadow', key: 'shadow' },
+  { label: 'Glass', key: 'glass' },
+];
+const ACCENT_OPTIONS: Array<{ key: AccentKey; label: string }> = [
+  { key: 'sage', label: 'Sage' },
+  { key: 'butter', label: 'Butter' },
+  { key: 'sky', label: 'Sky' },
+  { key: 'rose', label: 'Rose' },
+  { key: 'plum', label: 'Plum' },
+  { key: 'ink', label: 'Ink' },
+  { key: 'wine', label: 'Wine' },
+];
 
 interface Props {
   theme: Theme;
@@ -46,12 +64,24 @@ interface Props {
 }
 
 export function ThemeScreen({ theme, visible, onClose }: Props) {
-  const { wallpaperId: currentId, setWallpaperId } = useTheme();
+  const {
+    dark,
+    setDark,
+    accentKey,
+    setAccentKey,
+    cardStyle,
+    setCardStyle,
+    wallpaperId: currentId,
+    setWallpaperId,
+  } = useTheme();
   const insets = useSafeAreaInsets();
 
   const initialTab = findTabForWallpaper(currentId).id;
 
   // Local selection state — only commit to context on Apply.
+  const [pendingDark, setPendingDark] = useState<boolean>(dark);
+  const [pendingAccent, setPendingAccent] = useState<AccentKey>(accentKey);
+  const [pendingCardStyle, setPendingCardStyle] = useState<CardStyle>(cardStyle);
   const [pendingId, setPendingId] = useState<string>(currentId);
   const [tabId, setTabId] = useState<string>(initialTab);
 
@@ -59,11 +89,14 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
   const wasVisible = React.useRef(visible);
   React.useEffect(() => {
     if (visible && !wasVisible.current) {
+      setPendingDark(dark);
+      setPendingAccent(accentKey);
+      setPendingCardStyle(cardStyle);
       setPendingId(currentId);
       setTabId(findTabForWallpaper(currentId).id);
     }
     wasVisible.current = visible;
-  }, [visible, currentId]);
+  }, [visible, dark, accentKey, cardStyle, currentId]);
 
   // Slide-up + fade animation.
   const anim = React.useRef(new Animated.Value(0)).current;
@@ -91,7 +124,14 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
   }, [pendingId]);
 
   const pWallpaper = makeP(true);
-  const dirty = pendingId !== currentId;
+  const dirty =
+    pendingId !== currentId ||
+    pendingDark !== dark ||
+    pendingAccent !== accentKey ||
+    pendingCardStyle !== cardStyle;
+
+  const appearanceIdx = Math.max(0, APPEARANCE_OPTIONS.findIndex(opt => opt.dark === pendingDark));
+  const cardStyleIdx = Math.max(0, CARD_STYLE_OPTIONS.findIndex(opt => opt.key === pendingCardStyle));
 
   const handleSelect = (w: Wallpaper) => {
     if (w.id === pendingId) return;
@@ -100,9 +140,12 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
   };
 
   const handleApply = () => {
+    if (pendingDark !== dark) setDark(pendingDark);
+    if (pendingAccent !== accentKey) setAccentKey(pendingAccent);
+    if (pendingCardStyle !== cardStyle) setCardStyle(pendingCardStyle);
     if (dirty) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setWallpaperId(pendingId);
+      if (pendingId !== currentId) setWallpaperId(pendingId);
     }
     onClose();
   };
@@ -194,6 +237,91 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
             }}
             showsVerticalScrollIndicator={false}
           >
+            <View style={styles.controlsWrap}>
+              <BlurView
+                intensity={theme.dark ? 70 : 100}
+                tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+                style={styles.controlsCard}
+              >
+                <View style={[styles.controlsCardBorder, { borderColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)' }]}>
+                  <View style={styles.controlBlock}>
+                    <Text style={[styles.controlLabel, { color: pWallpaper.textSec }]}>Appearance</Text>
+                    <Host matchContents>
+                      <Picker
+                        selection={appearanceIdx}
+                        onSelectionChange={(val) => {
+                          const next = APPEARANCE_OPTIONS[Number(val)];
+                          if (next) setPendingDark(next.dark);
+                        }}
+                        modifiers={[
+                          pickerStyle('segmented'),
+                          tint(makeTheme(pendingDark, pendingAccent, pendingCardStyle).accent.dot),
+                          environment({ key: 'colorScheme', value: 'dark' }),
+                        ]}
+                      >
+                        {APPEARANCE_OPTIONS.map((opt, idx) => (
+                          <SwiftText key={opt.label} modifiers={[tag(idx)]}>
+                            {opt.label}
+                          </SwiftText>
+                        ))}
+                      </Picker>
+                    </Host>
+                  </View>
+
+                  <View style={styles.controlBlock}>
+                    <Text style={[styles.controlLabel, { color: pWallpaper.textSec }]}>Card style</Text>
+                    <Host matchContents>
+                      <Picker
+                        selection={cardStyleIdx}
+                        onSelectionChange={(val) => {
+                          const next = CARD_STYLE_OPTIONS[Number(val)];
+                          if (next) setPendingCardStyle(next.key);
+                        }}
+                        modifiers={[
+                          pickerStyle('segmented'),
+                          tint(makeTheme(pendingDark, pendingAccent, pendingCardStyle).accent.dot),
+                          environment({ key: 'colorScheme', value: 'dark' }),
+                        ]}
+                      >
+                        {CARD_STYLE_OPTIONS.map((opt, idx) => (
+                          <SwiftText key={opt.key} modifiers={[tag(idx)]}>
+                            {opt.label}
+                          </SwiftText>
+                        ))}
+                      </Picker>
+                    </Host>
+                  </View>
+
+                  <View style={styles.controlBlock}>
+                    <Text style={[styles.controlLabel, { color: pWallpaper.textSec }]}>Accent</Text>
+                    <View style={styles.accentRow}>
+                      {ACCENT_OPTIONS.map(opt => {
+                        const isActive = pendingAccent === opt.key;
+                        const previewTheme = makeTheme(pendingDark, opt.key, pendingCardStyle);
+                        return (
+                          <Pressable
+                            key={opt.key}
+                            onPress={() => setPendingAccent(opt.key)}
+                            style={[
+                              styles.accentSwatch,
+                              {
+                                backgroundColor: previewTheme.accent.dot,
+                                borderColor: isActive ? '#FFFFFF' : 'rgba(255,255,255,0.30)',
+                                borderWidth: isActive ? 2 : StyleSheet.hairlineWidth,
+                              },
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Set accent ${opt.label}`}
+                            accessibilityState={{ selected: isActive }}
+                          />
+                        );
+                      })}
+                    </View>
+                  </View>
+                </View>
+              </BlurView>
+            </View>
+
             {/* ─── Native segmented tabs ────────────────────── */}
             <View style={styles.segmentWrap}>
               <Host matchContents>
@@ -300,10 +428,9 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
 }
 
 // ── Tile ──────────────────────────────────────────────────────────
-// We size the <Image> at its intrinsic aspect ratio (resolved from the
-// asset registry), then center it inside the fixed-size tile. This is
-// rock-solid: every wallpaper is shown whole, regardless of source aspect,
-// without depending on resizeMode quirks.
+// The tile preview is an inspection surface, so it should always show the
+// whole wallpaper. `contain` avoids crop/zoom surprises from large or
+// progressive JPEG assets while the fixed tile background handles letterbox.
 function Tile({
   wallpaper,
   selected,
@@ -319,16 +446,6 @@ function Tile({
   accentInk: string;
   onPress: () => void;
 }) {
-  const dims = Image.resolveAssetSource(wallpaper.source);
-  const srcAspect = dims && dims.width > 0 && dims.height > 0
-    ? dims.width / dims.height
-    : 9 / 19.5;
-  const tileAspect = TILE_W / TILE_H;
-  const imgStyle =
-    srcAspect > tileAspect
-      ? { width: '100%' as const, aspectRatio: srcAspect }
-      : { height: '100%' as const, aspectRatio: srcAspect };
-
   const borderColor = selected
     ? accentFill
     : dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
@@ -348,7 +465,7 @@ function Tile({
       accessibilityLabel={wallpaper.name}
       accessibilityState={{ selected }}
     >
-      <Image source={wallpaper.source} style={imgStyle} />
+      <Image source={wallpaper.source} resizeMode="contain" style={styles.tileImage} />
       {selected && (
         <View style={[styles.checkBadge, { backgroundColor: accentFill }]}>
           <Icon name="plus" size={14} color={accentInk} stroke={2.4} />
@@ -406,6 +523,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: GRID_HPAD,
     marginBottom: 18,
   },
+  controlsWrap: {
+    paddingHorizontal: GRID_HPAD,
+    marginBottom: 16,
+  },
+  controlsCard: {
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
+  controlsCardBorder: {
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  controlBlock: {
+    gap: 8,
+  },
+  controlLabel: {
+    ...TYPE.captionEm,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    opacity: 0.92,
+  },
+  accentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    paddingTop: 2,
+    paddingBottom: 2,
+  },
+  accentSwatch: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
 
   gridStack: {
     position: 'relative',
@@ -431,6 +585,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(14,12,24,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tileImage: {
+    width: '100%',
+    height: '100%',
   },
   checkBadge: {
     position: 'absolute',

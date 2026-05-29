@@ -11,6 +11,9 @@
   "dependencies": {
     "@expo-google-fonts/inter": "^0.2.3",
     "@expo/ui": "~55.0.17",
+    "@react-native-masked-view/masked-view": "0.3.2",
+    "@react-native-menu/menu": "^2.0.0",
+    "@react-native-segmented-control/segmented-control": "2.5.7",
     "expo": "^55.0.25",
     "expo-blur": "~55.0.14",
     "expo-dev-client": "~55.0.35",

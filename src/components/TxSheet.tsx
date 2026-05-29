@@ -1,61 +1,54 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput, ScrollView, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
-import { presentationDetents, presentationDragIndicator, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { BottomSheet, DatePicker, Group, Host, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
+import { background, controlSize, datePickerStyle, fixedSize, font, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 
 const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
 const DETENT_LARGE: PresentationDetent = 'large';
 const DETENTS: PresentationDetent[] = [DETENT_DEFAULT, DETENT_LARGE];
+const DATE_PICKER_EXPANDED_HEIGHT = 236;
 
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
-import { Money } from './shared';
+import { Money, SheetPrimaryButton } from './shared';
 import { Theme, catPastel, GROUP_COLORS, OVER_DOT } from '../theme';
 import { TYPE } from '../typography';
 
-const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
-  needs: { label: 'Needs', icon: 'home' },
-  wants: { label: 'Wants', icon: 'sparkle' },
-  savings: { label: 'Savings', icon: 'wallet' },
+const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
+const GROUP_LABELS: Record<GroupKey, string> = {
+  needs: 'Needs',
+  wants: 'Wants',
+  savings: 'Savings',
 };
 
-const dateDraftFromIso = (iso?: string) => {
+const dateFromIso = (iso?: string) => {
   const d = iso ? new Date(iso) : new Date();
-  if (Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return Number.isNaN(d.getTime()) ? new Date() : d;
 };
 
-const timeDraftFromIso = (iso?: string) => {
-  const d = iso ? new Date(iso) : new Date();
-  if (Number.isNaN(d.getTime())) return '';
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
-
-const parseOccurredAtDraft = (dateDraft: string, timeDraft: string, fallback?: string) => {
-  const mDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateDraft.trim());
-  const mTime = /^(\d{1,2}):(\d{2})$/.exec(timeDraft.trim());
-  if (!mDate || !mTime) return fallback;
-  const year = Number(mDate[1]);
-  const month = Number(mDate[2]) - 1;
-  const day = Number(mDate[3]);
-  const hour = Number(mTime[1]);
-  const minute = Number(mTime[2]);
-  if (hour > 23 || minute > 59) return fallback;
-  const d = new Date(year, month, day, hour, minute, 0, 0);
-  return Number.isNaN(d.getTime()) ? fallback : d.toISOString();
-};
+const formatOccurredAt = (d: Date) =>
+  new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(d);
 
 export function TxSheet({
   tx,
   theme,
   onClose,
+  onDeleted,
 }: {
   tx: Transaction | null;
   theme: Theme;
   onClose: () => void;
+  onDeleted?: (tx: Transaction) => void;
 }) {
   const { transactionsRepo, categoriesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
@@ -71,9 +64,8 @@ export function TxSheet({
   const [editMerchant, setEditMerchant] = useState('');
   const [editNote, setEditNote] = useState('');
   const [editAmt, setEditAmt] = useState('');
-  const [editDate, setEditDate] = useState('');
-  const [editTime, setEditTime] = useState('');
-  const editAnim = useRef(new Animated.Value(0)).current;
+  const [editOccurredAt, setEditOccurredAt] = useState<Date>(new Date());
+  const [datePickerInlineOpen, setDatePickerInlineOpen] = useState(false);
 
   useEffect(() => {
     if (tx !== null) {
@@ -82,26 +74,12 @@ export function TxSheet({
       setEditMerchant(tx.merchant);
       setEditNote(tx.note ?? '');
       setEditAmt(tx.amount.toFixed(2));
-      setEditDate(dateDraftFromIso(tx.occurredAt));
-      setEditTime(timeDraftFromIso(tx.occurredAt));
+      setEditOccurredAt(dateFromIso(tx.occurredAt));
+      setDatePickerInlineOpen(false);
     }
   }, [tx]);
 
   const isExpanded = detent === DETENT_LARGE;
-
-  useEffect(() => {
-    if (isExpanded) {
-      Animated.timing(editAnim, {
-        toValue: 1,
-        duration: 250,
-        delay: 0,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }).start();
-    } else {
-      editAnim.setValue(0);
-    }
-  }, [isExpanded]);
 
   const saveEdit = () => {
     if (!t) return;
@@ -112,7 +90,7 @@ export function TxSheet({
       cat: editCat,
       merchant: editMerchant.trim() || t.merchant,
       note: editNote,
-      occurredAt: parseOccurredAtDraft(editDate, editTime, t.occurredAt),
+      occurredAt: Number.isNaN(editOccurredAt.getTime()) ? t.occurredAt : editOccurredAt.toISOString(),
       recurring: t.recurring,
       type: t.type ?? 'expense',
       recurringRuleId: t.recurringRuleId,
@@ -127,65 +105,66 @@ export function TxSheet({
   const deleteTx = () => {
     if (!t) return;
     transactionsRepo.delete(t.id);
+    onDeleted?.(t);
     onClose();
   };
 
   return (
-    <Host style={{ width: 0, height: 0, position: 'absolute' }}>
-        <BottomSheet
-          isPresented={tx !== null}
-          onIsPresentedChange={(v) => { if (!v) onClose(); }}
-        >
-          <Group modifiers={[
-            presentationDetents(DETENTS, { selection: detent, onSelectionChange: setDetent }),
-            presentationDragIndicator('visible'),
-            environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-          ]}>
-            <RNHostView>
-              <View style={[S.content, {
-                backgroundColor: theme.dark ? 'rgba(14,12,26,0.89)' : 'rgba(255,255,255,0.40)',
-              }]}>
-                {t && (
-                  <>
-                    {!isExpanded && (
-                      <Pressable
-                        onPress={onClose}
-                        pointerEvents="box-only"
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        style={[S.closeBtn, { backgroundColor: theme.chipBg }]}
-                      >
-                        <Icon name="close" size={15} color={theme.textSec} />
-                      </Pressable>
-                    )}
-                    <ScrollView
-                      bounces={false}
-                      showsVerticalScrollIndicator={false}
-                      scrollEnabled={false}
-                      keyboardShouldPersistTaps="handled"
-                      contentContainerStyle={{
-                        flexGrow: 1,
-                        justifyContent: isExpanded ? 'center' : 'flex-start',
-                        paddingBottom: Math.max(insets.bottom, 16) + 12,
-                      }}
-                    >
-                      <SheetBody tx={t} transactions={transactions} theme={theme} isExpanded={isExpanded} cats={cats} categories={categories} />
+    <>
+      <Host style={{ width: 0, height: 0, position: 'absolute' }}>
+          <BottomSheet
+            isPresented={tx !== null}
+            onIsPresentedChange={(v) => { if (!v) onClose(); }}
+          >
+            <Group modifiers={[
+              presentationDetents(DETENTS, { selection: detent, onSelectionChange: setDetent }),
+              presentationDragIndicator('visible'),
+              environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+              background(theme.surface),
+            ]}>
+              <RNHostView>
+                <View style={[S.content, {
+                  backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
+                }]}>
+                  {t && (
+                    <>
                       {!isExpanded && (
                         <Pressable
-                          onPress={() => setDetent(DETENT_LARGE)}
+                          onPress={onClose}
                           pointerEvents="box-only"
-                          style={S.expandHint}
-                          accessibilityRole="button"
-                          accessibilityLabel="Edit transaction"
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          style={[S.closeBtn, { backgroundColor: theme.chipBg }]}
                         >
-                          <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
-                          <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
+                          <Icon name="close" size={15} color={theme.textSec} />
                         </Pressable>
                       )}
-                      {isExpanded && (
-                        <Animated.View style={{
-                          opacity: editAnim,
-                          transform: [{ translateY: editAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }],
-                        }}>
+                      <ScrollView
+                        bounces={false}
+                        showsVerticalScrollIndicator={false}
+                        scrollEnabled={false}
+                        keyboardShouldPersistTaps="handled"
+                        contentContainerStyle={{
+                          flexGrow: 1,
+                          justifyContent: isExpanded ? 'flex-start' : 'center',
+                          paddingBottom: Math.max(insets.bottom, 16) + 12,
+                        }}
+                      >
+                        <SheetBody tx={t} transactions={transactions} theme={theme} isExpanded={isExpanded} cats={cats} categories={categories} />
+                        {!isExpanded ? (
+                          <View>
+                            <CompactSummary tx={t} transactions={transactions} theme={theme} cats={cats} categories={categories} />
+                            <Pressable
+                              onPress={() => setDetent(DETENT_LARGE)}
+                              pointerEvents="box-only"
+                              style={S.expandHint}
+                              accessibilityRole="button"
+                              accessibilityLabel="Edit transaction"
+                            >
+                              <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
+                              <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
+                            </Pressable>
+                          </View>
+                        ) : (
                           <EditSection
                             theme={theme}
                             editCat={editCat}
@@ -196,25 +175,25 @@ export function TxSheet({
                             setEditNote={setEditNote}
                             editAmt={editAmt}
                             setEditAmt={setEditAmt}
-                            editDate={editDate}
-                            setEditDate={setEditDate}
-                            editTime={editTime}
-                            setEditTime={setEditTime}
+                            editOccurredAt={editOccurredAt}
+                            datePickerInlineOpen={datePickerInlineOpen}
+                            onToggleDatePicker={() => setDatePickerInlineOpen(v => !v)}
+                            onDateChange={setEditOccurredAt}
                             cats={cats}
                             categories={categories}
                             onSave={saveEdit}
                             onDelete={deleteTx}
                           />
-                        </Animated.View>
-                      )}
-                    </ScrollView>
-                  </>
-                )}
-              </View>
-            </RNHostView>
-          </Group>
-        </BottomSheet>
-    </Host>
+                        )}
+                      </ScrollView>
+                    </>
+                  )}
+                </View>
+              </RNHostView>
+            </Group>
+          </BottomSheet>
+      </Host>
+    </>
   );
 }
 
@@ -236,116 +215,150 @@ function SheetBody({
   const cat = cats[tx.cat];
   const color = catPastel(tx.cat, theme.dark);
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
+
+  return (
+    <View style={[S.hero, isExpanded && S.heroCompact]}>
+      <View style={[S.catCircle, isExpanded && S.catCircleCompact, { backgroundColor: color + '42' }]}>
+        <Icon name={cat?.icon ?? 'tag'} size={isExpanded ? 18 : 24} color={groupColor} stroke={1.5} />
+      </View>
+      <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
+      <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
+        {cat?.label}
+        <Text style={{ color: theme.textTer }}> · </Text>
+        {tx.fullDate}
+        <Text style={{ color: theme.textTer }}> · </Text>
+        {tx.time}
+      </Text>
+      <View style={{ marginTop: isExpanded ? 12 : 18 }}>
+        <Money value={tx.amount} size={isExpanded ? 28 : 32} weight="600" prefix="−$" theme={theme} />
+      </View>
+    </View>
+  );
+}
+
+function CompactSummary({
+  tx,
+  transactions,
+  theme,
+  cats,
+  categories,
+}: {
+  tx: Transaction;
+  transactions: Transaction[];
+  theme: Theme;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
+}) {
+  const cat = cats[tx.cat];
+  const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const catTotal = transactions.filter(x => x.cat === tx.cat).reduce((s, x) => s + x.amount, 0);
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
 
   return (
     <>
-      <View style={[S.hero, isExpanded && S.heroCompact]}>
-        <View style={[S.catCircle, isExpanded && S.catCircleCompact, { backgroundColor: color + '42' }]}>
-          <Icon name={cat?.icon ?? 'tag'} size={isExpanded ? 18 : 24} color={groupColor} stroke={1.5} />
+      {tx.note ? (
+        <View style={[S.noteRow, { backgroundColor: theme.chipBg }]}>
+          <Text style={[S.noteLabel, { color: theme.textSec }]}>Note</Text>
+          <Text style={[S.noteValue, { color: theme.text }]}>{tx.note}</Text>
         </View>
-        <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
-        <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
-          {cat?.label}
-          <Text style={{ color: theme.textTer }}> · </Text>
-          {tx.fullDate}
-          <Text style={{ color: theme.textTer }}> · </Text>
-          {tx.time}
-        </Text>
-        <View style={{ marginTop: isExpanded ? 12 : 18 }}>
-          <Money value={tx.amount} size={isExpanded ? 28 : 32} weight="600" prefix="−$" theme={theme} />
+      ) : null}
+      <View style={S.budgetBlock}>
+        <View style={S.usageRow}>
+          <Text style={[S.usageLabel, { color: theme.textSec }]}>{cat?.label} this month</Text>
+          <Text style={[S.usageAmount, { color: theme.textSec }]}>
+            <Text style={[TYPE.bodySmEm, { color: theme.text }]}>${catTotal.toFixed(0)}</Text>
+            {' of $'}{catBudget}
+          </Text>
+        </View>
+        <View style={[S.bar, { backgroundColor: theme.hairline }]}>
+          <View style={[S.barFill, { width: `${catPct}%` as any, backgroundColor: groupColor }]} />
         </View>
       </View>
-
-      {!isExpanded && (
-        <>
-          {tx.note ? (
-            <View style={[S.noteRow, { backgroundColor: theme.chipBg }]}>
-              <Text style={[S.noteLabel, { color: theme.textSec }]}>Note</Text>
-              <Text style={[S.noteValue, { color: theme.text }]}>{tx.note}</Text>
-            </View>
-          ) : null}
-          <View style={S.budgetBlock}>
-            <View style={S.usageRow}>
-              <Text style={[S.usageLabel, { color: theme.textSec }]}>{cat?.label} this month</Text>
-              <Text style={[S.usageAmount, { color: theme.textSec }]}>
-                <Text style={[TYPE.bodySmEm, { color: theme.text }]}>${catTotal.toFixed(0)}</Text>
-                {' of $'}{catBudget}
-              </Text>
-            </View>
-            <View style={[S.bar, { backgroundColor: theme.hairline }]}>
-              <View style={[S.barFill, { width: `${catPct}%` as any, backgroundColor: groupColor }]} />
-            </View>
-          </View>
-        </>
-      )}
     </>
   );
 }
 
 function EditSection({
   theme, editCat, setEditCat, editMerchant, setEditMerchant,
-  editNote, setEditNote, editAmt, setEditAmt, editDate, setEditDate,
-  editTime, setEditTime, cats, categories, onSave, onDelete,
+  editNote, setEditNote, editAmt, setEditAmt, editOccurredAt, datePickerInlineOpen, onToggleDatePicker, onDateChange,
+  cats, categories, onSave, onDelete,
 }: {
   theme: Theme;
   editCat: string; setEditCat: (v: string) => void;
   editMerchant: string; setEditMerchant: (v: string) => void;
   editNote: string; setEditNote: (v: string) => void;
   editAmt: string; setEditAmt: (v: string) => void;
-  editDate: string; setEditDate: (v: string) => void;
-  editTime: string; setEditTime: (v: string) => void;
+  editOccurredAt: Date;
+  datePickerInlineOpen: boolean;
+  onToggleDatePicker: () => void;
+  onDateChange: (v: Date) => void;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
   onSave: () => void;
   onDelete: () => void;
 }) {
-  const grouped = (['needs', 'wants', 'savings'] as GroupKey[]).map(key => ({
-    key,
-    ...GROUP_META[key],
-    cats: categories.filter(cat => cat.group === key && !cat.archived),
-  }));
+  const selectedGroup = categoryGroupFor(editCat, categories);
+  const selectedGroupIdx = Math.max(0, GROUP_KEYS.indexOf(selectedGroup));
+  const subcats = categories.filter(cat => cat.group === selectedGroup && !cat.archived);
+  const selectedSubIdx = Math.max(0, subcats.findIndex(cat => cat.id === editCat));
+  const groupColors: Record<GroupKey, string> = {
+    needs: theme.dark ? GROUP_COLORS.needs.dark : GROUP_COLORS.needs.light,
+    wants: theme.dark ? GROUP_COLORS.wants.dark : GROUP_COLORS.wants.light,
+    savings: theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light,
+  };
+  const selectedGroupColor = groupColors[selectedGroup] ?? theme.accent.dot;
 
   return (
     <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
       <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
         <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={[TYPE.subsectionTitle, { fontWeight: '500', color: theme.textSec, marginRight: 1 }]}>$</Text>
+          <View style={S.amountEditor}>
             <TextInput
               value={editAmt}
               onChangeText={setEditAmt}
               keyboardType="decimal-pad"
               selectTextOnFocus
-              style={[S.fieldInput, { color: theme.text }]}
+              style={[S.fieldInput, S.amountInput, { color: theme.text }]}
             />
           </View>
         </View>
-        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Date</Text>
-          <TextInput
-            value={editDate}
-            onChangeText={setEditDate}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={theme.textTer}
-            keyboardType="numbers-and-punctuation"
-            style={[S.fieldInput, { color: theme.text, flex: 1 }]}
-          />
-        </View>
-        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Time</Text>
-          <TextInput
-            value={editTime}
-            onChangeText={setEditTime}
-            placeholder="HH:MM"
-            placeholderTextColor={theme.textTer}
-            keyboardType="numbers-and-punctuation"
-            style={[S.fieldInput, { color: theme.text, flex: 1 }]}
-          />
-        </View>
+        <Pressable
+          onPress={onToggleDatePicker}
+          style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
+        >
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Date & time</Text>
+          <View style={S.dateTimeEditor}>
+            <Text style={[S.fieldInput, { color: theme.text }]}>{formatOccurredAt(editOccurredAt)}</Text>
+          </View>
+        </Pressable>
+        {datePickerInlineOpen ? (
+          <View
+            style={[
+              S.inlineDatePickerClip,
+              {
+                height: DATE_PICKER_EXPANDED_HEIGHT,
+                borderBottomColor: theme.sep,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+              },
+            ]}
+          >
+            <View style={S.inlineDatePickerWrap}>
+              <Host matchContents>
+                <DatePicker
+                  selection={editOccurredAt}
+                  onDateChange={onDateChange}
+                  displayedComponents={['date', 'hourAndMinute']}
+                  modifiers={[
+                    datePickerStyle('wheel'),
+                    environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                  ]}
+                />
+              </Host>
+            </View>
+          </View>
+        ) : null}
         <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Merchant</Text>
           <TextInput
@@ -353,6 +366,7 @@ function EditSection({
             onChangeText={setEditMerchant}
             placeholder="Merchant name"
             placeholderTextColor={theme.textTer}
+            clearButtonMode="while-editing"
             style={[S.fieldInput, { color: theme.text, flex: 1 }]}
           />
         </View>
@@ -369,70 +383,72 @@ function EditSection({
       </View>
 
       {/* Category picker */}
-      <Text style={[S.editTitle, { color: theme.textTer, marginTop: 20 }]}>Category</Text>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        {grouped.map(g => {
-          const activeGroup = categoryGroupFor(editCat, categories);
-          const isActive = activeGroup === g.key;
-          const color = theme.dark ? GROUP_COLORS[g.key].dark : GROUP_COLORS[g.key].light;
-          const defaultCat = g.cats[0]?.id ?? editCat;
-          return (
-            <View key={g.key} style={{ flex: 1 }}>
-              <Pressable
-                onPress={() => setEditCat(defaultCat)}
-                pointerEvents="box-only"
-                style={[S.groupHeader, {
-                  backgroundColor: isActive ? color + '20' : theme.surface,
-                  borderColor: isActive ? color + '80' : theme.hairline,
-                }]}
+      <View
+        style={[
+          S.categoryPanel,
+          {
+            backgroundColor: theme.chipBg,
+            borderColor: theme.hairline,
+            marginTop: 20,
+          },
+        ]}
+      >
+        <SegmentedControl
+          values={GROUP_KEYS.map(key => GROUP_LABELS[key])}
+          selectedIndex={selectedGroupIdx}
+          onChange={(e) => {
+            const nextGroup = GROUP_KEYS[e.nativeEvent.selectedSegmentIndex];
+            if (!nextGroup) return;
+            const nextSubcats = categories.filter(cat => cat.group === nextGroup && !cat.archived);
+            if (nextSubcats.length === 0) return;
+            const nextKeep = nextSubcats.find(cat => cat.id === editCat);
+            setEditCat((nextKeep ?? nextSubcats[0]).id);
+          }}
+          tintColor={theme.accent.dot}
+          appearance={theme.dark ? 'dark' : 'light'}
+          style={S.groupSegmented}
+        />
+
+        <View style={[S.subcategoryRow, { borderTopColor: theme.hairline }]}>
+          <Text style={[S.fieldLabel, { color: theme.textSec }]}>Subcategory</Text>
+          {subcats.length > 0 ? (
+            <Host matchContents>
+              <Picker
+                selection={selectedSubIdx}
+                onSelectionChange={(val) => {
+                  const idx = Number(val);
+                  const next = subcats[idx];
+                  if (next) setEditCat(next.id);
+                }}
+                modifiers={[
+                  pickerStyle('menu'),
+                  tint(theme.text),
+                  controlSize('small'),
+                  font({ size: 15, weight: 'medium' }),
+                  environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                  fixedSize({ horizontal: true, vertical: false }),
+                ]}
               >
-                <View style={[S.groupHeaderIcon, {
-                  backgroundColor: isActive ? color + '30' : theme.chipBg,
-                }]}>
-                  <Icon name={g.icon} size={13} color={isActive ? color : theme.textTer} stroke={1.6} />
-                </View>
-                <Text style={[
-                  isActive ? TYPE.captionEm : TYPE.caption,
-                  { color: isActive ? theme.text : theme.textSec },
-                ]}>
-                  {g.label}
-                </Text>
-              </Pressable>
-              <View style={S.subcatList}>
-                {g.cats.map(cat => {
-                  const c = cats[cat.id] ?? cat;
-                  const isActiveCat = editCat === cat.id;
-                  return (
-                    <Pressable
-                      key={cat.id}
-                      onPress={() => setEditCat(cat.id)}
-                      pointerEvents="box-only"
-                      style={[S.subcatRow, { backgroundColor: isActiveCat ? theme.text : 'transparent' }]}
-                    >
-                      <Icon name={c.icon} size={12} color={isActiveCat ? theme.bg : theme.textTer} stroke={1.5} />
-                      <Text style={[
-                        isActiveCat ? TYPE.captionEm : TYPE.caption,
-                        { color: isActiveCat ? theme.bg : theme.textSec, marginLeft: 5 },
-                      ]}>
-                        {c.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          );
-        })}
+                {subcats.map((cat, idx) => (
+                  <SwiftText key={cat.id} modifiers={[tag(idx)]}>
+                    {cats[cat.id]?.label ?? cat.label}
+                  </SwiftText>
+                ))}
+              </Picker>
+            </Host>
+          ) : (
+            <Text style={[TYPE.bodySm, { color: theme.textTer }]}>No subcategories</Text>
+          )}
+        </View>
       </View>
 
       {/* Save */}
-      <Pressable
+      <SheetPrimaryButton
+        label="Save changes"
         onPress={onSave}
-        pointerEvents="box-only"
-        style={[S.saveBtn, { backgroundColor: theme.text }]}
-      >
-        <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save changes</Text>
-      </Pressable>
+        theme={theme}
+        style={S.saveBtn}
+      />
       <Pressable
         onPress={onDelete}
         pointerEvents="box-only"
@@ -543,38 +559,53 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 13,
+    minHeight: 50,
+    paddingVertical: 11,
     paddingHorizontal: 16,
     gap: 12,
   },
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
-  groupHeader: {
+  amountEditor: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 5,
-    marginBottom: 5,
+    justifyContent: 'flex-end',
   },
-  groupHeaderIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
+  amountInput: {
+    minWidth: 84,
+    textAlign: 'right',
   },
-  subcatList: { height: 90 },
-  subcatRow: {
+  dateTimeEditor: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  inlineDatePickerClip: {
+    overflow: 'hidden',
+  },
+  inlineDatePickerWrap: {
+    paddingHorizontal: 10,
     paddingVertical: 6,
-    paddingHorizontal: 7,
-    borderRadius: 8,
-    marginBottom: 2,
+  },
+  categoryPanel: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  groupSegmented: {
+    marginHorizontal: 12,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  subcategoryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   saveBtn: {
     marginTop: 28,

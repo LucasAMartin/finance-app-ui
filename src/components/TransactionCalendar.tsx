@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Picker, Text as SwiftText, Host } from '@expo/ui/swift-ui';
-import { pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { MenuView } from '@react-native-menu/menu';
 import { Theme } from '../theme';
 import { categoryGroupColor } from '../repositories/categoryUtils';
 import type { Category } from '../repositories/types';
@@ -61,6 +60,65 @@ function resolveColors(theme: Theme, override?: CalOverrideColors) {
   };
 }
 
+// ── Nav chevron ─────────────────────────────────────────────────────────────────
+
+const EASE_OUT_EXPO = Easing.bezier(0.16, 1, 0.3, 1);
+
+function NavChevron({
+  dir, onPress, color, tint, label,
+}: {
+  dir: 'chevL' | 'chevR';
+  onPress: () => void;
+  color: string;
+  tint: string;
+  label: string;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const [pressed, setPressed] = useState(false);
+
+  const pressIn = () => {
+    setPressed(true);
+    Animated.timing(scale, {
+      toValue: 0.86,
+      duration: 80,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.cubic),
+    }).start();
+  };
+  const pressOut = () => {
+    setPressed(false);
+    Animated.timing(scale, {
+      toValue: 1,
+      duration: 280,
+      useNativeDriver: true,
+      easing: EASE_OUT_EXPO,
+    }).start();
+  };
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      pointerEvents="box-only"
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={[styles.navBtn, { backgroundColor: 'transparent' }]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Animated.View
+        style={[
+          styles.navHit,
+          { transform: [{ scale }] },
+          pressed && { backgroundColor: tint, opacity: 0.55 },
+        ]}
+      >
+        <Icon name={dir} size={20} color={color} stroke={1.6} />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
 export function TransactionCalendar({
@@ -114,46 +172,45 @@ export function TransactionCalendar({
     <View>
       {/* ── Header: [←] [Month Year ↓] [→] ── */}
       <View style={styles.headerRow}>
-        <Pressable
+        <NavChevron
+          dir="chevL"
           onPress={prevMonth}
-          pointerEvents="box-only"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={[styles.navBtn, { backgroundColor: 'transparent' }]}
-          accessibilityRole="button"
-          accessibilityLabel="Previous month"
+          color={clr.textSec}
+          tint={clr.text + '14'}
+          label="Previous month"
+        />
+
+        <MenuView
+          shouldOpenOnLongPress={false}
+          themeVariant={theme.dark ? 'dark' : 'light'}
+          actions={[viewYear, viewYear - 1, viewYear - 2].flatMap(y =>
+            MONTH_NAMES.map((name, m) => ({
+              id: `${y}-${m}`,
+              title: `${name} ${y}`,
+              state: (y === viewYear && m === viewMonth ? 'on' : 'off') as 'on' | 'off',
+            }))
+          )}
+          onPressAction={({ nativeEvent }) => {
+            const [y, m] = nativeEvent.event.split('-').map(Number);
+            navigateToMonth(y, m);
+          }}
+          style={{ flex: 1, height: 44 }}
         >
-          <Icon name="chevL" size={18} color={clr.textSec} stroke={1.6} />
-        </Pressable>
+          <View style={styles.monthPickerBtn}>
+            <Text style={[styles.monthTitle, { color: clr.text }]}>
+              {MONTH_NAMES[viewMonth]} {viewYear}
+            </Text>
+            <Icon name="chevDown" size={11} color={clr.textSec} stroke={2} />
+          </View>
+        </MenuView>
 
-        <Host style={{ flex: 1, height: 44 }}>
-          <Picker
-            selection={`${viewYear}-${viewMonth}`}
-            onSelectionChange={(val) => {
-              const [y, m] = (val as string).split('-').map(Number);
-              navigateToMonth(y, m);
-            }}
-            modifiers={[pickerStyle('menu'), tint(clr.text)]}
-          >
-            {[viewYear, viewYear - 1, viewYear - 2].flatMap(y =>
-              MONTH_NAMES.map((name, m) => (
-                <SwiftText key={`${y}-${m}`} modifiers={[tag(`${y}-${m}`)]}>
-                  {name} {y}
-                </SwiftText>
-              ))
-            )}
-          </Picker>
-        </Host>
-
-        <Pressable
+        <NavChevron
+          dir="chevR"
           onPress={nextMonth}
-          pointerEvents="box-only"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={[styles.navBtn, { backgroundColor: 'transparent' }]}
-          accessibilityRole="button"
-          accessibilityLabel="Next month"
-        >
-          <Icon name="chevR" size={18} color={clr.textSec} stroke={1.6} />
-        </Pressable>
+          color={clr.textSec}
+          tint={clr.text + '14'}
+          label="Next month"
+        />
       </View>
 
       <>
@@ -232,8 +289,19 @@ const styles = StyleSheet.create({
     width: 44, height: 44,
     alignItems: 'center', justifyContent: 'center',
   },
+  navHit: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+  },
   monthTitle: {
     fontSize: 16, fontWeight: '700', letterSpacing: -0.3,
+  },
+  monthPickerBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
   row: { flexDirection: 'row' },
   cell: {

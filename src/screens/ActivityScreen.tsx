@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Easing,
   ImageBackground,
-  PanResponder,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,32 +12,46 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {
+  Swipeable,
+  ScrollView as GHScrollView,
+} from 'react-native-gesture-handler';
+
+const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BottomSheet, Group, Host, RNHostView, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
-import { presentationDetents, presentationDragIndicator, pickerStyle, tag, tint, fixedSize, environment } from '@expo/ui/swift-ui/modifiers';
+import { background, presentationDetents, presentationDragIndicator, pickerStyle, tag, tint, fixedSize, environment } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Bill, Category, Transaction } from '../repositories/types';
-import { upcomingBillsFromRecurring } from '../selectors/finance';
+import { txToCreateInput, upcomingBillsFromRecurring } from '../selectors/finance';
+import type { ActivityInitialFilter } from '../selectors/spending';
 
 const CALENDAR_YEAR  = 2026;
 const CALENDAR_MONTH = 4; // 0-indexed → May
+const CALENDAR_COLLAPSE_FALLBACK_HEIGHT = 430;
+const MINI_CALENDAR_COLLAPSE_FALLBACK_HEIGHT = 360;
+const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Calendar open state persists across screen remounts (and across the rest of
 // the app session). Module-scope so it survives even if ActivityScreen ever
 // unmounts; today the App keeps all screens mounted, but this is the cheap
 // safeguard against future architectural changes.
-let cachedCalOpen = true;
+// Defaults closed so the transaction list — the primary content of a "History"
+// screen — sits above the fold; the calendar is a secondary filter tool opened
+// on demand via the handle.
+let cachedCalOpen = false;
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
+import { Skeleton } from '../components/Skeleton';
 import { TxSheet } from '../components/TxSheet';
+import { Toast } from '../components/Toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
-import { Collapsible } from '../components/Collapsible';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
-import { Theme, GROUP_COLORS, cautionBg, cautionText, flagBg } from '../theme';
+import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim } from '../wallpaperPalette';
 import { TYPE } from '../typography';
 import { useTheme } from '../ThemeProvider';
@@ -56,7 +71,61 @@ function SectionCard({ children, style, noPad, dark }: { children: React.ReactNo
   );
 }
 
-const SWIPE_W = 72;
+function AnimatedCollapse({
+  open,
+  children,
+  duration = 300,
+  fallbackHeight,
+}: {
+  open: boolean;
+  children: React.ReactNode;
+  duration?: number;
+  fallbackHeight: number;
+}) {
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
+  const anim = useRef(new Animated.Value(open ? 1 : 0)).current;
+  const expandedHeight = measuredHeight ?? fallbackHeight;
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: open ? 1 : 0,
+      duration,
+      easing: EASE_OUT_QUINT,
+      useNativeDriver: false,
+    }).start();
+  }, [anim, duration, open]);
+
+  return (
+    <Animated.View
+      pointerEvents={open ? 'auto' : 'none'}
+      style={{
+        overflow: 'hidden',
+        height: anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, expandedHeight],
+        }),
+        opacity: anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 1],
+        }),
+      }}
+    >
+      {/* Absolutely positioned so the parent's animated height clamp doesn't
+          shrink this child during the close animation — otherwise onLayout
+          would fire with intermediate small heights and pin measuredHeight to
+          a tiny value, leaving the next open stuck at ~5% expansion. */}
+      <View
+        style={{ position: 'absolute', top: 0, left: 0, right: 0 }}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          if (h > 0 && Math.abs((measuredHeight ?? 0) - h) > 0.5) setMeasuredHeight(h);
+        }}
+      >
+        {children}
+      </View>
+    </Animated.View>
+  );
+}
 
 type DateFilterPreset = 'today' | 'yesterday' | 'this-week' | 'this-month';
 type DateFilter = DateFilterPreset | { from: Date; to: Date } | null;
@@ -114,9 +183,11 @@ function fmtDate(d: Date): string {
 interface Props {
   theme: Theme;
   onOpenDrawer?: () => void;
+  initialFilter?: ActivityInitialFilter | null;
+  filterToken?: number;
 }
 
-export function ActivityScreen({ theme, onOpenDrawer }: Props) {
+export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken }: Props) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
   const categories = useRepositoryList(categoriesRepo);
@@ -131,6 +202,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
   const [dateFilter, setDateFilter]         = useState<DateFilter>(null);
   const [sortBy, setSortBy]                 = useState<SortOrder>('date-desc');
   const [sheetTx, setSheetTx]               = useState<Transaction | null>(null);
+  const [pendingUndo, setPendingUndo]       = useState<{ tx: Transaction } | null>(null);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [selectedDay, setSelectedDay]       = useState<number | null>(null);
   const [calViewYear, setCalViewYear]       = useState(CALENDAR_YEAR);
@@ -142,6 +214,21 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
       cachedCalOpen = resolved;
       return resolved;
     });
+  };
+
+  // Loading / refresh lifecycle mirrors HomeScreen: a simulated settle today,
+  // the seam where the async data source (CloudKit) hooks in later.
+  const [loading, setLoading]       = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setLoading(false), 1100);
+    return () => clearTimeout(t);
+  }, []);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1100);
   };
 
   const handleSetDateFilter = (d: DateFilter) => {
@@ -156,7 +243,45 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     setCalViewMonth(CALENDAR_MONTH);
   };
 
+  const handleDeleteTx = (t: Transaction) => {
+    transactionsRepo.delete(t.id);
+    setPendingUndo({ tx: t });
+  };
+  const handleUndoDelete = () => {
+    if (pendingUndo) transactionsRepo.create(txToCreateInput(pendingUndo.tx));
+    setPendingUndo(null);
+  };
+
+  // Swipe-to-delete coordination (mirrors BudgetScreen): only one row open at a
+  // time, and any open row closes when the user scrolls or taps elsewhere.
+  const scrollViewRef = useRef<GHScrollView>(null);
+  const openSwipeRef  = useRef<Swipeable | null>(null);
+
+  const handleSwipeOpen = useCallback((ref: Swipeable) => {
+    if (openSwipeRef.current && openSwipeRef.current !== ref) openSwipeRef.current.close();
+    openSwipeRef.current = ref;
+  }, []);
+  const handleSwipeClose = useCallback(() => { openSwipeRef.current = null; }, []);
+  const dismissOpenSwipe = useCallback(() => { openSwipeRef.current?.close(); }, []);
+
   const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
+
+  const appliedTokenRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (filterToken === undefined || filterToken === appliedTokenRef.current) return;
+    if (!initialFilter) return;
+    appliedTokenRef.current = filterToken;
+    setCatFilter(initialFilter.catIds ?? []);
+    setQuery(initialFilter.merchantQuery ?? '');
+    if (initialFilter.dateFrom && initialFilter.dateTo) {
+      setDateFilter({ from: initialFilter.dateFrom, to: initialFilter.dateTo });
+      setCalViewMonth(initialFilter.dateFrom.getMonth());
+      setCalViewYear(initialFilter.dateFrom.getFullYear());
+    } else {
+      setDateFilter(null);
+    }
+    setSelectedDay(null);
+  }, [filterToken]);
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
 
@@ -219,6 +344,13 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
   const dayKeys    = Object.keys(grouped);
   const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
 
+  // Spending sum for the active result set, excluding income inflows so the
+  // figure reads as "spent", not net.
+  const filteredSpendTotal = useMemo(
+    () => filtered.filter(t => t.type !== 'income').reduce((s, t) => s + t.amount, 0),
+    [filtered],
+  );
+
   // ── Calendar marks ───────────────────────────────────────────────────────
   const calSource = useMemo(
     () => transactions.filter(t => {
@@ -266,6 +398,10 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
     });
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
   }, [selectedDay, calViewMonth, calSource, calBills]);
+
+  const dayDetailSpend = dayDetail.txs
+    .filter(t => t.type !== 'income')
+    .reduce((s, t) => s + t.amount, 0);
 
   const pWallpaper = makeP(true);
   const p          = makeP(theme.dark);
@@ -331,22 +467,36 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
         </View>
 
         {/* ── Scrollable content ──────────────────────────────────── */}
-        <Animated.ScrollView
+        <AnimatedGHScrollView
+          ref={scrollViewRef}
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={dismissOpenSwipe}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true },
           )}
           scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={pWallpaper.textSec}
+              colors={[theme.accent.dot]}
+              progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
+            />
+          }
         >
           <View style={S.sectionStack}>
 
             {/* ── Calendar card ─────────────────────────────────── */}
             <SectionCard noPad dark={theme.dark}>
-              <Collapsible open={calOpen}>
+              <AnimatedCollapse
+                open={calOpen}
+                fallbackHeight={CALENDAR_COLLAPSE_FALLBACK_HEIGHT}
+              >
                 <View style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6 }}>
                   <TransactionCalendar
                     theme={theme}
@@ -377,7 +527,7 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                     } : undefined}
                   />
                 </View>
-              </Collapsible>
+              </AnimatedCollapse>
 
               {/* Toggle handle */}
               <Pressable
@@ -524,12 +674,20 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
 
             {/* ── Transactions card ─────────────────────────────── */}
             <SectionCard dark={theme.dark}>
-              {selectedDay !== null ? (
+              {loading ? (
+                <TxListSkeleton dark={theme.dark} />
+              ) : selectedDay !== null ? (
                 <>
                   {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
                     <Text style={[S.detailEmpty, { color: p.textTer }]}>No activity this day</Text>
                   ) : (
                     <View>
+                      <View style={S.summaryRow}>
+                        <Text style={[S.dayLabel, { color: p.textTer }]}>
+                          {MONTHS[calViewMonth]} {selectedDay}
+                        </Text>
+                        <Text style={[S.summaryTotal, { color: p.text }]}>${dayDetailSpend.toFixed(2)}</Text>
+                      </View>
                       {dayDetail.txs.map((tx, i) => (
                         <TxRow
                           key={tx.id}
@@ -555,17 +713,44 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
                     onClearFilters={() => { setCatFilter([]); setDateFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
                   />
                 ) : (
-                  dayKeys.map(day => (
-                    <DayGroup key={day} day={day} group={grouped[day]} theme={theme} cats={cats} categories={categories} onPress={setSheetTx} />
-                  ))
+                  <>
+                    {isFiltered && (
+                      <View style={[S.summaryRow, { borderBottomColor: p.hairline, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                        <Text style={[S.summaryLabel, { color: p.textSec }]}>
+                          {filtered.length} {filtered.length === 1 ? 'transaction' : 'transactions'}
+                        </Text>
+                        <Text style={[S.summaryTotal, { color: p.text }]}>${filteredSpendTotal.toFixed(2)}</Text>
+                      </View>
+                    )}
+                    {dayKeys.map(day => (
+                      <DayGroup
+                        key={day}
+                        day={day}
+                        group={grouped[day]}
+                        theme={theme}
+                        cats={cats}
+                        categories={categories}
+                        onPress={setSheetTx}
+                        onDelete={handleDeleteTx}
+                        onSwipeOpen={handleSwipeOpen}
+                        onSwipeClose={handleSwipeClose}
+                        scrollRef={scrollViewRef}
+                      />
+                    ))}
+                  </>
                 )
               )}
             </SectionCard>
 
           </View>
-        </Animated.ScrollView>
+        </AnimatedGHScrollView>
 
-        <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} />
+        <TxSheet
+          tx={sheetTx}
+          theme={theme}
+          onClose={() => setSheetTx(null)}
+          onDeleted={(deleted) => setPendingUndo({ tx: deleted })}
+        />
 
         <FilterSheet
           visible={filterSheetOpen}
@@ -580,6 +765,14 @@ export function ActivityScreen({ theme, onOpenDrawer }: Props) {
           setSortBy={setSortBy}
           clearDay={() => setSelectedDay(null)}
           onClose={() => setFilterSheetOpen(false)}
+        />
+
+        <Toast
+          theme={theme}
+          message={pendingUndo ? 'Transaction deleted' : null}
+          actionLabel="Undo"
+          onAction={handleUndoDelete}
+          onDismiss={() => setPendingUndo(null)}
         />
       </ImageBackground>
     </View>
@@ -693,6 +886,7 @@ function FilterSheet({
         <Group modifiers={[
           presentationDetents([{ fraction: 0.88 }]),
           presentationDragIndicator('visible'),
+          background(theme.surface),
         ]}>
           <RNHostView>
             <View style={[FS.content, { backgroundColor: theme.surface }]}>
@@ -773,7 +967,10 @@ function FilterSheet({
                   </Host>
                 </View>
 
-                <Collapsible open={customMode}>
+                <AnimatedCollapse
+                  open={customMode}
+                  fallbackHeight={MINI_CALENDAR_COLLAPSE_FALLBACK_HEIGHT}
+                >
                   <View style={{ paddingHorizontal: 22, paddingTop: 4 }}>
                     <MiniCalendar
                       theme={theme}
@@ -782,7 +979,7 @@ function FilterSheet({
                       onRangeChange={handleRangeChange}
                     />
                   </View>
-                </Collapsible>
+                </AnimatedCollapse>
 
                 {/* ── Category rows ─────────────────────────────── */}
                 {groupedCategories.map(g => {
@@ -1024,7 +1221,8 @@ function MiniCalendar({
 // ─── DayGroup ────────────────────────────────────────────────────────────────
 
 function DayGroup({
-  day, group, theme, cats, categories, onPress,
+  day, group, theme, cats, categories, onPress, onDelete,
+  onSwipeOpen, onSwipeClose, scrollRef,
 }: {
   day: string;
   group: { txs: Transaction[]; total: number };
@@ -1032,9 +1230,14 @@ function DayGroup({
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
   onPress: (tx: Transaction) => void;
+  onDelete: (tx: Transaction) => void;
+  onSwipeOpen: (ref: Swipeable) => void;
+  onSwipeClose: () => void;
+  scrollRef: React.RefObject<any>;
 }) {
   const p     = makeP(theme.dark);
   const { txs } = group;
+  const spendTotal = txs.filter(t => t.type !== 'income').reduce((s, t) => s + t.amount, 0);
   const label =
     txs[0]?.when === 'today'     ? 'Today'
     : txs[0]?.when === 'yesterday' ? 'Yesterday'
@@ -1044,10 +1247,17 @@ function DayGroup({
     <View style={{ marginBottom: 16 }}>
       <View style={S.dayHeader}>
         <Text style={[S.dayLabel, { color: p.textTer }]}>{label}</Text>
+        <Text style={[S.dayTotal, { color: p.textSec }]}>${spendTotal.toFixed(2)}</Text>
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
-          <SwipeRow key={tx.id} theme={theme}>
+          <SwipeRow
+            key={tx.id}
+            onDelete={() => onDelete(tx)}
+            onOpen={onSwipeOpen}
+            onClose={onSwipeClose}
+            scrollRef={scrollRef}
+          >
             <TxRow
               tx={tx}
               theme={theme}
@@ -1065,59 +1275,46 @@ function DayGroup({
 
 // ─── SwipeRow ────────────────────────────────────────────────────────────────
 
-function SwipeRow({ children, theme }: { children: React.ReactNode; theme: Theme }) {
-  const swipeX = useRef(new Animated.Value(0)).current;
-  const isOpen = useRef(false);
+function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
+  children: React.ReactNode;
+  onDelete: () => void;
+  onOpen: (ref: Swipeable) => void;
+  onClose: () => void;
+  scrollRef: React.RefObject<any>;
+}) {
+  const swipeRef = useRef<Swipeable>(null);
 
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder:  (_, gs) =>
-        Math.abs(gs.dx) > 6 && Math.abs(gs.dx) > Math.abs(gs.dy),
-      onPanResponderMove: (_, gs) => {
-        const base = isOpen.current ? -SWIPE_W : 0;
-        swipeX.setValue(Math.min(0, Math.max(-SWIPE_W, base + gs.dx)));
-      },
-      onPanResponderRelease: (_, gs) => {
-        const base      = isOpen.current ? -SWIPE_W : 0;
-        const projected = Math.min(0, Math.max(-SWIPE_W, base + gs.dx));
-        const willOpen  = projected < -SWIPE_W / 2 || (!isOpen.current && gs.vx < -0.5);
-        isOpen.current  = willOpen;
-        Animated.spring(swipeX, {
-          toValue: willOpen ? -SWIPE_W : 0,
-          useNativeDriver: true,
-          tension: 260,
-          friction: 24,
-        }).start();
-      },
-    }),
-  ).current;
-
-  const actionOpacity = swipeX.interpolate({
-    inputRange:  [-SWIPE_W, -SWIPE_W * 0.25, 0],
-    outputRange: [1, 0.6, 0],
-    extrapolate: 'clamp',
-  });
-  const iconScale = swipeX.interpolate({
-    inputRange:  [-SWIPE_W, -SWIPE_W * 0.4, 0],
-    outputRange: [1, 0.7, 0.3],
-    extrapolate: 'clamp',
-  });
+  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
+    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
+    return (
+      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
+        <TouchableOpacity
+          onPress={() => { swipeRef.current?.close(); onDelete(); }}
+          style={S.swipeActionBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Delete transaction"
+        >
+          <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
 
   return (
-    <View>
-      <Animated.View
-        pointerEvents="none"
-        style={[S.swipeAction, { backgroundColor: flagBg(theme.dark), opacity: actionOpacity }]}
-      >
-        <Animated.View style={{ transform: [{ scale: iconScale }] }}>
-          <Icon name="tag" size={17} color="#fff" stroke={1.6} />
-        </Animated.View>
-      </Animated.View>
-      <Animated.View {...pan.panHandlers} style={{ transform: [{ translateX: swipeX }] }}>
-        {children}
-      </Animated.View>
-    </View>
+    <Swipeable
+      ref={swipeRef}
+      renderRightActions={renderRightActions}
+      simultaneousHandlers={[scrollRef]}
+      friction={1}
+      overshootRight={false}
+      rightThreshold={30}
+      activeOffsetX={[-15, 15]}
+      failOffsetY={[-15, 15]}
+      onSwipeableWillOpen={() => onOpen(swipeRef.current!)}
+      onSwipeableClose={onClose}
+    >
+      {children}
+    </Swipeable>
   );
 }
 
@@ -1136,15 +1333,15 @@ function TxRow({
   const p          = makeP(theme.dark);
   const cat        = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
+  const isIncome   = tx.type === 'income';
+  const incomeColor = theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light;
 
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      delayPressIn={0}
-      activeOpacity={0.6}
-      style={[S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}
+      style={({ pressed }) => [S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline, opacity: pressed ? 0.6 : 1 }]}
       accessibilityRole="button"
-      accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, $${tx.amount.toFixed(2)}`}
+      accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
     >
       <View style={[S.txIcon, { backgroundColor: groupColor }]}>
         <Icon name={cat?.icon} size={16} color="#FBF8FF" stroke={1.6} />
@@ -1158,8 +1355,15 @@ function TxRow({
         </View>
         <Text style={[S.txMeta, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Money value={tx.amount} size={13} weight="500" theme={theme} color={p.text} />
-    </TouchableOpacity>
+      <Money
+        value={tx.amount}
+        size={13}
+        weight="500"
+        theme={theme}
+        prefix={isIncome ? '+$' : '−$'}
+        color={isIncome ? incomeColor : p.text}
+      />
+    </Pressable>
   );
 }
 
@@ -1193,10 +1397,40 @@ function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; 
           color={p.text}
           prefix="$"
         />
-        <View style={[S.upcomingPill, { backgroundColor: 'rgba(255,200,80,0.18)' }]}>
-          <Text style={[S.upcomingText, { color: 'rgba(255,200,80,0.9)' }]}>Upcoming</Text>
+        <View style={[S.upcomingPill, { backgroundColor: cautionBg(theme.dark) }]}>
+          <Text style={[S.upcomingText, { color: cautionText(theme.dark) }]}>Upcoming</Text>
         </View>
       </View>
+    </View>
+  );
+}
+
+// ─── TxListSkeleton ──────────────────────────────────────────────────────────
+// Mirrors the day-grouped row layout so the pending state holds the same shape
+// the real list will fill. Swap the simulated `loading` timer for the async
+// data source when the backend lands.
+
+function TxListSkeleton({ dark }: { dark: boolean }) {
+  return (
+    <View>
+      {[0, 1].map(g => (
+        <View key={g} style={{ marginBottom: 16 }}>
+          <View style={[S.dayHeader, { marginBottom: 10 }]}>
+            <Skeleton width={64} height={11} radius={4} onMedia={dark} />
+            <Skeleton width={52} height={11} radius={4} onMedia={dark} />
+          </View>
+          {[0, 1, 2].map(r => (
+            <View key={r} style={S.txRow}>
+              <Skeleton width={36} height={36} radius={18} onMedia={dark} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Skeleton width={g === 0 ? '55%' : '42%'} height={13} radius={4} onMedia={dark} />
+                <Skeleton width="34%" height={11} radius={4} onMedia={dark} />
+              </View>
+              <Skeleton width={54} height={13} radius={4} onMedia={dark} />
+            </View>
+          ))}
+        </View>
+      ))}
     </View>
   );
 }
@@ -1211,12 +1445,14 @@ function EmptyState({ theme, isFiltered, onClearFilters }: {
   const p = makeP(theme.dark);
   return (
     <View style={S.empty}>
-      <Icon name="search" size={28} color={p.textTer} />
+      <Icon name={isFiltered ? 'search' : 'receipt'} size={28} color={p.textTer} />
       <Text style={[S.emptyTitle, { color: p.textSec }]}>
         {isFiltered ? 'No results' : 'No transactions yet'}
       </Text>
       <Text style={[S.emptyBody, { color: p.textTer }]}>
-        {isFiltered ? 'Try adjusting your filters' : 'Your spending will appear here'}
+        {isFiltered
+          ? 'Try adjusting your filters'
+          : 'Tap the add button below to record your first expense, or use the mic to log one by voice.'}
       </Text>
       {isFiltered && onClearFilters && (
         <TouchableOpacity
@@ -1387,9 +1623,24 @@ const S = StyleSheet.create({
   dayLabel: {
     ...TYPE.txDateLabel,
   },
-  swipeAction: {
-    position: 'absolute', right: 0, top: 0, bottom: 0,
-    width: SWIPE_W, alignItems: 'center', justifyContent: 'center',
+  dayTotal: {
+    ...TYPE.bodySmEm,
+  },
+  summaryRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'baseline', paddingHorizontal: 2,
+    paddingBottom: 12, marginBottom: 14,
+  },
+  summaryLabel: {
+    ...TYPE.bodySm,
+  },
+  summaryTotal: {
+    ...TYPE.subsectionTitle,
+  },
+  swipeActionBtn: {
+    flex: 1, marginLeft: 6,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: OVER_DOT,
   },
   txRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -1523,10 +1774,6 @@ const CAL = StyleSheet.create({
   dayCircle: {
     width: 30, height: 30, borderRadius: 15,
     alignItems: 'center', justifyContent: 'center',
-  },
-  dayText: {
-    fontSize: 13,
-    lineHeight: 16,
   },
   summary: {
     flexDirection: 'row', alignItems: 'center',

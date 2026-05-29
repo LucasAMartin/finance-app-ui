@@ -13,7 +13,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
 import { useAppFonts, patchTextWithInter } from './src/fonts';
-import { RepositoryProvider } from './src/repositories/RepositoryProvider';
+import { RepositoryProvider, useRepositories } from './src/repositories/RepositoryProvider';
+import { txToCreateInput } from './src/selectors/finance';
+import type { ActivityInitialFilter } from './src/selectors/spending';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { SpendingScreen } from './src/screens/SpendingScreen';
@@ -21,9 +23,13 @@ import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { TabBar } from './src/components/TabBar';
-import { VoiceSheet } from './src/components/VoiceSheet';
+import { VoiceSheet, type SavedExpenseInfo } from './src/components/VoiceSheet';
+import { Toast } from './src/components/Toast';
 import { RecurringSheet } from './src/components/RecurringSheet';
+import { TxSheet } from './src/components/TxSheet';
+import { BillSheet } from './src/components/BillSheet';
 import { Drawer } from './src/components/Drawer';
+import type { Bill, Transaction } from './src/repositories/types';
 
 type Screen = 'home' | 'spending' | 'activity' | 'budget';
 
@@ -58,6 +64,7 @@ function AnimatedScreen({
 
 function AppInner() {
   const { theme, dark } = useTheme();
+  const { transactionsRepo } = useRepositories();
 
   // `screen` is only used for TabBar active state and pointerEvents.
   // The actual visual positions are driven imperatively via TX refs.
@@ -68,10 +75,39 @@ function AppInner() {
   const [incomeSheetToken, setIncomeSheetToken] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
+  const [activityFilterToken, setActivityFilterToken] = useState(0);
+  // Sheets hoisted out of HomeScreen so their SwiftUI BottomSheet host
+  // isn't a sibling of HomeScreen's menu Hosts (the month picker / More
+  // dropdown). Sibling SwiftUI hosts that present/dismiss caused those
+  // menus to drift down on re-evaluation.
+  const [sheetTx, setSheetTx] = useState<Transaction | null>(null);
+  const [sheetBill, setSheetBill] = useState<Bill | null>(null);
+  const [toast, setToast] = useState<{ message: string; onUndo: () => void } | null>(null);
 
   const openAdd = (mode: 'voice' | 'manual' = 'voice') => {
     setAddingMode(mode);
     setAdding(true);
+  };
+
+  const handleSaved = (info: SavedExpenseInfo) => {
+    setToast({
+      message: `Added $${info.amount.toFixed(2)} to ${info.catLabel}`,
+      onUndo: () => transactionsRepo.delete(info.id),
+    });
+  };
+
+  const handleDeleteTx = (tx: Transaction) => {
+    transactionsRepo.delete(tx.id);
+    setToast({
+      message: 'Transaction deleted',
+      onUndo: () => transactionsRepo.create(txToCreateInput(tx)),
+    });
+  };
+
+  const runToastUndo = () => {
+    toast?.onUndo();
+    setToast(null);
   };
 
   // Synchronous read of current screen so navigate() never reads stale state.
@@ -137,6 +173,14 @@ function AppInner() {
     setScreen(s);
   };
 
+  const navigateToActivity = (filter?: ActivityInitialFilter) => {
+    if (filter) {
+      setActivityFilter(filter);
+      setActivityFilterToken(t => t + 1);
+    }
+    navigate('activity');
+  };
+
   const handleDrawerNav = (id: string) => {
     closeDrawer();
     if      (id === 'home')     navigate('home');
@@ -170,15 +214,18 @@ function AppInner() {
               setIncomeSheetToken(t => t + 1);
             }}
             onOpenTheme={() => setThemeOpen(true)}
+            onOpenTx={setSheetTx}
+            onDeleteTx={handleDeleteTx}
+            onOpenBill={setSheetBill}
           />
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.spending} active={screen === 'spending'}>
-          <SpendingScreen theme={theme} onOpenDrawer={openDrawer} />
+          <SpendingScreen theme={theme} onOpenDrawer={openDrawer} onViewActivity={navigateToActivity} />
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.activity} active={screen === 'activity'}>
-          <ActivityScreen theme={theme} onOpenDrawer={openDrawer} />
+          <ActivityScreen theme={theme} onOpenDrawer={openDrawer} initialFilter={activityFilter} filterToken={activityFilterToken} />
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.budget} active={screen === 'budget'}>
@@ -226,6 +273,7 @@ function AppInner() {
           theme={theme}
           visible={adding}
           initialMode={addingMode}
+          onSaved={handleSaved}
           onClose={() => setAdding(false)}
         />
 
@@ -239,6 +287,16 @@ function AppInner() {
           theme={theme}
           visible={themeOpen}
           onClose={() => setThemeOpen(false)}
+        />
+
+        <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} onDeleted={handleDeleteTx} />
+        <BillSheet bill={sheetBill} theme={theme} onClose={() => setSheetBill(null)} />
+
+        <Toast
+          theme={theme}
+          message={toast?.message ?? null}
+          onAction={runToastUndo}
+          onDismiss={() => setToast(null)}
         />
       </View>
     </>

@@ -187,7 +187,7 @@ function DetailRows({
                   <Text style={[s.subSpent, { color: over ? OVER_DOT : textColor }]}>
                     ${sub.spent.toLocaleString()}
                   </Text>
-                  {!funded && (
+                  {(!funded || over) && (
                     <Text style={[s.subBudget, { color: textTerColor }]}>
                       {'  /  $'}{sub.budget.toLocaleString()}
                     </Text>

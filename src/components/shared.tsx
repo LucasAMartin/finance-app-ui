@@ -1,5 +1,6 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, StyleSheet, Animated, LayoutChangeEvent } from 'react-native';
+import React from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
 
@@ -29,110 +30,6 @@ export function Money({ value, size = 16, weight = '600', color, prefix = '−$'
     }}>
       {prefix}{whole}.{frac}
     </Text>
-  );
-}
-
-// ── Segmented control ──────────────────────────────────────────
-type SegOption = string | { value: string; label: string };
-
-interface SegmentedProps {
-  value: string;
-  onChange: (v: string) => void;
-  options: SegOption[];
-  theme: Theme;
-}
-
-const SEG_SPRING = { tension: 220, friction: 22, useNativeDriver: true } as const;
-
-export function Segmented({ value, onChange, options, theme }: SegmentedProps) {
-  const normalized = options.map(o =>
-    typeof o === 'string' ? { value: o, label: o } : o,
-  );
-  const activeIndex = Math.max(0, normalized.findIndex(o => o.value === value));
-
-  // Measure widths of each segment so the sliding pill can land on the exact position
-  // regardless of label length. Padded by 0 since the buttons set their own padding.
-  const [segWidths, setSegWidths] = useState<number[]>([]);
-  const idx = useRef(new Animated.Value(activeIndex)).current;
-
-  useEffect(() => {
-    Animated.spring(idx, { ...SEG_SPRING, toValue: activeIndex }).start();
-  }, [activeIndex]);
-
-  const onSegLayout = (i: number) => (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    setSegWidths(prev => {
-      if (prev[i] === w) return prev;
-      const next = prev.slice();
-      next[i] = w;
-      return next;
-    });
-  };
-
-  // All widths known? Build the interpolation offsets (cumulative left positions).
-  const measured = segWidths.length === normalized.length && segWidths.every(w => w > 0);
-  const offsets = measured
-    ? normalized.reduce<number[]>((acc, _, i) => {
-        const prev = i === 0 ? 0 : acc[i - 1] + segWidths[i - 1];
-        return [...acc, prev];
-      }, [])
-    : null;
-
-  const slideTX = measured && offsets
-    ? idx.interpolate({
-        inputRange: normalized.map((_, i) => i),
-        outputRange: offsets,
-      })
-    : null;
-
-  const handlePress = (v: string, i: number) => {
-    Animated.spring(idx, { ...SEG_SPRING, toValue: i }).start();
-    onChange(v);
-  };
-
-  const activeW = measured ? segWidths[activeIndex] : 0;
-
-  return (
-    <View style={[styles.segOuter, { backgroundColor: theme.chipBg }]}>
-      {slideTX != null && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.segActive,
-            {
-              width: activeW,
-              backgroundColor: theme.text,
-              transform: [{ translateX: slideTX }],
-            },
-          ]}
-        />
-      )}
-      {normalized.map((o, i) => {
-        const active = o.value === value;
-        return (
-          <TouchableOpacity
-            key={o.value}
-            onPress={() => handlePress(o.value, i)}
-            onLayout={onSegLayout(i)}
-            activeOpacity={0.7}
-            delayPressIn={0}
-            style={styles.segBtn}
-          >
-            <Text
-              style={[
-                active ? TYPE.captionEm : TYPE.caption,
-                {
-                  color: active ? theme.bg : theme.textSec,
-                  letterSpacing: 0.2,
-                },
-              ]}
-            >
-              {o.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
   );
 }
 
@@ -240,27 +137,47 @@ export function SectionHeader({ title, actionLabel, onAction, theme }: SectionHe
   );
 }
 
+interface SheetPrimaryButtonProps {
+  label: string;
+  onPress: () => void;
+  theme: Theme;
+  disabled?: boolean;
+  style?: any;
+}
+
+export function SheetPrimaryButton({
+  label,
+  onPress,
+  theme,
+  disabled = false,
+  style,
+}: SheetPrimaryButtonProps) {
+  const handlePress = () => {
+    if (disabled) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    onPress();
+  };
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      disabled={disabled}
+      pointerEvents="box-only"
+      style={({ pressed }) => [
+        styles.sheetPrimaryBtn,
+        {
+          backgroundColor: pressed ? theme.textSec : theme.text,
+          opacity: disabled ? 0.45 : 1,
+        },
+        style,
+      ]}
+    >
+      <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  segOuter: {
-    flexDirection: 'row',
-    borderRadius: 100,
-    padding: 3,
-    position: 'relative',
-  },
-  segBtn: {
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    borderRadius: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  segActive: {
-    position: 'absolute',
-    top: 3,
-    left: 3,
-    bottom: 3,
-    borderRadius: 100,
-  },
   circleBtn: {
     borderWidth: 1,
     alignItems: 'center',
@@ -285,5 +202,12 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     marginBottom: 12,
     paddingHorizontal: 2,
+  },
+  sheetPrimaryBtn: {
+    borderRadius: 16,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
   },
 });

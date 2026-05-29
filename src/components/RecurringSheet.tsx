@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet, Group, Host, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
-import { environment, fixedSize, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { background, environment, fixedSize, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
 import { Theme, GROUP_COLORS } from '../theme';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey, RecurringRule } from '../repositories/types';
 import { Icon } from './Icon';
+import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
 
 const DETENT: PresentationDetent = { fraction: 0.72 };
@@ -107,6 +108,7 @@ export function RecurringSheet({ theme, visible, onClose }: Props) {
           presentationDetents([DETENT]),
           presentationDragIndicator('visible'),
           environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+          background(theme.surface),
         ]}>
           <RNHostView>
             <View style={[S.sheet, { backgroundColor: theme.surface, paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
@@ -188,13 +190,12 @@ export function RecurringSheet({ theme, visible, onClose }: Props) {
                 <Text style={[TYPE.labelLg, S.sectionLabel, { color: theme.textTer }]}>Category</Text>
                 <CategoryPicker theme={theme} activeCat={cat} categories={categories} cats={cats} onChange={setCat} />
 
-                <Pressable
+                <SheetPrimaryButton
+                  label="Save recurring"
                   onPress={save}
-                  pointerEvents="box-only"
-                  style={[S.saveBtn, { backgroundColor: theme.text }]}
-                >
-                  <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>Save recurring</Text>
-                </Pressable>
+                  theme={theme}
+                  style={S.saveBtn}
+                />
               </ScrollView>
             </View>
           </RNHostView>
