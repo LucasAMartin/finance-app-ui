@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash-screen.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -16,6 +16,7 @@
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow finance-app to recognize speech so you can add expenses hands-free.",
         "NSMicrophoneUsageDescription": "Allow finance-app to use the microphone to log expenses by voice.",
+        "NSPhotoLibraryUsageDescription": "Choose a photo from your library to use as the app background.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.anonymous.finance-app"
@@ -34,6 +35,10 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-image-picker",
+        { "photosPermission": "Choose a photo from your library to use as the app background." }
+      ],
       [
         "expo-speech-recognition",
         {

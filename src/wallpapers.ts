@@ -6,8 +6,10 @@
 export interface Wallpaper {
   id: string;
   name: string;
-  source: number;
+  source: number | { uri: string };
 }
+
+export const CUSTOM_WALLPAPER_ID = 'custom';
 
 export interface WallpaperTab {
   id: string;

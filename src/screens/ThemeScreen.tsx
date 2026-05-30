@@ -12,14 +12,15 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Picker, Text as SwiftText, Host } from '@expo/ui/swift-ui';
-import { pickerStyle, tag, tint, environment } from '@expo/ui/swift-ui/modifiers';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
 import { AccentKey, CardStyle, Theme, makeTheme } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import {
+  CUSTOM_WALLPAPER_ID,
   WALLPAPER_TABS,
   findTabForWallpaper,
   Wallpaper,
@@ -41,11 +42,6 @@ const TILE_H = TILE_W * (19.5 / 9);
 const APPEARANCE_OPTIONS: Array<{ label: string; dark: boolean }> = [
   { label: 'Dark', dark: true },
   { label: 'Light', dark: false },
-];
-const CARD_STYLE_OPTIONS: Array<{ label: string; key: CardStyle }> = [
-  { label: 'Flat', key: 'flat' },
-  { label: 'Shadow', key: 'shadow' },
-  { label: 'Glass', key: 'glass' },
 ];
 const ACCENT_OPTIONS: Array<{ key: AccentKey; label: string }> = [
   { key: 'sage', label: 'Sage' },
@@ -70,19 +66,22 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     accentKey,
     setAccentKey,
     cardStyle,
-    setCardStyle,
     wallpaperId: currentId,
     setWallpaperId,
+    customWallpaperUri: currentCustomUri,
+    setCustomWallpaperUri,
   } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const initialTab = findTabForWallpaper(currentId).id;
+  const initialTab = currentId === CUSTOM_WALLPAPER_ID
+    ? WALLPAPER_TABS[0].id
+    : findTabForWallpaper(currentId).id;
 
   // Local selection state — only commit to context on Apply.
   const [pendingDark, setPendingDark] = useState<boolean>(dark);
   const [pendingAccent, setPendingAccent] = useState<AccentKey>(accentKey);
-  const [pendingCardStyle, setPendingCardStyle] = useState<CardStyle>(cardStyle);
   const [pendingId, setPendingId] = useState<string>(currentId);
+  const [customUri, setCustomUri] = useState<string | undefined>(currentCustomUri);
   const [tabId, setTabId] = useState<string>(initialTab);
 
   // Reset local state every time the screen is opened.
@@ -91,12 +90,12 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     if (visible && !wasVisible.current) {
       setPendingDark(dark);
       setPendingAccent(accentKey);
-      setPendingCardStyle(cardStyle);
       setPendingId(currentId);
-      setTabId(findTabForWallpaper(currentId).id);
+      setCustomUri(currentCustomUri);
+      setTabId(currentId === CUSTOM_WALLPAPER_ID ? WALLPAPER_TABS[0].id : findTabForWallpaper(currentId).id);
     }
     wasVisible.current = visible;
-  }, [visible, dark, accentKey, cardStyle, currentId]);
+  }, [visible, dark, accentKey, currentId, currentCustomUri]);
 
   // Slide-up + fade animation.
   const anim = React.useRef(new Animated.Value(0)).current;
@@ -114,24 +113,24 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     WALLPAPER_TABS.find(t => t.id === tabId) ?? WALLPAPER_TABS[0];
   const tabIdx = Math.max(0, WALLPAPER_TABS.findIndex(t => t.id === activeTab.id));
 
-  // Preview wallpaper for the page background — switches as user picks.
-  const preview = useMemo(() => {
+  // Preview source for the page background — switches as user picks.
+  const previewSource = useMemo((): number | { uri: string } => {
+    if (pendingId === CUSTOM_WALLPAPER_ID && customUri) return { uri: customUri };
     for (const tab of WALLPAPER_TABS) {
       const found = tab.items.find(w => w.id === pendingId);
-      if (found) return found;
+      if (found) return found.source as number;
     }
-    return WALLPAPER_TABS[0].items[0];
-  }, [pendingId]);
+    return WALLPAPER_TABS[0].items[0].source as number;
+  }, [pendingId, customUri]);
 
-  const pWallpaper = makeP(true);
+  const pCard = makeP(dark);
   const dirty =
     pendingId !== currentId ||
     pendingDark !== dark ||
     pendingAccent !== accentKey ||
-    pendingCardStyle !== cardStyle;
+    (pendingId === CUSTOM_WALLPAPER_ID && customUri !== currentCustomUri);
 
   const appearanceIdx = Math.max(0, APPEARANCE_OPTIONS.findIndex(opt => opt.dark === pendingDark));
-  const cardStyleIdx = Math.max(0, CARD_STYLE_OPTIONS.findIndex(opt => opt.key === pendingCardStyle));
 
   const handleSelect = (w: Wallpaper) => {
     if (w.id === pendingId) return;
@@ -139,13 +138,30 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     setPendingId(w.id);
   };
 
+  const handleUpload = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (result.canceled) return;
+    const uri = result.assets[0].uri;
+    Haptics.selectionAsync().catch(() => {});
+    setCustomUri(uri);
+    setPendingId(CUSTOM_WALLPAPER_ID);
+  };
+
   const handleApply = () => {
     if (pendingDark !== dark) setDark(pendingDark);
     if (pendingAccent !== accentKey) setAccentKey(pendingAccent);
-    if (pendingCardStyle !== cardStyle) setCardStyle(pendingCardStyle);
+    if (pendingId !== currentId) setWallpaperId(pendingId);
+    if (pendingId === CUSTOM_WALLPAPER_ID && customUri && customUri !== currentCustomUri) {
+      setCustomWallpaperUri(customUri);
+    }
     if (dirty) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      if (pendingId !== currentId) setWallpaperId(pendingId);
     }
     onClose();
   };
@@ -166,7 +182,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     >
       <View style={[styles.root, { backgroundColor: theme.dark ? '#000' : '#F8F6FF' }]}>
         <ImageBackground
-          source={preview.source}
+          source={previewSource}
           resizeMode="cover"
           style={StyleSheet.absoluteFillObject}
         >
@@ -216,7 +232,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
                 Background
               </Text>
               <Pressable
-                onPress={() => {/* upload placeholder */}}
+                onPress={handleUpload}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 style={[styles.headerIconBtn, { alignItems: 'flex-end' }]}
                 accessibilityLabel="Upload custom wallpaper"
@@ -245,59 +261,25 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
               >
                 <View style={[styles.controlsCardBorder, { borderColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)' }]}>
                   <View style={styles.controlBlock}>
-                    <Text style={[styles.controlLabel, { color: pWallpaper.textSec }]}>Appearance</Text>
-                    <Host matchContents>
-                      <Picker
-                        selection={appearanceIdx}
-                        onSelectionChange={(val) => {
-                          const next = APPEARANCE_OPTIONS[Number(val)];
-                          if (next) setPendingDark(next.dark);
-                        }}
-                        modifiers={[
-                          pickerStyle('segmented'),
-                          tint(makeTheme(pendingDark, pendingAccent, pendingCardStyle).accent.dot),
-                          environment({ key: 'colorScheme', value: 'dark' }),
-                        ]}
-                      >
-                        {APPEARANCE_OPTIONS.map((opt, idx) => (
-                          <SwiftText key={opt.label} modifiers={[tag(idx)]}>
-                            {opt.label}
-                          </SwiftText>
-                        ))}
-                      </Picker>
-                    </Host>
+                    <Text style={[styles.controlLabel, { color: pCard.textSec }]}>Appearance</Text>
+                    <SegmentedControl
+                      values={APPEARANCE_OPTIONS.map(o => o.label)}
+                      selectedIndex={appearanceIdx}
+                      onChange={(e) => {
+                        const next = APPEARANCE_OPTIONS[e.nativeEvent.selectedSegmentIndex];
+                        if (next) setPendingDark(next.dark);
+                      }}
+                      tintColor={makeTheme(pendingDark, pendingAccent, cardStyle).accent.dot}
+                      appearance={dark ? 'dark' : 'light'}
+                    />
                   </View>
 
                   <View style={styles.controlBlock}>
-                    <Text style={[styles.controlLabel, { color: pWallpaper.textSec }]}>Card style</Text>
-                    <Host matchContents>
-                      <Picker
-                        selection={cardStyleIdx}
-                        onSelectionChange={(val) => {
-                          const next = CARD_STYLE_OPTIONS[Number(val)];
-                          if (next) setPendingCardStyle(next.key);
-                        }}
-                        modifiers={[
-                          pickerStyle('segmented'),
-                          tint(makeTheme(pendingDark, pendingAccent, pendingCardStyle).accent.dot),
-                          environment({ key: 'colorScheme', value: 'dark' }),
-                        ]}
-                      >
-                        {CARD_STYLE_OPTIONS.map((opt, idx) => (
-                          <SwiftText key={opt.key} modifiers={[tag(idx)]}>
-                            {opt.label}
-                          </SwiftText>
-                        ))}
-                      </Picker>
-                    </Host>
-                  </View>
-
-                  <View style={styles.controlBlock}>
-                    <Text style={[styles.controlLabel, { color: pWallpaper.textSec }]}>Accent</Text>
+                    <Text style={[styles.controlLabel, { color: pCard.textSec }]}>Accent</Text>
                     <View style={styles.accentRow}>
                       {ACCENT_OPTIONS.map(opt => {
                         const isActive = pendingAccent === opt.key;
-                        const previewTheme = makeTheme(pendingDark, opt.key, pendingCardStyle);
+                        const previewTheme = makeTheme(pendingDark, opt.key, cardStyle);
                         return (
                           <Pressable
                             key={opt.key}
@@ -306,7 +288,9 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
                               styles.accentSwatch,
                               {
                                 backgroundColor: previewTheme.accent.dot,
-                                borderColor: isActive ? '#FFFFFF' : 'rgba(255,255,255,0.30)',
+                                borderColor: isActive
+                                  ? (dark ? '#FFFFFF' : 'rgba(14,12,24,0.85)')
+                                  : (dark ? 'rgba(255,255,255,0.30)' : 'rgba(14,12,24,0.18)'),
                                 borderWidth: isActive ? 2 : StyleSheet.hairlineWidth,
                               },
                             ]}
@@ -322,29 +306,18 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
               </BlurView>
             </View>
 
-            {/* ─── Native segmented tabs ────────────────────── */}
+            {/* ─── Tab selector ────────────────────────────── */}
             <View style={styles.segmentWrap}>
-              <Host matchContents>
-                <Picker
-                  selection={tabIdx}
-                  onSelectionChange={(val) => {
-                    const idx = Number(val);
-                    const next = WALLPAPER_TABS[idx];
-                    if (next) setTabId(next.id);
-                  }}
-                  modifiers={[
-                    pickerStyle('segmented'),
-                    tint(theme.accent.dot),
-                    environment({ key: 'colorScheme', value: 'dark' }),
-                  ]}
-                >
-                  {WALLPAPER_TABS.map((t, idx) => (
-                    <SwiftText key={t.id} modifiers={[tag(idx)]}>
-                      {t.label}
-                    </SwiftText>
-                  ))}
-                </Picker>
-              </Host>
+              <SegmentedControl
+                values={WALLPAPER_TABS.map(t => t.label)}
+                selectedIndex={tabIdx}
+                onChange={(e) => {
+                  const next = WALLPAPER_TABS[e.nativeEvent.selectedSegmentIndex];
+                  if (next) setTabId(next.id);
+                }}
+                tintColor={makeTheme(pendingDark, pendingAccent, cardStyle).accent.dot}
+                appearance="dark"
+              />
             </View>
 
             {/* ─── Grids (all mounted to avoid image pop-in) ─── */}

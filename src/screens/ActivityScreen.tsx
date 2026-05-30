@@ -29,8 +29,13 @@ import type { Bill, Category, Transaction } from '../repositories/types';
 import { txToCreateInput, upcomingBillsFromRecurring } from '../selectors/finance';
 import type { ActivityInitialFilter } from '../selectors/spending';
 
-const CALENDAR_YEAR  = 2026;
-const CALENDAR_MONTH = 4; // 0-indexed → May
+// Default calendar position and the "current month" reference derive from the
+// real clock. occurredAt (ISO, set by the data layer) is the source of truth
+// for every transaction, so the screen tracks actual dates rather than a pinned
+// mock month — it stays correct in any month/year.
+const NOW            = new Date();
+const CALENDAR_YEAR  = NOW.getFullYear();
+const CALENDAR_MONTH = NOW.getMonth();
 const CALENDAR_COLLAPSE_FALLBACK_HEIGHT = 430;
 const MINI_CALENDAR_COLLAPSE_FALLBACK_HEIGHT = 360;
 const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
@@ -43,6 +48,7 @@ const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
 // screen — sits above the fold; the calendar is a secondary filter tool opened
 // on demand via the handle.
 let cachedCalOpen = false;
+let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
 import { Skeleton } from '../components/Skeleton';
@@ -162,11 +168,16 @@ function parseMonthDay(s: string): { month: number; day: number } | null {
   return month < 0 ? null : { month, day: parseInt(m[2], 10) };
 }
 
-const todayDom = (transactions: Transaction[]) => {
-  const t = transactions.find(tx => tx.when === 'today');
-  const pd = t ? parseMonthDay(t.fullDate) : null;
-  return pd ? pd.day : null;
-};
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+// Real Date for a transaction. occurredAt (ISO) is the data layer's source of
+// truth; fall back to parsing the derived fullDate (assuming the current year)
+// only for a legacy row that somehow lacks it.
+function txDate(t: Transaction): Date | null {
+  if (t.occurredAt) return new Date(t.occurredAt);
+  const pd = parseMonthDay(t.fullDate);
+  return pd ? new Date(NOW.getFullYear(), pd.month, pd.day) : null;
+}
 
 function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() &&
@@ -219,12 +230,24 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   // Loading / refresh lifecycle mirrors HomeScreen: a simulated settle today,
   // the seam where the async data source (CloudKit) hooks in later.
   const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showSwipeHint, setShowSwipeHint] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setLoading(false), 1100);
     return () => clearTimeout(t);
   }, []);
+
+  // One-time swipe hint: fires when the list first appears with real rows.
+  useEffect(() => {
+    if (!loading && !loadError && !hasShownDeleteHint) {
+      hasShownDeleteHint = true;
+      setShowSwipeHint(true);
+      const t = setTimeout(() => setShowSwipeHint(false), 3500);
+      return () => clearTimeout(t);
+    }
+  }, [loading, loadError]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -264,7 +287,9 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const handleSwipeClose = useCallback(() => { openSwipeRef.current = null; }, []);
   const dismissOpenSwipe = useCallback(() => { openSwipeRef.current?.close(); }, []);
 
-  const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
+  // Sort is a presentation preference, not a scope filter — excluded from the badge count
+  // so the filter button doesn't fill just because the user changed sort order.
+  const activeCount = catFilter.length + (dateFilter ? 1 : 0);
 
   const appliedTokenRef = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -296,8 +321,8 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
     const result = transactions.filter(t => {
       if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
       if (isViewingNonDefaultMonth && dateFilter === null) {
-        const pd = parseMonthDay(t.fullDate);
-        if (!pd || pd.month !== calViewMonth) return false;
+        const txd = txDate(t);
+        if (!txd || txd.getMonth() !== calViewMonth || txd.getFullYear() !== calViewYear) return false;
       }
       if (dateFilter !== null) {
         if (typeof dateFilter === 'string') {
@@ -305,15 +330,15 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
           if (dateFilter === 'yesterday' && t.when !== 'yesterday') return false;
           if (dateFilter === 'this-week' && t.when === 'earlier')   return false;
           if (dateFilter === 'this-month') {
-            const pd = parseMonthDay(t.fullDate);
-            if (!pd || pd.month !== CALENDAR_MONTH) return false;
+            const txd = txDate(t);
+            if (!txd || txd.getMonth() !== NOW.getMonth() || txd.getFullYear() !== NOW.getFullYear()) return false;
           }
         } else {
-          const pd = parseMonthDay(t.fullDate);
-          if (pd) {
-            const tx   = new Date(CALENDAR_YEAR, pd.month, pd.day);
-            const from = new Date(dateFilter.from.getFullYear(), dateFilter.from.getMonth(), dateFilter.from.getDate());
-            const to   = new Date(dateFilter.to.getFullYear(),   dateFilter.to.getMonth(),   dateFilter.to.getDate());
+          const txd = txDate(t);
+          if (txd) {
+            const tx   = startOfDay(txd);
+            const from = startOfDay(dateFilter.from);
+            const to   = startOfDay(dateFilter.to);
             if (tx < from || tx > to) return false;
           }
         }
@@ -329,7 +354,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
     else if (sortBy === 'date-asc')    result.reverse();
     else if (sortBy === 'cat')         result.sort((a, b) => a.cat.localeCompare(b.cat) || a.merchant.localeCompare(b.merchant));
     return result;
-  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth, transactions, cats]);
+  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth, calViewYear, transactions, cats]);
 
   const grouped = useMemo(() => {
     const g: Record<string, { txs: Transaction[]; total: number }> = {};
@@ -344,12 +369,18 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const dayKeys    = Object.keys(grouped);
   const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
 
-  // Spending sum for the active result set, excluding income inflows so the
-  // figure reads as "spent", not net.
+  // Expense-only count and sum for the filtered result set. Both exclude income
+  // so count and total are consistent — no silent discrepancy between them.
+  const filteredExpenses = useMemo(() => filtered.filter(t => t.type !== 'income'), [filtered]);
+  const filteredExpenseCount = filteredExpenses.length;
   const filteredSpendTotal = useMemo(
-    () => filtered.filter(t => t.type !== 'income').reduce((s, t) => s + t.amount, 0),
-    [filtered],
+    () => filteredExpenses.reduce((s, t) => s + t.amount, 0),
+    [filteredExpenses],
   );
+
+  // Average daily expense spend across visible day groups — used to add relative
+  // weight signal to day headers without needing a budget target.
+  const avgDaySpend = dayKeys.length > 0 ? filteredSpendTotal / dayKeys.length : 0;
 
   // ── Calendar marks ───────────────────────────────────────────────────────
   const calSource = useMemo(
@@ -376,28 +407,30 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
       return m[d];
     };
     calSource.forEach(t => {
-      const pd = parseMonthDay(t.fullDate);
-      if (pd && pd.month === calViewMonth) ensure(pd.day).txCats.push(t.cat);
+      const txd = txDate(t);
+      if (txd && txd.getMonth() === calViewMonth && txd.getFullYear() === calViewYear) {
+        ensure(txd.getDate()).txCats.push(t.cat);
+      }
     });
     calBills.forEach(b => {
       const pd = parseMonthDay(b.dueDate);
       if (pd && pd.month === calViewMonth) ensure(pd.day).billCats.push(b.cat);
     });
     return m;
-  }, [calSource, calBills, calViewMonth]);
+  }, [calSource, calBills, calViewMonth, calViewYear]);
 
   const dayDetail = useMemo(() => {
     if (selectedDay == null) return { txs: [], bills: [], total: 0 };
     const txs = calSource.filter(t => {
-      const pd = parseMonthDay(t.fullDate);
-      return pd?.month === calViewMonth && pd.day === selectedDay;
+      const txd = txDate(t);
+      return txd != null && txd.getMonth() === calViewMonth && txd.getFullYear() === calViewYear && txd.getDate() === selectedDay;
     });
     const bills = calBills.filter(b => {
       const pd = parseMonthDay(b.dueDate);
       return pd?.month === calViewMonth && pd.day === selectedDay;
     });
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
-  }, [selectedDay, calViewMonth, calSource, calBills]);
+  }, [selectedDay, calViewMonth, calViewYear, calSource, calBills]);
 
   const dayDetailSpend = dayDetail.txs
     .filter(t => t.type !== 'income')
@@ -415,7 +448,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const hasFilterPills = selectedDay !== null || dateFilter !== null || catFilter.length > 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.dark ? '#000' : '#F8F6FF' }}>
+    <View style={{ flex: 1, backgroundColor: theme.dark ? '#0F0B1C' : '#F5F4F8' }}>
       <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
         <LinearGradient
           pointerEvents="none"
@@ -504,7 +537,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                     month={calViewMonth}
                     marks={calMarks}
                     selectedDay={selectedDay}
-                    today={todayDom(transactions)}
+                    today={calViewYear === NOW.getFullYear() && calViewMonth === NOW.getMonth() ? NOW.getDate() : null}
                     categories={categories}
                     onSelectDay={(day) => {
                       setSelectedDay(day);
@@ -514,6 +547,12 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                       setCalViewYear(y);
                       setCalViewMonth(m);
                       setSelectedDay(null);
+                      // Clear "This month" preset when the user navigates the calendar
+                      // to a different month — prevents the calendar showing June with
+                      // no marks while the list stays pinned to May transactions.
+                      if (dateFilter === 'this-month' && (m !== CALENDAR_MONTH || y !== CALENDAR_YEAR)) {
+                        setDateFilter(null);
+                      }
                     }}
                     overrideColors={theme.dark ? {
                       text: MEDIA.text,
@@ -541,10 +580,14 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                 <View style={S.calShowRow}>
                   <Icon name="cal" size={12} color={p.textSec} stroke={1.5} />
                   <Text style={[S.calShowText, { color: p.textSec }]}>
-                    {calOpen ? 'Hide calendar' : 'Show calendar'}
+                    {calOpen
+                      ? 'Hide calendar'
+                      : selectedDay !== null
+                        ? `${MONTHS[calViewMonth]} ${selectedDay} selected`
+                        : 'Show calendar'}
                   </Text>
-                  {selectedDay !== null && (
-                    <View style={[S.calActiveDot, { backgroundColor: p.textSec }]} />
+                  {selectedDay !== null && !calOpen && (
+                    <View style={[S.calActiveDot, { backgroundColor: theme.accent.dot }]} />
                   )}
                   <View style={{ flex: 1 }} />
                   <Icon name={calOpen ? 'chevUp' : 'chevDown'} size={10} color={p.textSec} stroke={1.8} />
@@ -565,6 +608,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                     style={[S.searchInput, { color: p.text }]}
                     returnKeyType="search"
                     accessibilityLabel="Search transactions"
+                    accessibilityHint="Searches by merchant name or category"
                   />
                   {query.length > 0 && (
                     <TouchableOpacity
@@ -676,6 +720,11 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
             <SectionCard dark={theme.dark}>
               {loading ? (
                 <TxListSkeleton dark={theme.dark} />
+              ) : loadError ? (
+                <LoadError
+                  theme={theme}
+                  onRetry={() => { setLoadError(false); setLoading(true); setTimeout(() => setLoading(false), 1100); }}
+                />
               ) : selectedDay !== null ? (
                 <>
                   {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
@@ -715,13 +764,45 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                 ) : (
                   <>
                     {isFiltered && (
-                      <View style={[S.summaryRow, { borderBottomColor: p.hairline, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                      <View
+                        accessibilityLiveRegion="polite"
+                        style={[S.summaryRow, { borderBottomColor: p.hairline, borderBottomWidth: StyleSheet.hairlineWidth }]}
+                      >
                         <Text style={[S.summaryLabel, { color: p.textSec }]}>
-                          {filtered.length} {filtered.length === 1 ? 'transaction' : 'transactions'}
+                          {filteredExpenseCount} {filteredExpenseCount === 1 ? 'expense' : 'expenses'}
                         </Text>
                         <Text style={[S.summaryTotal, { color: p.text }]}>${filteredSpendTotal.toFixed(2)}</Text>
                       </View>
                     )}
+                    {/*
+                      TODO(perf, real-data): this renders every day group and
+                      every TxRow eagerly inside the outer ScrollView. Fine at
+                      mock-data size; at real volume (hundreds–thousands of
+                      transactions from CloudKit) it builds and holds every row
+                      in memory on mount, causing slow opens, memory bloat, and
+                      scroll jank.
+
+                      Fix is to VIRTUALIZE: make a SectionList the screen's
+                      scroll container (sections = dayKeys, renderSectionHeader =
+                      the day header + total, renderItem = SwipeRow + TxRow) so
+                      only the rows near the viewport are mounted.
+
+                      Not a mechanical swap — two things have to be reworked and
+                      verified on a device:
+                        1. Layout. The whole list currently lives inside ONE
+                           frosted SectionCard (a BlurView). A virtualized list
+                           must BE the scroller, and a BlurView can't be the
+                           scroller — so the calendar + search cards move into
+                           ListHeaderComponent and the day groups need their own
+                           card treatment (per-group cards, or rows on a
+                           translucent strip). That's a visual decision.
+                        2. Gestures. Swipe-to-delete coordination
+                           (simultaneousHandlers + openSwipeRef) and the
+                           header-scroll Animated.event must be re-pointed at the
+                           SectionList ref instead of scrollViewRef.
+                      Pair this with the CloudKit data wiring; it only pays off
+                      at that scale.
+                    */}
                     {dayKeys.map(day => (
                       <DayGroup
                         key={day}
@@ -735,8 +816,10 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                         onSwipeOpen={handleSwipeOpen}
                         onSwipeClose={handleSwipeClose}
                         scrollRef={scrollViewRef}
+                        avgDaySpend={avgDaySpend}
                       />
                     ))}
+                    {showSwipeHint && <SwipeHint dark={theme.dark} />}
                   </>
                 )
               )}
@@ -1222,7 +1305,7 @@ function MiniCalendar({
 
 function DayGroup({
   day, group, theme, cats, categories, onPress, onDelete,
-  onSwipeOpen, onSwipeClose, scrollRef,
+  onSwipeOpen, onSwipeClose, scrollRef, avgDaySpend,
 }: {
   day: string;
   group: { txs: Transaction[]; total: number };
@@ -1234,10 +1317,16 @@ function DayGroup({
   onSwipeOpen: (ref: Swipeable) => void;
   onSwipeClose: () => void;
   scrollRef: React.RefObject<any>;
+  avgDaySpend: number;
 }) {
   const p     = makeP(theme.dark);
   const { txs } = group;
   const spendTotal = txs.filter(t => t.type !== 'income').reduce((s, t) => s + t.amount, 0);
+  // Relative spend weight: days above 2× the average get caution amber;
+  // days above average get full-weight text instead of secondary.
+  const isHeavyDay    = avgDaySpend > 0 && spendTotal > avgDaySpend * 2;
+  const isAboveAvg    = avgDaySpend > 0 && spendTotal > avgDaySpend;
+  const dayTotalColor = isHeavyDay ? cautionText(theme.dark) : isAboveAvg ? p.text : p.textSec;
   const label =
     txs[0]?.when === 'today'     ? 'Today'
     : txs[0]?.when === 'yesterday' ? 'Yesterday'
@@ -1247,7 +1336,7 @@ function DayGroup({
     <View style={{ marginBottom: 16 }}>
       <View style={S.dayHeader}>
         <Text style={[S.dayLabel, { color: p.textTer }]}>{label}</Text>
-        <Text style={[S.dayTotal, { color: p.textSec }]}>${spendTotal.toFixed(2)}</Text>
+        <Text style={[S.dayTotal, { color: dayTotalColor }]}>${spendTotal.toFixed(2)}</Text>
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
@@ -1265,6 +1354,7 @@ function DayGroup({
               categories={categories}
               onPress={() => onPress(tx)}
               last={i === txs.length - 1}
+              onDelete={() => onDelete(tx)}
             />
           </SwipeRow>
         ))}
@@ -1321,7 +1411,7 @@ function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
 // ─── TxRow ───────────────────────────────────────────────────────────────────
 
 function TxRow({
-  tx, theme, cats, categories, onPress, last,
+  tx, theme, cats, categories, onPress, last, onDelete,
 }: {
   tx: Transaction;
   theme: Theme;
@@ -1329,6 +1419,7 @@ function TxRow({
   categories: Category[];
   onPress: () => void;
   last: boolean;
+  onDelete?: () => void;
 }) {
   const p          = makeP(theme.dark);
   const cat        = cats[tx.cat];
@@ -1342,6 +1433,8 @@ function TxRow({
       style={({ pressed }) => [S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline, opacity: pressed ? 0.6 : 1 }]}
       accessibilityRole="button"
       accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
+      accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
+      onAccessibilityAction={onDelete ? (e) => { if (e.nativeEvent.actionName === 'delete') onDelete(); } : undefined}
     >
       <View style={[S.txIcon, { backgroundColor: groupColor }]}>
         <Icon name={cat?.icon} size={16} color="#FBF8FF" stroke={1.6} />
@@ -1373,7 +1466,11 @@ function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; 
   const p          = makeP(theme.dark);
   const groupColor = categoryGroupColor(bill.cat, categories, theme.dark);
   return (
-    <View style={[S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}>
+    <View style={[S.txRow, {
+      borderBottomWidth: last ? 0 : 1,
+      borderBottomColor: p.hairline,
+      backgroundColor: theme.dark ? 'rgba(255,255,255,0.03)' : 'rgba(14,12,24,0.025)',
+    }]}>
       <View style={[S.billIcon, { borderColor: groupColor }]}>
         <Icon name={bill.icon} size={15} color={groupColor} stroke={1.7} />
       </View>
@@ -1401,6 +1498,42 @@ function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; 
           <Text style={[S.upcomingText, { color: cautionText(theme.dark) }]}>Upcoming</Text>
         </View>
       </View>
+    </View>
+  );
+}
+
+// ─── LoadError ───────────────────────────────────────────────────────────────
+
+function LoadError({ theme, onRetry }: { theme: Theme; onRetry: () => void }) {
+  const p = makeP(theme.dark);
+  return (
+    <View style={S.empty}>
+      <Icon name="alertCircle" size={28} color={p.textTer} stroke={1.5} />
+      <Text style={[S.emptyTitle, { color: p.textSec }]}>Couldn't load transactions</Text>
+      <Text style={[S.emptyBody, { color: p.textTer }]}>
+        Check your connection and try again.
+      </Text>
+      <TouchableOpacity
+        onPress={onRetry}
+        activeOpacity={0.7}
+        style={[S.emptyClear, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.12)' : 'rgba(14,12,24,0.07)' }]}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading transactions"
+      >
+        <Text style={[S.emptyClearText, { color: p.textSec }]}>Try again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── SwipeHint ───────────────────────────────────────────────────────────────
+
+function SwipeHint({ dark }: { dark: boolean }) {
+  const p = makeP(dark);
+  return (
+    <View style={S.swipeHint}>
+      <Icon name="chevL" size={11} color={p.textTer} stroke={2} />
+      <Text style={[S.swipeHintText, { color: p.textTer }]}>Swipe to delete</Text>
     </View>
   );
 }
@@ -1534,7 +1667,7 @@ const S = StyleSheet.create({
 
   // Calendar toggle handle
   calHandle: {
-    paddingVertical: 13,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     borderTopWidth: 1,
@@ -1550,7 +1683,14 @@ const S = StyleSheet.create({
     ...TYPE.caption,
   },
   calActiveDot: {
-    width: 6, height: 6, borderRadius: 3,
+    width: 8, height: 8, borderRadius: 4,
+  },
+  swipeHint: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    justifyContent: 'flex-end', paddingTop: 6, paddingBottom: 2,
+  },
+  swipeHintText: {
+    ...TYPE.caption,
   },
 
   // Search
@@ -1576,7 +1716,7 @@ const S = StyleSheet.create({
     width: 16, height: 16, borderRadius: 8,
     alignItems: 'center', justifyContent: 'center',
   },
-  filterBadgeText: { ...TYPE.label, letterSpacing: 0 },
+  filterBadgeText: { ...TYPE.labelPlain },
   filterPill: {
     flexDirection: 'row', alignItems: 'center',
     paddingLeft: 11, paddingRight: 8, paddingVertical: 6,
@@ -1589,7 +1729,7 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 4,
   },
   emptyClear: {
-    marginTop: 16, paddingHorizontal: 18, paddingVertical: 9,
+    marginTop: 16, paddingHorizontal: 18, paddingVertical: 13,
     borderRadius: 100,
   },
   emptyClearText: {
@@ -1612,9 +1752,7 @@ const S = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 100,
   },
   upcomingText: {
-    ...TYPE.labelSm,
-    textTransform: 'none',
-    letterSpacing: 0,
+    ...TYPE.labelSmPlain,
   },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
@@ -1712,9 +1850,7 @@ const FS = StyleSheet.create({
     gap: 10,
   },
   groupDividerLabel: {
-    ...TYPE.labelSm,
-    textTransform: 'none',
-    letterSpacing: 0,
+    ...TYPE.labelSmPlain,
   },
   catRow: {
     flexDirection: 'row',
@@ -1761,9 +1897,7 @@ const CAL = StyleSheet.create({
     flex: 1, alignItems: 'center', paddingVertical: 4,
   },
   dowText: {
-    ...TYPE.label,
-    textTransform: 'none',
-    letterSpacing: 0,
+    ...TYPE.labelPlain,
   },
   weekRow: {
     flexDirection: 'row',
@@ -1783,9 +1917,7 @@ const CAL = StyleSheet.create({
     flex: 1, alignItems: 'center', gap: 3,
   },
   summaryLabel: {
-    ...TYPE.label,
-    textTransform: 'none',
-    letterSpacing: 0,
+    ...TYPE.labelPlain,
   },
   summaryValue: {
     ...TYPE.body,

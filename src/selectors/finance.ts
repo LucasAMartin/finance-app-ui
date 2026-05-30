@@ -1,6 +1,5 @@
 import {
   DEFAULT_MONTHLY_BUDGET,
-  DEFAULT_MONTHLY_INCOME,
   SEED_MONTH_BUDGETS,
   SEED_PERIOD_DATA,
   SEED_SPARK_7D,
@@ -45,9 +44,32 @@ function categoryTotal(transactions: Transaction[], cat: string | undefined): nu
   return transactions.filter(tx => tx.cat === cat).reduce((sum, tx) => sum + tx.amount, 0);
 }
 
-export function monthlyIncome(incomes: Income[]): number {
-  const regular = incomes.filter(income => (income.kind ?? 'regular') === 'regular');
-  const total = regular.reduce((sum, income) => {
+function monthBounds(monthKey: string): { start: string; end: string } {
+  const [year, month] = monthKey.split('-').map(Number);
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
+
+function currentMonthKey(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function incomeActiveInMonth(income: Income, monthKey: string): boolean {
+  const { start, end } = monthBounds(monthKey);
+  const startsBeforeMonthEnds = income.startDate.slice(0, 10) <= end;
+  const endsAfterMonthStarts = !income.endDate || income.endDate.slice(0, 10) >= start;
+  return startsBeforeMonthEnds && endsAfterMonthStarts;
+}
+
+export function monthlyIncome(incomes: Income[], monthKey = currentMonthKey()): number {
+  const regular = incomes.filter(income => (
+    (income.kind ?? 'regular') === 'regular' && incomeActiveInMonth(income, monthKey)
+  ));
+  return regular.reduce((sum, income) => {
     switch (income.cadence) {
       case 'weekly': return sum + Math.round(income.amount * 52 / 12);
       case 'biweekly': return sum + Math.round(income.amount * 26 / 12);
@@ -55,7 +77,6 @@ export function monthlyIncome(incomes: Income[]): number {
       default: return sum + income.amount;
     }
   }, 0);
-  return total > 0 ? total : DEFAULT_MONTHLY_INCOME;
 }
 
 export function currentMonthlyBudget(budgets: Budget[]): number {
@@ -122,7 +143,7 @@ export function groupSpent(
   return spendGroups(transactions, budgets, categories).find(group => group.key === groupKey);
 }
 
-export function spendGroups(transactions: Transaction[], budgets: Budget[] = [], categories: Category[] = []): SpendGroup[] {
+export function spendGroups(transactions: Transaction[], budgets: Budget[] = [], categories: Category[] = [], month = '2026-05'): SpendGroup[] {
   const activeCategories = categories.length > 0
     ? categories.filter(cat => !cat.archived)
     : SEED_SPEND_GROUPS.flatMap(g => g.subs.map((sub, idx) => ({
@@ -144,7 +165,7 @@ export function spendGroups(transactions: Transaction[], budgets: Budget[] = [],
       .filter(cat => cat.group === groupKey)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label))
       .map(cat => {
-      const budget = budgets.find(b => (b.category === cat.id || b.label === cat.label) && b.month === '2026-05');
+      const budget = budgets.find(b => (b.category === cat.id || b.label === cat.label) && b.month === month);
       const seedSub = SEED_SPEND_GROUPS.flatMap(g => g.subs).find(sub => sub.cat === cat.id);
       const baselineSpent = (seedSub?.spent ?? 0) - (seedCatTotals[cat.id] ?? 0);
       return {

@@ -41,6 +41,10 @@ export const TYPE = {
   labelLg:        { fontSize: 11, fontWeight: '500', letterSpacing: 0.5,  lineHeight: 14, textTransform: 'uppercase' },
   label:          { fontSize: 10, fontWeight: '500', letterSpacing: 0.6,  lineHeight: 13, textTransform: 'uppercase' },
   labelSm:        { fontSize: 9,  fontWeight: '600', letterSpacing: 0.9,  lineHeight: 12, textTransform: 'uppercase' },
+  // Plain variants — same size/weight as label/labelSm but without uppercase or tracking,
+  // for contexts where sentence-case label styling is needed (badges, pills, calendar headers).
+  labelPlain:     { fontSize: 10, fontWeight: '500', letterSpacing: 0,    lineHeight: 13 },
+  labelSmPlain:   { fontSize: 9,  fontWeight: '600', letterSpacing: 0,    lineHeight: 12 },
 
   // Transaction date group header — "Today", "Yesterday", "Mon 12 May"
   txDateLabel:    { fontSize: 13, fontWeight: '500', letterSpacing: 0,    lineHeight: 18 },

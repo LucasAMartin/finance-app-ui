@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { makeTheme, Theme, AccentKey, CardStyle } from './theme';
-import { DEFAULT_WALLPAPER_ID, findWallpaperById, Wallpaper } from './wallpapers';
+import { CUSTOM_WALLPAPER_ID, DEFAULT_WALLPAPER_ID, findWallpaperById, Wallpaper } from './wallpapers';
 import { useRepositories, useRepositoryList } from './repositories/RepositoryProvider';
 
 interface ThemeCtx {
@@ -16,6 +16,8 @@ interface ThemeCtx {
   wallpaperId: string;
   wallpaper: Wallpaper;
   setWallpaperId: (id: string) => void;
+  customWallpaperUri: string | undefined;
+  setCustomWallpaperUri: (uri: string) => void;
 }
 
 const ThemeContext = createContext<ThemeCtx | null>(null);
@@ -52,13 +54,19 @@ export function ThemeProvider({
   const accentKey = settings.accentKey;
   const cardStyle = settings.cardStyle;
   const wallpaperId = settings.wallpaperId ?? defaultWallpaperId;
+  const customWallpaperUri = settings.meta?.customWallpaperUri as string | undefined;
 
   const theme = useMemo(
     () => makeTheme(dark, accentKey, cardStyle),
     [dark, accentKey, cardStyle],
   );
 
-  const wallpaper = useMemo(() => findWallpaperById(wallpaperId), [wallpaperId]);
+  const wallpaper = useMemo(() => {
+    if (wallpaperId === CUSTOM_WALLPAPER_ID && customWallpaperUri) {
+      return { id: CUSTOM_WALLPAPER_ID, name: 'Custom Photo', source: { uri: customWallpaperUri } };
+    }
+    return findWallpaperById(wallpaperId);
+  }, [wallpaperId, customWallpaperUri]);
 
   const setDark = useCallback((v: boolean) => {
     settingsRepo.update('settings', { themeDark: v }) ?? settingsRepo.create({ ...settings, themeDark: v });
@@ -72,6 +80,11 @@ export function ThemeProvider({
   const setWallpaperId = useCallback((id: string) => {
     settingsRepo.update('settings', { wallpaperId: id }) ?? settingsRepo.create({ ...settings, wallpaperId: id });
   }, [settingsRepo, settings]);
+  const setCustomWallpaperUri = useCallback((uri: string) => {
+    const currentMeta = settings.meta ?? {};
+    settingsRepo.update('settings', { meta: { ...currentMeta, customWallpaperUri: uri } })
+      ?? settingsRepo.create({ ...settings, meta: { ...currentMeta, customWallpaperUri: uri } });
+  }, [settingsRepo, settings]);
   const toggleDark = useCallback(() => setDark(!dark), [dark, setDark]);
 
   const value = useMemo<ThemeCtx>(
@@ -80,8 +93,9 @@ export function ThemeProvider({
       accentKey, setAccentKey,
       cardStyle, setCardStyle,
       wallpaperId, wallpaper, setWallpaperId,
+      customWallpaperUri, setCustomWallpaperUri,
     }),
-    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId],
+    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId, customWallpaperUri, setCustomWallpaperUri],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
