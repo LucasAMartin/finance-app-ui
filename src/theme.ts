@@ -1,4 +1,11 @@
-export type AccentKey = 'sage' | 'butter' | 'sky' | 'rose' | 'plum' | 'ink' | 'wine';
+export type AccentKey =
+  | 'sage'
+  | 'butter'
+  | 'sky'
+  | 'rose'
+  | 'plum'
+  | 'ink'
+  | 'wine';
 export type CardStyle = 'flat' | 'shadow' | 'glass';
 
 export interface Accent {
@@ -8,18 +15,73 @@ export interface Accent {
 }
 
 // Internal accent definitions — light and dark variants resolved by makeTheme.
-const ACCENT_DEFS: Record<AccentKey, {
-  fill: string; fillDark: string;
-  ink: string;  inkDark: string;
-  dot: string;  dotDark: string;
-}> = {
-  sage:   { fill: '#D6E4D8', fillDark: '#18281E', ink: '#3F5A48', inkDark: '#82C29A', dot: '#7A9D85', dotDark: '#7A9D85' },
-  butter: { fill: '#F1E6B7', fillDark: '#1E1A0A', ink: '#6E5A1F', inkDark: '#CCA840', dot: '#C5A946', dotDark: '#C5A946' },
-  sky:    { fill: '#D5E2EE', fillDark: '#131E2E', ink: '#3D5874', inkDark: '#76AAD4', dot: '#7393B3', dotDark: '#7393B3' },
-  rose:   { fill: '#EDD9D4', fillDark: '#261514', ink: '#6F4940', inkDark: '#D49080', dot: '#B47A6E', dotDark: '#B47A6E' },
-  plum:   { fill: '#EBE7FF', fillDark: '#1C1444', ink: '#3D28A0', inkDark: '#B09AE8', dot: '#7B5CE0', dotDark: '#A08AEA' },
-  ink:    { fill: '#D9D9DC', fillDark: '#1A1A22', ink: '#0E0E10', inkDark: '#C4C4D0', dot: '#0E0E10', dotDark: '#C4C4D0' },
-  wine:   { fill: '#FAE8EC', fillDark: '#2C0F1A', ink: '#8C1530', inkDark: '#F2A0B4', dot: '#C23B58', dotDark: '#E06A7E' },
+const ACCENT_DEFS: Record<
+  AccentKey,
+  {
+    fill: string;
+    fillDark: string;
+    ink: string;
+    inkDark: string;
+    dot: string;
+    dotDark: string;
+  }
+> = {
+  sage: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
+  butter: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
+  sky: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
+  rose: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
+  plum: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
+  ink: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
+  wine: {
+    fill: '#0E1116',
+    fillDark: '#E7EAED',
+    ink: '#F2F4F5',
+    inkDark: '#080A0D',
+    dot: '#0E1116',
+    dotDark: '#E7EAED',
+  },
 };
 
 export interface Theme {
@@ -40,25 +102,25 @@ export interface Theme {
 export function makeTheme(
   dark: boolean,
   accentKey: AccentKey = 'plum',
-  cardStyle: CardStyle = 'flat'
+  cardStyle: CardStyle = 'flat',
 ): Theme {
   const def = ACCENT_DEFS[accentKey];
   const accent: Accent = dark
     ? { fill: def.fillDark, ink: def.inkDark, dot: def.dotDark }
-    : { fill: def.fill,     ink: def.ink,     dot: def.dot };
+    : { fill: def.fill, ink: def.ink, dot: def.dot };
   return {
     dark,
     accent,
     cardStyle,
-    bg:       dark ? '#0F0B1C' : '#F5F4F8',
-    surface:  dark ? '#1A1530' : '#FFFFFF',
-    surface2: dark ? '#221D3C' : '#FAFAFC',
-    text:     dark ? '#EDE9FF' : '#0E0C18',
-    textSec:  dark ? 'rgba(237,233,255,0.65)' : 'rgba(14,12,24,0.62)',
-    textTer:  dark ? 'rgba(237,233,255,0.36)' : 'rgba(14,12,24,0.32)',
-    sep:      dark ? 'rgba(180,160,240,0.10)' : 'rgba(14,12,24,0.08)',
-    hairline: dark ? 'rgba(180,160,240,0.14)' : 'rgba(14,12,24,0.10)',
-    chipBg:   dark ? 'rgba(180,160,240,0.08)' : 'rgba(14,12,24,0.04)',
+    bg: dark ? '#080A0D' : '#F4F5F6',
+    surface: dark ? '#101215' : '#FAFBFC',
+    surface2: dark ? '#1C1F24' : '#EEF0F2',
+    text: dark ? '#F2F4F5' : '#0B0D10',
+    textSec: dark ? 'rgba(242,244,245,0.66)' : 'rgba(11,13,16,0.62)',
+    textTer: dark ? 'rgba(242,244,245,0.42)' : 'rgba(11,13,16,0.36)',
+    sep: dark ? 'rgba(235,239,242,0.10)' : 'rgba(11,13,16,0.08)',
+    hairline: dark ? 'rgba(235,239,242,0.13)' : 'rgba(11,13,16,0.10)',
+    chipBg: dark ? 'rgba(235,239,242,0.08)' : 'rgba(11,13,16,0.045)',
   };
 }
 
@@ -80,9 +142,13 @@ export function getCardStyle(theme: Theme) {
   // glass
   return {
     ...base,
-    backgroundColor: theme.dark ? 'rgba(28,28,33,0.88)' : 'rgba(255,255,255,0.88)',
+    backgroundColor: theme.dark
+      ? 'rgba(28,28,33,0.88)'
+      : 'rgba(255,255,255,0.88)',
     borderWidth: 1,
-    borderColor: theme.dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.7)',
+    borderColor: theme.dark
+      ? 'rgba(255,255,255,0.08)'
+      : 'rgba(255,255,255,0.7)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -95,31 +161,41 @@ export function getCardStyle(theme: Theme) {
 // Dark variants tuned to read against the navy-blue dark background — bumped luminance
 // and cooled hues slightly so they sit naturally on #0B1020.
 export const CAT_PASTEL: Record<string, { light: string; dark: string }> = {
-  groceries:     { light: '#8EC49A', dark: '#76B888' },
-  dining:        { light: '#D4A48A', dark: '#C89070' },
-  transport:     { light: '#8AAACE', dark: '#7AAAD4' },
-  shopping:      { light: '#B09AE0', dark: '#A08CD4' },
-  bills:         { light: '#88BEB8', dark: '#78B0AA' },
-  entertainment: { light: '#C498B4', dark: '#BC88A8' },
+  groceries: { light: '#79B7A8', dark: '#48B8A4' },
+  dining: { light: '#D68A7F', dark: '#D76F5F' },
+  transport: { light: '#79A8D8', dark: '#4E8FDB' },
+  shopping: { light: '#C3877C', dark: '#D76F5F' },
+  bills: { light: '#6F9CCF', dark: '#4E8FDB' },
+  entertainment: { light: '#C58A82', dark: '#D76F5F' },
 };
 
 export const catPastel = (cat: string, dark: boolean) =>
   CAT_PASTEL[cat]?.[dark ? 'dark' : 'light'] ?? '#CCCCCC';
 
 // Over-budget warning colors
-export const OVER_BG   = '#F4E9E5';
+export const OVER_BG = '#F4E9E5';
 export const OVER_TEXT = '#8A3218';
-export const OVER_DOT  = '#D4522A';
-export function overBg(dark: boolean)   { return dark ? '#2A1612' : OVER_BG; }
-export function overText(dark: boolean) { return dark ? '#F09272' : OVER_TEXT; }
+export const OVER_DOT = '#D4522A';
+export function overBg(dark: boolean) {
+  return dark ? '#2A1612' : OVER_BG;
+}
+export function overText(dark: boolean) {
+  return dark ? '#F09272' : OVER_TEXT;
+}
 
 // Caution colors (bills due soon, off-target spending)
-export const CAUTION_BG     = '#F1E6B7';
-export const CAUTION_TEXT   = '#6E5A1F';
-export const CAUTION_AMBER  = '#C5A946'; // chart/bar fill at "near limit" — DESIGN.md caution-amber
-export function cautionBg(dark: boolean)   { return dark ? '#201A0A' : CAUTION_BG; }
-export function cautionText(dark: boolean) { return dark ? '#CCA838' : CAUTION_TEXT; }
-export function flagBg(dark: boolean):     string { return dark ? '#C8881C' : '#B87018'; }
+export const CAUTION_BG = '#F1E6B7';
+export const CAUTION_TEXT = '#6E5A1F';
+export const CAUTION_AMBER = '#C5A946'; // chart/bar fill at "near limit" — DESIGN.md caution-amber
+export function cautionBg(dark: boolean) {
+  return dark ? '#201A0A' : CAUTION_BG;
+}
+export function cautionText(dark: boolean) {
+  return dark ? '#CCA838' : CAUTION_TEXT;
+}
+export function flagBg(dark: boolean): string {
+  return dark ? '#C8881C' : '#B87018';
+}
 
 // Hero "available" status color — teal on the dark hero/wallpaper surface.
 // DESIGN.md hero-avail token.
@@ -127,24 +203,27 @@ export const HERO_AVAIL = '#5CC4BA';
 
 // Accent colors for the three 50/30/20 spending groups.
 // Import GROUP_COLORS in any component that needs to color by group.
-export const GROUP_COLORS: Record<string, { light: string; dark: string; vibrant: string }> = {
-  needs:   { light: '#5B7FBB', dark: '#7A9ED8', vibrant: '#2857CC' },
-  wants:   { light: '#B86C60', dark: '#D08878', vibrant: '#C4311E' },
-  savings: { light: '#4AA8A0', dark: '#5CC4BA', vibrant: '#0A8C85' },
+export const GROUP_COLORS: Record<
+  string,
+  { light: string; dark: string; vibrant: string }
+> = {
+  needs: { light: '#4E8FDB', dark: '#4E8FDB', vibrant: '#4E8FDB' },
+  wants: { light: '#D76F5F', dark: '#D76F5F', vibrant: '#D76F5F' },
+  savings: { light: '#48B8A4', dark: '#48B8A4', vibrant: '#48B8A4' },
 };
 
 // Maps every transaction category key to its spending group.
 // Add new categories here so icon colors stay consistent automatically.
 export const CAT_TO_GROUP: Record<string, 'needs' | 'wants' | 'savings'> = {
-  groceries:     'needs',
-  transport:     'needs',
-  bills:         'needs',
-  housing:       'needs',
-  dining:        'wants',
-  shopping:      'wants',
+  groceries: 'needs',
+  transport: 'needs',
+  bills: 'needs',
+  housing: 'needs',
+  dining: 'wants',
+  shopping: 'wants',
   entertainment: 'wants',
   'emergency-fund': 'savings',
-  retirement:    'savings',
+  retirement: 'savings',
 };
 
 export function catGroupColor(cat: string, dark: boolean): string {

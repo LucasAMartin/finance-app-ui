@@ -271,6 +271,9 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
                       }}
                       tintColor={makeTheme(pendingDark, pendingAccent, cardStyle).accent.dot}
                       appearance={dark ? 'dark' : 'light'}
+                      backgroundColor={dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
+                      fontStyle={{ color: dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
+                      activeFontStyle={{ color: dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
                     />
                   </View>
 
@@ -317,6 +320,9 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
                 }}
                 tintColor={makeTheme(pendingDark, pendingAccent, cardStyle).accent.dot}
                 appearance="dark"
+                backgroundColor="rgba(242,244,245,0.055)"
+                fontStyle={{ color: 'rgba(242,244,245,0.68)' }}
+                activeFontStyle={{ color: '#080A0D', fontWeight: '600' }}
               />
             </View>
 

@@ -407,6 +407,9 @@ function EditSection({
           }}
           tintColor={theme.accent.dot}
           appearance={theme.dark ? 'dark' : 'light'}
+          backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
+          fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
+          activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
           style={S.groupSegmented}
         />
 
