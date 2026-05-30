@@ -44,8 +44,6 @@ import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
 import {
   InsightBarChart,
-  InsightMixChart,
-  InsightPaceChart,
   type InsightBin,
   type InsightDetail,
   type InsightGroup,
@@ -61,7 +59,6 @@ const CHART_INNER_W  = CARD_W - CARD_INNER_PAD * 2;
 const CHART_H        = 188;
 const INSIGHT_SHEET_DETENT: PresentationDetent = { fraction: 0.42 };
 
-const CHART_TYPES    = ['Period', 'Planned', 'Categories'] as const;
 const PERIODS        = ['Week', 'Month', 'Year'] as const;
 type Period          = (typeof PERIODS)[number];
 const BREAKDOWN_TABS = ['Category', 'Merchant'] as const;
@@ -337,46 +334,51 @@ function EmptyState({
   );
 }
 
-function ReadoutRow({
-  label,
-  title,
-  value,
-  color,
-  text,
-  textTer,
-  onPress,
+// Compact 50/30/20 allocation: a single stacked bar + a tappable legend.
+// Replaces the standalone Mix donut chart — the split now reads inline at the
+// top of the breakdown, and each group opens the same detail sheet on tap.
+function AllocationBar({
+  groups,
+  total,
+  p,
+  onSelectGroup,
 }: {
-  label: string;
-  title: string;
-  value?: string;
-  color: string;
-  text: string;
-  textTer: string;
-  onPress?: () => void;
+  groups: InsightGroup[];
+  total: number;
+  p: P;
+  onSelectGroup: (g: InsightGroup) => void;
 }) {
-  const content = (
-    <>
-      <View style={[styles.readoutDot, { backgroundColor: color }]} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[TYPE.labelSm, { color: textTer }]}>{label}</Text>
-        <Text style={[TYPE.bodySmEm, { color: text, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
-      </View>
-      {value ? <Text style={[TYPE.bodySmEm, { color }]}>{value}</Text> : null}
-    </>
-  );
-
-  if (!onPress) return <View style={styles.readoutRow}>{content}</View>;
+  const safe = Math.max(total, 0.0001);
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.65}
-      delayPressIn={0}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}. ${title}${value ? `. ${value}` : ''}`}
-      style={styles.readoutRow}
-    >
-      {content}
-    </TouchableOpacity>
+    <View style={styles.alloc}>
+      <View style={[styles.allocTrack, { backgroundColor: p.hairline }]}>
+        {groups.map(g => {
+          const frac = Math.max(0, g.value / safe);
+          if (frac <= 0) return null;
+          return <View key={g.key} style={{ flex: frac, backgroundColor: g.color }} />;
+        })}
+      </View>
+      <View style={styles.allocLegend}>
+        {groups.map(g => {
+          const pct = total > 0 ? Math.round((g.value / total) * 100) : 0;
+          return (
+            <TouchableOpacity
+              key={g.key}
+              onPress={() => onSelectGroup(g)}
+              activeOpacity={0.6}
+              delayPressIn={0}
+              accessibilityRole="button"
+              accessibilityLabel={`${g.label}, ${pct}% of spend, target ${Math.round(g.targetPct * 100)}%`}
+              style={styles.allocLegendItem}
+            >
+              <View style={[styles.allocDot, { backgroundColor: g.color }]} />
+              <Text style={[TYPE.captionEm, { color: p.text }]} numberOfLines={1}>{g.label}</Text>
+              <Text style={[TYPE.caption, { color: p.textSec }]}>{pct}%</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -491,7 +493,6 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
   const shadow  = DARK_TEXT_SHADOW;
 
   const [period,    setPeriod]    = useState<Period>('Week');
-  const [chartIdx,  setChartIdx]  = useState(0);
   const [breakdown, setBreakdown] = useState<BreakdownMode>('Category');
   const [insightDetail, setInsightDetail] = useState<InsightDetail | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<InsightDetail | null>(null);
@@ -593,22 +594,6 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
       color: delta > 0 ? OVER_DOT : groupDisplayColor('savings', theme.dark),
     };
   }, [catBreakdown.total, insightBins, monthlyBgt, now, period, ranges.current.from, ranges.current.to, rangeComplete, theme.dark]);
-  const whatChanged = useMemo(() => {
-    return catBreakdown.rows
-      .map(row => {
-        const delta = row.spent - row.prevSpent;
-        const pct = row.prevSpent > 0 ? Math.round((delta / row.prevSpent) * 100) : null;
-        return {
-          ...row,
-          delta,
-          pct,
-          color: delta > 0 ? OVER_DOT : delta < 0 ? groupDisplayColor('savings', theme.dark) : p.textSec,
-          statusLabel: row.prevSpent === 0 ? 'New' : delta > 0 ? 'Up' : delta < 0 ? 'Down' : 'Flat',
-        };
-      })
-      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-      .slice(0, 3);
-  }, [catBreakdown.rows, p.textSec, theme.dark]);
   const topDriver = useMemo(() => {
     const merchant = merchBreakdown.rows[0];
     if (!merchant) return null;
@@ -630,7 +615,6 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
     const bill = upcomingBills[0] ?? null;
     return { pressureCat, bill };
   }, [catBreakdown.rows, upcomingBills]);
-  const topChange = whatChanged.find(row => row.delta !== 0 && row.prevSpent > 0) ?? null;
   const hasSpending = total > 0;
   const nowInsight = useMemo(() => {
     if (!hasSpending) {
@@ -720,20 +704,25 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
     setSelectedDetail(detail);
   }, []);
 
-  const withCurrentRange = useCallback((detail: InsightDetail): InsightDetail => ({
-    ...detail,
-    filter: detail.filter
-      ? { ...detail.filter, dateFrom: ranges.current.from, dateTo: ranges.current.to }
-      : undefined,
-  }), [ranges.current.from, ranges.current.to]);
-
-  const handleMixSelect = useCallback((detail: InsightDetail) => {
-    setSelectedDetail(withCurrentRange(detail));
-  }, [withCurrentRange]);
-
-  const handleMixInspect = useCallback((detail: InsightDetail) => {
-    setInsightDetail(withCurrentRange(detail));
-  }, [withCurrentRange]);
+  const groupDetail = useCallback((g: InsightGroup): InsightDetail => {
+    const actualPct = total > 0 ? g.value / total : 0;
+    const over = actualPct - g.targetPct > 0.02;
+    return {
+      title: g.label,
+      eyebrow: '50/30/20 mix',
+      amount: money(g.value, g.value < 100 ? 2 : 0),
+      color: over ? OVER_DOT : g.color,
+      description: `${Math.round(actualPct * 100)}% of spend · target ${Math.round(g.targetPct * 100)}%`,
+      metrics: [
+        { label: 'Actual', value: `${Math.round(actualPct * 100)}%` },
+        { label: 'Target', value: `${Math.round(g.targetPct * 100)}%` },
+        { label: 'Txns', value: String(g.txCount) },
+      ],
+      filter: g.catIds.length
+        ? { catIds: g.catIds, dateFrom: ranges.current.from, dateTo: ranges.current.to }
+        : undefined,
+    };
+  }, [total, ranges.current.from, ranges.current.to]);
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
 
@@ -866,6 +855,31 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
             />
           </View>
 
+          {/* ─── Hero: total spend, on the scrim ───── */}
+          <View style={styles.heroBlock}>
+            <Text style={[TYPE.label, { color: pWall.textSec }, shadow]}>
+              {`Spent ${rangeContextLabel.toLowerCase()}`}
+            </Text>
+            <Text style={[styles.heroAmount, { color: pWall.text }, shadow]}>
+              {spendDisplay.whole}
+              <Text style={[styles.heroCents, { color: pWall.textSec }]}>{spendDisplay.cents}</Text>
+            </Text>
+            {prevTotal > 0 && (
+              <View style={styles.heroDeltaRow}>
+                <View style={[styles.heroDeltaPill, {
+                  backgroundColor: deltaIsDown ? 'rgba(92,196,186,0.22)' : 'rgba(212,82,42,0.24)',
+                }]}>
+                  <Text style={[styles.heroDeltaText, { color: deltaIsDown ? '#A7ECE2' : '#F4AB91' }]}>
+                    {deltaIsDown ? '▼' : '▲'} {deltaPctAbs}%
+                  </Text>
+                </View>
+                <Text style={[TYPE.bodySm, { color: pWall.textSec }, shadow]}>
+                  {money(Math.abs(total - prevTotal))} {deltaIsDown ? 'less than' : 'more than'} last {period.toLowerCase()}
+                </Text>
+              </View>
+            )}
+          </View>
+
           {/* ─── Sections ─────────────────────────── */}
           <View style={styles.sectionStack}>
 
@@ -880,78 +894,23 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
                 onPress={nowInsight.onPress}
               />
 
-              <View style={styles.chartHero}>
-                <Text style={[styles.chartHeroAmount, { color: p.text }]}>
-                  {spendDisplay.whole}
-                  <Text style={[styles.chartHeroCents, { color: p.text }]}>{spendDisplay.cents}</Text>
-                </Text>
-                <View style={styles.chartHeroSubRow}>
-                  <Text style={[styles.chartHeroLabel, { color: p.textSec }]}>Total spend in range</Text>
-                  {prevTotal > 0 && (
-                    <View style={[
-                      styles.heroOverviewDelta,
-                      {
-                        backgroundColor: deltaIsDown
-                          ? (theme.dark ? 'rgba(122,205,138,0.16)' : 'rgba(58,135,80,0.10)')
-                          : (theme.dark ? 'rgba(212,82,42,0.18)' : 'rgba(212,82,42,0.12)'),
-                      },
-                    ]}>
-                      <Text style={[styles.deltaText, { color: deltaIsDown ? (theme.dark ? '#7ACD8A' : '#3A8750') : OVER_DOT }]}>
-                        {deltaIsDown ? '▼' : '▲'} {deltaPctAbs}%
-                      </Text>
-                    </View>
-                  )}
-                  {prevTotal > 0 && <Text style={[styles.chartHeroVs, { color: p.textTer }]}>vs prev</Text>}
-                </View>
-              </View>
-
-              <View style={styles.chartSwitchWrap}>
-                <SegmentedControl
-                  values={CHART_TYPES as unknown as string[]}
-                  selectedIndex={chartIdx}
-                  onChange={(e) => setChartIdx(e.nativeEvent.selectedSegmentIndex)}
-                  tintColor={theme.accent.dot}
-                  appearance={theme.dark ? 'dark' : 'light'}
-                />
+              <View style={styles.chartHead}>
+                <Text style={[styles.chartTitle, { color: p.text }]}>Spending rhythm</Text>
+                <Text style={[TYPE.caption, { color: p.textSec }]}>{rangeContextLabel}</Text>
               </View>
 
               {hasSpending ? (
                 <>
                   <View style={[styles.chartSlide, { width: CHART_INNER_W }]}>
-                    {chartIdx === 0 && (
-                      <InsightBarChart
-                        bins={insightBins}
-                        theme={theme}
-                        width={CHART_INNER_W}
-                        height={CHART_H}
-                        onInspect={setInsightDetail}
-                        onSelectDetail={handleSelectedDetail}
-                        onInteractionChange={setChartHolding}
-                      />
-                    )}
-                    {chartIdx === 1 && (
-                      <InsightPaceChart
-                        bins={insightBins}
-                        theme={theme}
-                        width={CHART_INNER_W}
-                        height={CHART_H}
-                        onInspect={setInsightDetail}
-                        onSelectDetail={handleSelectedDetail}
-                        onInteractionChange={setChartHolding}
-                      />
-                    )}
-                    {chartIdx === 2 && (
-                      <InsightMixChart
-                        groups={mixGroups}
-                        total={total}
-                        theme={theme}
-                        width={CHART_INNER_W}
-                        height={CHART_H}
-                        onInteractionChange={setChartHolding}
-                        onSelectDetail={handleMixSelect}
-                        onInspect={handleMixInspect}
-                      />
-                    )}
+                    <InsightBarChart
+                      bins={insightBins}
+                      theme={theme}
+                      width={CHART_INNER_W}
+                      height={CHART_H}
+                      onInspect={setInsightDetail}
+                      onSelectDetail={handleSelectedDetail}
+                      onInteractionChange={setChartHolding}
+                    />
                   </View>
 
                   <SelectedInsightStrip
@@ -963,152 +922,38 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
               ) : (
                 <EmptyState
                   title="No chart data yet"
-                  body="Choose another range to inspect spend, pace, and mix."
+                  body="Choose another range to inspect your spending."
                   theme={theme}
                 />
               )}
             </SectionCard>
 
+            {/* ── Where it went: 50/30/20 + breakdown ── */}
             <SectionCard dark={theme.dark}>
-              <View style={styles.readoutHead}>
-                <Text style={[styles.chartTitle, { color: p.text }]}>Snapshot</Text>
-                <Text style={[TYPE.caption, { color: p.textSec }]}>{rangeContextLabel}</Text>
+              <View style={styles.breakdownHead}>
+                <Text style={[styles.chartTitle, { color: p.text }]}>Where it went</Text>
+                <View style={styles.breakdownToggle}>
+                  <SegmentedControl
+                    values={BREAKDOWN_TABS as unknown as string[]}
+                    selectedIndex={breakdownIdx}
+                    onChange={(e) => {
+                      const next = BREAKDOWN_TABS[e.nativeEvent.selectedSegmentIndex];
+                      if (next) setBreakdown(next);
+                    }}
+                    tintColor={theme.accent.dot}
+                    appearance={theme.dark ? 'dark' : 'light'}
+                  />
+                </View>
               </View>
 
-              <View style={styles.readoutRows}>
-                {topDriver && (
-                  <ReadoutRow
-                    label="Driver"
-                    title={topDriver.copy}
-                    value={money(topDriver.merchant.spent, topDriver.merchant.spent < 100 ? 2 : 0)}
-                    color={topDriver.color}
-                    text={p.text}
-                    textTer={p.textTer}
-                    onPress={() => setInsightDetail({
-                      title: topDriver.merchant.merchant,
-                      eyebrow: `${rangeContextLabel} merchant`,
-                      amount: money(topDriver.merchant.spent, topDriver.merchant.spent < 100 ? 2 : 0),
-                      color: topDriver.color,
-                      description: topDriver.copy,
-                      metrics: [
-                        { label: 'Category', value: topDriver.cat?.label ?? topDriver.merchant.cat },
-                        { label: 'Txns', value: String(topDriver.merchant.txCount) },
-                        { label: 'Share', value: `${Math.round(topDriver.merchant.pct * 100)}%` },
-                      ],
-                      filter: {
-                        merchantQuery: topDriver.merchant.merchant,
-                        dateFrom: ranges.current.from,
-                        dateTo: ranges.current.to,
-                      },
-                    })}
-                  />
-                )}
-
-                {budgetPressure.pressureCat && (
-                  <ReadoutRow
-                    label={rangeComplete ? 'Budget' : 'Pace'}
-                    title={
-                      rangeComplete
-                        ? (budgetPressure.pressureCat.remaining < 0
-                            ? `${budgetPressure.pressureCat.label} ended over plan`
-                            : `${budgetPressure.pressureCat.label} came in ${money(budgetPressure.pressureCat.remaining)} under`)
-                        : (budgetPressure.pressureCat.remaining < 0
-                            ? `${budgetPressure.pressureCat.label} is above planned pace`
-                            : `${budgetPressure.pressureCat.label} has ${money(budgetPressure.pressureCat.remaining)} left at pace`)
-                    }
-                    value={`${Math.round(budgetPressure.pressureCat.ratio * 100)}% ${rangeComplete ? 'of budget' : 'pace'}`}
-                    color={budgetPressure.pressureCat.remaining < 0 ? OVER_DOT : categoryDisplayColor(budgetPressure.pressureCat.cat, categories, theme.dark)}
-                    text={p.text}
-                    textTer={p.textTer}
-                    onPress={() => setInsightDetail({
-                      title: budgetPressure.pressureCat.label,
-                      eyebrow: `${rangeContextLabel} category`,
-                      amount: money(budgetPressure.pressureCat.spent, budgetPressure.pressureCat.spent < 100 ? 2 : 0),
-                      color: budgetPressure.pressureCat.remaining < 0 ? OVER_DOT : categoryDisplayColor(budgetPressure.pressureCat.cat, categories, theme.dark),
-                      description: rangeComplete
-                        ? (budgetPressure.pressureCat.remaining < 0
-                            ? `${money(Math.abs(budgetPressure.pressureCat.remaining))} over budget for this range.`
-                            : `${money(budgetPressure.pressureCat.remaining)} under budget for this range.`)
-                        : (budgetPressure.pressureCat.remaining < 0
-                            ? 'Spending is above the planned pace for this range.'
-                            : `${money(budgetPressure.pressureCat.remaining)} left at the current planned pace.`),
-                      metrics: [
-                        { label: rangeComplete ? 'Of budget' : 'Pace', value: `${Math.round(budgetPressure.pressureCat.ratio * 100)}%` },
-                        { label: 'Txns', value: String(budgetPressure.pressureCat.txCount) },
-                        { label: 'Share', value: `${Math.round(budgetPressure.pressureCat.pct * 100)}%` },
-                      ],
-                      filter: {
-                        catIds: [budgetPressure.pressureCat.cat],
-                        dateFrom: ranges.current.from,
-                        dateTo: ranges.current.to,
-                      },
-                    })}
-                  />
-                )}
-
-                {budgetPressure.bill && (
-                  <ReadoutRow
-                    label="Upcoming"
-                    title={`${budgetPressure.bill.name} due in ${budgetPressure.bill.daysUntil}d`}
-                    value={money(budgetPressure.bill.amount, budgetPressure.bill.amount < 100 ? 2 : 0)}
-                    color={CAUTION_AMBER}
-                    text={p.text}
-                    textTer={p.textTer}
-                  />
-                )}
-
-                {topChange && (
-                  <ReadoutRow
-                    label="Changed"
-                    title={`${topChange.label} ${topChange.statusLabel.toLowerCase()}`}
-                    value={signedMoney(topChange.delta)}
-                    color={topChange.color}
-                    text={p.text}
-                    textTer={p.textTer}
-                    onPress={() => setInsightDetail({
-                      title: topChange.label,
-                      eyebrow: `${rangeContextLabel} change`,
-                      amount: money(topChange.spent, topChange.spent < 100 ? 2 : 0),
-                      color: topChange.color,
-                      description: `${signedMoney(topChange.delta)} compared with the previous ${period.toLowerCase()}.`,
-                      metrics: [
-                        { label: 'Previous', value: money(topChange.prevSpent, topChange.prevSpent < 100 ? 2 : 0) },
-                        { label: 'Now', value: money(topChange.spent, topChange.spent < 100 ? 2 : 0) },
-                        { label: 'Txns', value: String(topChange.txCount) },
-                      ],
-                      filter: {
-                        catIds: [topChange.cat],
-                        dateFrom: ranges.current.from,
-                        dateTo: ranges.current.to,
-                      },
-                    })}
-                  />
-                )}
-
-                {!topDriver && !budgetPressure.pressureCat && !budgetPressure.bill && !topChange && (
-                  <EmptyState
-                    title="No snapshot yet"
-                    body="Switch periods to compare drivers, budget pressure, and bills."
-                    theme={theme}
-                  />
-                )}
-              </View>
-            </SectionCard>
-
-            {/* ── Category / Merchant breakdown ──── */}
-            <SectionCard dark={theme.dark}>
-              <View style={styles.breakdownTabsWrap}>
-                <SegmentedControl
-                  values={BREAKDOWN_TABS as unknown as string[]}
-                  selectedIndex={breakdownIdx}
-                  onChange={(e) => {
-                    const next = BREAKDOWN_TABS[e.nativeEvent.selectedSegmentIndex];
-                    if (next) setBreakdown(next);
-                  }}
-                  tintColor={theme.accent.dot}
-                  appearance={theme.dark ? 'dark' : 'light'}
+              {hasSpending && (
+                <AllocationBar
+                  groups={mixGroups}
+                  total={total}
+                  p={p}
+                  onSelectGroup={(g) => setInsightDetail(groupDetail(g))}
                 />
-              </View>
+              )}
 
               {breakdown === 'Category' && catBreakdown.rows.length === 0 ? (
                 <EmptyState
@@ -1321,7 +1166,14 @@ const styles = StyleSheet.create({
   weekNavBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   weekNavMenuHost: { flex: 1, height: 38 },
   weekNavMenuLabel: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
-  segmentWrap: { paddingHorizontal: CARD_OUTER_PAD, marginBottom: 24 },
+  segmentWrap: { paddingHorizontal: CARD_OUTER_PAD, marginBottom: 18 },
+  // Hero — total spend sitting directly on the wallpaper scrim
+  heroBlock: { paddingHorizontal: CARD_OUTER_PAD, paddingBottom: 22 },
+  heroAmount: { ...TYPE.displayXl, marginTop: 6 },
+  heroCents: { ...TYPE.headline, fontWeight: '600' },
+  heroDeltaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  heroDeltaPill: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 100 },
+  heroDeltaText: { fontSize: 12, fontWeight: '700', letterSpacing: -0.1 },
   sectionStack: { paddingHorizontal: CARD_OUTER_PAD, gap: 24 },
   sectionCard: { borderRadius: 24, overflow: 'hidden' },
   sectionCardBorder: {
@@ -1348,14 +1200,7 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 5,
   },
-  chartHero: { marginBottom: 16 },
-  chartHeroAmount: { ...TYPE.display, lineHeight: 38 },
-  chartHeroCents:  { ...TYPE.subsectionTitle, opacity: 0.65 },
-  chartHeroSubRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  chartHeroLabel:  { ...TYPE.bodySm },
-  chartHeroVs:     { ...TYPE.caption },
-  heroOverviewDelta: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
-  chartSwitchWrap: { marginBottom: 12 },
+  chartHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 },
   chartSlide: { height: CHART_H, justifyContent: 'center' },
   selectedStrip: {
     minHeight: 50,
@@ -1386,50 +1231,38 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     marginTop: 12,
   },
-  // Readout
-  readoutHead: {
+  // Where it went — header + 50/30/20 allocation
+  breakdownHead: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 16,
   },
-  driverCard: {
-    borderRadius: 18,
-    padding: 12,
+  breakdownToggle: { width: 168 },
+  alloc: { marginBottom: 14 },
+  allocTrack: {
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    gap: 2,
+  },
+  allocLegend: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  allocLegendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
-    marginBottom: 8,
+    gap: 6,
   },
-  driverIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  readoutRows: {
-    gap: 4,
-  },
-  readoutRow: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-  },
-  readoutDot: {
-    width: 8,
-    height: 8,
+  allocDot: {
+    width: 7,
+    height: 7,
     borderRadius: 4,
   },
-  changedBlock: {
-    borderTopWidth: 1,
-    marginTop: 8,
-    paddingTop: 12,
-  },
-  // Breakdown
-  breakdownTabsWrap: { marginBottom: 8 },
+  // Breakdown rows
   row: {
     flexDirection: 'row', alignItems: 'flex-start',
     gap: 12, paddingVertical: 12,
