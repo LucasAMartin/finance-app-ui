@@ -37,7 +37,7 @@ const SECTIONS: DrawerSection[] = [
     items: [
       { id: 'home',       label: 'Dashboard',      icon: 'home' },
       { id: 'budget',     label: 'Budgets',        icon: 'chart' },
-      { id: 'spending',   label: 'Spending',       icon: 'tag' },
+      { id: 'insights',   label: 'Insights',       icon: 'chart' },
       { id: 'activity',   label: 'Activity',       icon: 'note', badge: 3 },
     ],
   },

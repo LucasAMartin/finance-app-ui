@@ -164,7 +164,7 @@ const fmtAmount = (n: number) =>
 
 interface Props {
   theme: Theme;
-  onViewSpending: () => void;
+  onViewInsights: () => void;
   onViewActivity: () => void;
   onOpenDrawer: () => void;
   onAddVoice: () => void;
@@ -177,7 +177,7 @@ interface Props {
   onOpenBill: (bill: Bill) => void;
 }
 
-export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill }: Props) {
+export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
@@ -448,8 +448,8 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
             <SectionCard dark={theme.dark}>
               <View style={styles.sectionHead}>
                 <Text style={[styles.ledgerLabel, { color: p.text }]}>Spending</Text>
-                <TouchableOpacity onPress={onViewSpending} activeOpacity={0.6} delayPressIn={0}>
-                  <Text style={[styles.ledgerAction, { color: p.text }]}>See all</Text>
+                <TouchableOpacity onPress={onViewInsights} activeOpacity={0.6} delayPressIn={0}>
+                  <Text style={[styles.ledgerAction, { color: p.text }]}>Insights</Text>
                 </TouchableOpacity>
               </View>
               {loading ? (

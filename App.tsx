@@ -18,7 +18,7 @@ import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
 
 import { HomeScreen } from './src/screens/HomeScreen';
-import { SpendingScreen } from './src/screens/SpendingScreen';
+import { InsightsScreen } from './src/screens/InsightsScreen';
 import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
@@ -31,14 +31,14 @@ import { BillSheet } from './src/components/BillSheet';
 import { Drawer } from './src/components/Drawer';
 import type { Bill, Transaction } from './src/repositories/types';
 
-type Screen = 'home' | 'spending' | 'activity' | 'budget';
+type Screen = 'home' | 'insights' | 'activity' | 'budget';
 
 patchTextWithInter();
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(300, SCREEN_W * 0.82);
 
-const ALL_SCREENS: Screen[] = ['home', 'spending', 'budget', 'activity'];
+const ALL_SCREENS: Screen[] = ['home', 'insights', 'budget', 'activity'];
 
 const FADE_DURATION = 180;
 
@@ -117,7 +117,7 @@ function AppInner() {
   // Driven imperatively — no useEffect cycle.
   const OP = useRef<Record<Screen, Animated.Value>>({
     home:     new Animated.Value(1),
-    spending: new Animated.Value(0),
+    insights: new Animated.Value(0),
     budget:   new Animated.Value(0),
     activity: new Animated.Value(0),
   }).current;
@@ -185,7 +185,7 @@ function AppInner() {
     closeDrawer();
     if      (id === 'home')     navigate('home');
     else if (id === 'budget')   navigate('budget');
-    else if (id === 'spending') navigate('spending');
+    else if (id === 'insights') navigate('insights');
     else if (id === 'activity') navigate('activity');
     else if (id === 'settings') setThemeOpen(true);
   };
@@ -203,7 +203,7 @@ function AppInner() {
         <AnimatedScreen opacity={OP.home} active={screen === 'home'}>
           <HomeScreen
             theme={theme}
-            onViewSpending={() => navigate('spending')}
+            onViewInsights={() => navigate('insights')}
             onViewActivity={() => navigate('activity')}
             onOpenDrawer={openDrawer}
             onAddVoice={() => openAdd('voice')}
@@ -220,8 +220,8 @@ function AppInner() {
           />
         </AnimatedScreen>
 
-        <AnimatedScreen opacity={OP.spending} active={screen === 'spending'}>
-          <SpendingScreen theme={theme} onOpenDrawer={openDrawer} onViewActivity={navigateToActivity} />
+        <AnimatedScreen opacity={OP.insights} active={screen === 'insights'}>
+          <InsightsScreen theme={theme} onOpenDrawer={openDrawer} onViewActivity={navigateToActivity} />
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.activity} active={screen === 'activity'}>
@@ -234,11 +234,11 @@ function AppInner() {
 
         <TabBar
           theme={theme}
-          active={screen === 'activity' ? 'profile' : screen}
+          active={screen === 'activity' ? 'profile' : screen === 'insights' ? 'spending' : screen}
           onAdd={() => openAdd('voice')}
           onTabPress={(id) => {
             if      (id === 'home')     navigate('home');
-            else if (id === 'spending') navigate('spending');
+            else if (id === 'spending') navigate('insights');
             else if (id === 'budget')   navigate('budget');
             else if (id === 'profile')  navigate('activity');
           }}

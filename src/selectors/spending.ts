@@ -14,7 +14,7 @@ export interface SpendingRanges {
   prev: PeriodRange;
 }
 
-/** Handed off from SpendingScreen → App.tsx → ActivityScreen to pre-apply filters on drill-in. */
+/** Handed off from InsightsScreen → App.tsx → ActivityScreen to pre-apply filters on drill-in. */
 export interface ActivityInitialFilter {
   catIds?: string[];
   merchantQuery?: string;

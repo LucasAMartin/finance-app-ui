@@ -1354,7 +1354,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
 	                          <Text style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
 	                        </View>
 	                        <Text style={[TYPE.caption, { color: groupIsOver ? OVER_DOT : p.textSec }]}>
-	                          {groupIsOver ? `\$${fmtMoney(groupDelta)} over target` : `\$${fmtMoney(groupTarget)} target · ${fmtPct(g.targetPct)}`}
+	                          {groupIsOver ? `\$${fmtMoney(groupDelta)} over target of ${fmtPct(g.targetPct)}` : `\$${fmtMoney(groupTarget)} target · ${fmtPct(g.targetPct)}`}
 	                        </Text>
 	                      </View>
 	                      <View style={styles.groupHeadAmount}>

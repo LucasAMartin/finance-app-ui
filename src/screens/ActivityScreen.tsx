@@ -736,7 +736,11 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                         <Text style={[S.dayLabel, { color: p.textTer }]}>
                           {MONTHS[calViewMonth]} {selectedDay}
                         </Text>
-                        <Text style={[S.summaryTotal, { color: p.text }]}>${dayDetailSpend.toFixed(2)}</Text>
+                        <Text style={[S.summaryLabel, { color: p.textSec }]}>
+                          {dayDetail.txs.length === 1
+                            ? '1 transaction'
+                            : `${dayDetail.txs.length} transactions · $${dayDetailSpend.toFixed(2)} total`}
+                        </Text>
                       </View>
                       {dayDetail.txs.map((tx, i) => (
                         <TxRow
@@ -1332,6 +1336,7 @@ function DayGroup({
 }) {
   const p     = makeP(theme.dark);
   const { txs } = group;
+  const expenseCount = txs.filter(t => t.type !== 'income').length;
   const spendTotal = txs.filter(t => t.type !== 'income').reduce((s, t) => s + t.amount, 0);
   // Relative spend weight: days above 2× the average get caution amber;
   // days above average get full-weight text instead of secondary.
@@ -1347,7 +1352,9 @@ function DayGroup({
     <View style={{ marginBottom: 16 }}>
       <View style={S.dayHeader}>
         <Text style={[S.dayLabel, { color: p.textTer }]}>{label}</Text>
-        <Text style={[S.dayTotal, { color: dayTotalColor }]}>${spendTotal.toFixed(2)}</Text>
+        <Text style={[S.dayTotal, { color: expenseCount > 1 ? dayTotalColor : p.textTer }]}>
+          {expenseCount > 1 ? `$${spendTotal.toFixed(2)} total` : `${txs.length} ${txs.length === 1 ? 'transaction' : 'transactions'}`}
+        </Text>
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
