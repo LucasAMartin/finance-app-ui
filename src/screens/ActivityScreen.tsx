@@ -20,8 +20,9 @@ import {
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BottomSheet, Group, Host, RNHostView, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
-import { background, presentationDetents, presentationDragIndicator, pickerStyle, tag, tint, fixedSize, environment } from '@expo/ui/swift-ui/modifiers';
+import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
+import { background, presentationDetents, presentationDragIndicator } from '@expo/ui/swift-ui/modifiers';
+import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
@@ -954,6 +955,12 @@ function FilterSheet({
   })();
 
   const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
+  // Trigger label for the Date menu (mirrors menu indices: 0 = Any time, 1-4 = presets, 5 = Custom).
+  const dateMenuLabel = datePickerIdx === 0
+    ? 'Any time'
+    : datePickerIdx === 5
+      ? customLabel
+      : DATE_PRESETS[datePickerIdx - 1]?.label ?? 'Any time';
   const groupedCategories = (['needs', 'wants', 'savings'] as const).map(key => ({
     key,
     label: key === 'needs' ? 'Needs' : key === 'wants' ? 'Wants' : 'Savings',
@@ -1005,49 +1012,53 @@ function FilterSheet({
                 showsVerticalScrollIndicator={false}
                 scrollEventThrottle={16}
               >
-                {/* ── Sort by — native iOS menu picker ───────────── */}
+                {/* ── Sort by — UIKit menu (styled trigger) ──────── */}
                 <View style={FS.sortRow}>
                   <Text style={[FS.sortRowLabel, { color: theme.text }]}>Sort by</Text>
-                  <Host matchContents>
-                    <Picker
-                      selection={sortIdx >= 0 ? sortIdx : 0}
-                      onSelectionChange={(val) => setSortBy(SORT_OPTIONS[Number(val)].id)}
-                      modifiers={[
-                        pickerStyle('menu'),
-                        tint(theme.accent.dot),
-                        environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-                        fixedSize({ horizontal: true, vertical: false }),
-                      ]}
-                    >
-                      {SORT_OPTIONS.map((o, idx) => (
-                        <SwiftText key={o.id} modifiers={[tag(idx)]}>{o.label}</SwiftText>
-                      ))}
-                    </Picker>
-                  </Host>
+                  <MenuView
+                    shouldOpenOnLongPress={false}
+                    themeVariant={theme.dark ? 'dark' : 'light'}
+                    actions={SORT_OPTIONS.map((o, idx) => ({
+                      id: String(idx),
+                      title: o.label,
+                      state: idx === (sortIdx >= 0 ? sortIdx : 0) ? 'on' : 'off',
+                    }))}
+                    onPressAction={({ nativeEvent }) => setSortBy(SORT_OPTIONS[Number(nativeEvent.event)].id)}
+                  >
+                    <View style={FS.menuTrigger}>
+                      <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]}>
+                        {SORT_OPTIONS[sortIdx >= 0 ? sortIdx : 0]?.label}
+                      </Text>
+                      <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
+                    </View>
+                  </MenuView>
                 </View>
 
-                {/* ── Date — native picker dropdown ──────────────── */}
-                {/* Picker indices: 0 = Any time, 1-4 = presets, 5 = Custom range */}
+                {/* ── Date — UIKit menu (styled trigger) ─────────── */}
+                {/* Menu indices: 0 = Any time, 1-4 = presets, 5 = Custom range */}
                 <View style={FS.sortRow}>
                   <Text style={[FS.sortRowLabel, { color: theme.text }]}>Date</Text>
-                  <Host matchContents>
-                    <Picker
-                      selection={datePickerIdx}
-                      onSelectionChange={(val) => handleDatePickerChange(Number(val))}
-                      modifiers={[
-                        pickerStyle('menu'),
-                        tint(theme.accent.dot),
-                        environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-                        fixedSize({ horizontal: true, vertical: false }),
-                      ]}
-                    >
-                      <SwiftText modifiers={[tag(0)]}>Any time</SwiftText>
-                      {DATE_PRESETS.map((o, i) => (
-                        <SwiftText key={o.id} modifiers={[tag(i + 1)]}>{o.label}</SwiftText>
-                      ))}
-                      <SwiftText modifiers={[tag(5)]}>{customLabel}</SwiftText>
-                    </Picker>
-                  </Host>
+                  <MenuView
+                    shouldOpenOnLongPress={false}
+                    themeVariant={theme.dark ? 'dark' : 'light'}
+                    actions={[
+                      { id: '0', title: 'Any time', state: datePickerIdx === 0 ? 'on' : 'off' },
+                      ...DATE_PRESETS.map((o, i) => ({
+                        id: String(i + 1),
+                        title: o.label,
+                        state: (datePickerIdx === i + 1 ? 'on' : 'off') as 'on' | 'off',
+                      })),
+                      { id: '5', title: customLabel, state: datePickerIdx === 5 ? 'on' : 'off' },
+                    ]}
+                    onPressAction={({ nativeEvent }) => handleDatePickerChange(Number(nativeEvent.event))}
+                  >
+                    <View style={FS.menuTrigger}>
+                      <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]}>
+                        {dateMenuLabel}
+                      </Text>
+                      <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
+                    </View>
+                  </MenuView>
                 </View>
 
                 <AnimatedCollapse
@@ -1826,7 +1837,7 @@ const FS = StyleSheet.create({
     ...TYPE.bodySmEm,
   },
 
-  // Sort by — single row with native iOS Picker
+  // Sort by / Date — single row with a styled UIKit menu trigger
   sortRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1838,6 +1849,17 @@ const FS = StyleSheet.create({
   },
   sortRowLabel: {
     ...TYPE.body,
+  },
+  menuTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingLeft: 8,
+  },
+  menuTriggerText: {
+    ...TYPE.body,
+    fontWeight: '500',
   },
 
   // Category section

@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
-  Alert,
   View,
   Text,
   TouchableOpacity,
@@ -27,6 +26,7 @@ import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { Icon } from '../components/Icon';
+import { Collapsible } from '../components/Collapsible';
 import { SheetPrimaryButton } from '../components/shared';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TYPE } from '../typography';
@@ -86,6 +86,9 @@ const CAT_DETENT: PresentationDetent = 'large';
 const CAT_DETENTS: PresentationDetent[] = [CAT_DETENT];
 const CURRENT_MONTH = '2026-05';
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Cap Dynamic Type growth on dense, multi-column rows so large accessibility text
+// sizes can't clip or collide. Full-width prose is intentionally left uncapped.
+const MAX_FONT_SCALE = 1.4;
 
 const monthKeyFromOffset = (baseKey: string, offset: number): string => {
   const [y, m] = baseKey.split('-').map(Number);
@@ -180,6 +183,24 @@ const parseAmountDraft = (text: string): number | null => {
   const v = Number(clean);
   return Number.isFinite(v) && v >= 0 ? v : null;
 };
+
+function RotatingChevron({ open, color }: { open: boolean; color: string }) {
+  const rot = useRef(new Animated.Value(open ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.timing(rot, {
+      toValue: open ? 1 : 0,
+      duration: 260,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [open]);
+  const rotate = rot.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+  return (
+    <Animated.View style={{ transform: [{ rotate }] }}>
+      <Icon name="chevDown" size={11} color={color} stroke={2} />
+    </Animated.View>
+  );
+}
 
 function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; children: React.ReactNode; size?: number }) {
   return (
@@ -326,9 +347,11 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
   const shadow = DARK_TEXT_SHADOW;
   const scrim = makeScrim(theme.dark);
 
-  // ── Scroll-driven sticky morph ────────────────────────────────
-  const scrollRaw = useRef(new Animated.Value(0)).current;
-  const stickyAnim = useRef(new Animated.Value(0)).current;
+  // ── Scroll-driven sticky pin ──────────────────────────────────
+  // When the allocation card meets the header it's replaced by a full-bleed
+  // pinned bar. The geometry snaps (no per-frame width/radius animation) so fast
+  // flings stay smooth; a one-shot, fully-native opacity + rise gives it a clean
+  // settle so the swap reads as intentional rather than abrupt.
   const sectionStackYRef = useRef(0);
   const allocCardYRef = useRef(0);
   const allocCardHRef = useRef(0);
@@ -337,31 +360,32 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
   // before that it's invisible and must let the hero region stay tappable.
   const [pinned, setPinned] = useState(false);
   const pinnedRef = useRef(false);
+  const pinAnim = useRef(new Animated.Value(0)).current;
+
+  const handleScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const cardAbsY = sectionStackYRef.current + allocCardYRef.current;
+    // 4px hysteresis so the pin doesn't jitter when you hover right on the line.
+    const isPinned = pinnedRef.current ? y > cardAbsY - 4 : y > cardAbsY + 4;
+    if (isPinned !== pinnedRef.current) {
+      pinnedRef.current = isPinned;
+      setPinned(isPinned);
+    }
+  }, []);
 
   useEffect(() => {
-    const id = scrollRaw.addListener(({ value }) => {
-      // Pin fires the instant the card's top meets the header. progress then
-      // drives the card→full-bleed "grow"; the visible/pinned swap is sharp so
-      // it reads as the same card sticking, not a second one fading in.
-      const cardAbsY = sectionStackYRef.current + allocCardYRef.current;
-      const range = Math.max(allocCardHRef.current * 0.6, 1);
-      const progress = Math.max(0, Math.min(1, (value - cardAbsY) / range));
-      stickyAnim.setValue(progress);
-      const isPinned = progress > 0;
-      if (isPinned !== pinnedRef.current) {
-        pinnedRef.current = isPinned;
-        setPinned(isPinned);
-      }
-    });
-    return () => scrollRaw.removeListener(id);
-  }, [scrollRaw, stickyAnim]);
+    // One-shot, fully native (opacity + transform) — no layout work per frame.
+    Animated.timing(pinAnim, {
+      toValue: pinned ? 1 : 0,
+      duration: pinned ? 220 : 150,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [pinned, pinAnim]);
 
-  // Pinned copy morphs from card-style → full-bleed (it "grows" to the edges).
-  const stickyPaddingH   = stickyAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
-  const stickyRadius     = stickyAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] });
-  // Sharp hand-off at the pin line — both renders are identical & aligned there.
-  const stickyOpacity    = stickyAnim.interpolate({ inputRange: [0, 0.001, 1], outputRange: [0, 1, 1] });
-  const allocCardOpacity = stickyAnim.interpolate({ inputRange: [0, 0.001, 1], outputRange: [1, 0, 0] });
+  const stickyOpacity    = pinAnim;
+  const stickyTranslateY = pinAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] });
+  const allocCardOpacity = pinAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
 
   // ── Budget state ──────────────────────────────────────────────
   const [income, setIncome] = useState(initialIncome);
@@ -525,19 +549,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
       }
     }
     showUndo(`Removed ${removed.source}`);
-  };
-
-  const confirmRemoveIncome = (id: string) => {
-    const inc = incomes.find(item => item.id === id);
-    if (!inc) return;
-    Alert.alert(
-      'Remove income',
-      `Remove "${inc.source}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => removeIncome(id) },
-      ],
-    );
   };
 
   const openIncomeSheet = () => {
@@ -733,7 +744,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
     saveSnapshot();
     setRemovedSubs(prev => new Set([...prev, bKey(gKey, label)]));
     setBudgets(b => { const n = { ...b }; delete n[bKey(gKey, label)]; return n; });
-    showUndo(`Archived ${label}`, () => {
+    showUndo(`Removed ${label}`, () => {
       const category = categories.find(cat => cat.id === sub.cat);
       if (category) categoriesRepo.update(category.id, { archived: true, updatedByUserId: 'local' });
     });
@@ -1017,14 +1028,10 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
   const savingsFrac = barMax > 0 ? savingsTotal / barMax : 0;
 
   const gCol = (key: string) =>
-    (theme.dark ? GROUP_COLORS[key]?.dark : GROUP_COLORS[key]?.light) ?? '#888888';
+    (theme.dark ? GROUP_COLORS[key]?.dark : GROUP_COLORS[key]?.light) ?? '#8B8597';
   const needsCol   = gCol('needs');
   const wantsCol   = gCol('wants');
   const savingsCol = gCol('savings');
-
-  const needsShare = totalBudgeted > 0 ? needsTotal / totalBudgeted : 0;
-  const wantsShare = totalBudgeted > 0 ? wantsTotal / totalBudgeted : 0;
-  const savingsShare = totalBudgeted > 0 ? savingsTotal / totalBudgeted : 0;
 
   // Hero focal metric — zero-based "allocate to zero" framing.
   const fullyAssigned = remaining === 0;
@@ -1098,16 +1105,23 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
     outputRange: ['#FBF8FF', '#5CC4BA'],
   });
 
+  const _base = Math.max(income, totalBudgeted, 1);
+  const _needsPct   = Math.round(needsTotal   / _base * 100);
+  const _wantsPct   = Math.round(wantsTotal   / _base * 100);
+  const _savingsPct = Math.round(savingsTotal / _base * 100);
+  const _remainPct  = 100 - _needsPct - _wantsPct - _savingsPct;
+
   const legendItems = [
-    { label: 'Needs',                  dotColor: needsCol,   amount: needsTotal,   pct: Math.round(needsShare * 100)   },
-    { label: 'Wants',                  dotColor: wantsCol,   amount: wantsTotal,   pct: Math.round(wantsShare * 100)   },
-    { label: 'Savings',                dotColor: savingsCol, amount: savingsTotal, pct: Math.round(savingsShare * 100) },
-    { label: isOver ? 'Over' : 'Unassigned', dotColor: isOver ? OVER_DOT : p.textTer, amount: Math.abs(remaining), pct: Math.round(Math.abs(remaining) / Math.max(income, 1) * 100) },
+    { label: 'Needs',                        dotColor: needsCol,                           amount: needsTotal,   pct: _needsPct            },
+    { label: 'Wants',                         dotColor: wantsCol,                           amount: wantsTotal,   pct: _wantsPct            },
+    { label: 'Savings',                       dotColor: savingsCol,                         amount: savingsTotal, pct: _savingsPct          },
+    { label: isOver ? 'Over' : 'Unassigned', dotColor: isOver ? OVER_DOT : p.textTer, amount: Math.abs(remaining), pct: isOver ? null : Math.abs(_remainPct) },
   ];
 
   // Shared allocation-card body — rendered identically by both the in-scroll
   // card and the pinned overlay so the hand-off is a seamless swap, not a fade.
-  const allocationCardBody = () => (
+  // Only the bar + legend animates — the income button lives in its own card below.
+  const allocationBarBody = () => (
     <>
       <AllocationBar
         needsFrac={needsFrac} wantsFrac={wantsFrac} savingsFrac={savingsFrac}
@@ -1119,15 +1133,20 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
           <View key={item.label} style={styles.legendItem}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.dotColor }} />
-              <Text style={[TYPE.label, { color: item.dotColor }]}>{item.label}</Text>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.label, { color: item.dotColor }]}>{item.label}</Text>
             </View>
-            <Text style={[TYPE.subsectionTitle, { color: p.text }]}>
+            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.subsectionTitle, { color: p.text }]}>
               ${Math.round(item.amount).toLocaleString()}
             </Text>
-            <Text style={[TYPE.caption, { color: p.textSec }]}>{item.pct}%</Text>
+            {item.pct !== null && <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.caption, { color: p.textSec }]}>{item.pct}%</Text>}
           </View>
         ))}
       </View>
+    </>
+  );
+
+  const incomeButtonCard = () => (
+    <SectionCard dark={theme.dark}>
       <TouchableOpacity
         onPress={openIncomeSheet}
         activeOpacity={0.7}
@@ -1136,16 +1155,16 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
         accessibilityLabel={`Income $${fmtMoney(income)}, assigned $${fmtMoney(totalBudgeted)}`}
       >
         <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(income)}</Text>
-          <Text style={[TYPE.labelSm, { color: p.textTer }]}>INCOME</Text>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(income)}</Text>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.labelSm, { color: p.textSec }]}>INCOME</Text>
         </View>
         <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: p.textTer }} />
         <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(totalBudgeted)}</Text>
-          <Text style={[TYPE.labelSm, { color: p.textTer }]}>ASSIGNED</Text>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(totalBudgeted)}</Text>
+          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.labelSm, { color: p.textSec }]}>ASSIGNED</Text>
         </View>
       </TouchableOpacity>
-    </>
+    </SectionCard>
   );
 
   const stickyBorderColor = theme.dark ? 'rgba(235,225,255,0.16)' : 'rgba(14,12,24,0.08)';
@@ -1157,7 +1176,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
   const incomeSep = { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth };
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.dark ? '#0F0B1C' : '#F5F4F8' }}>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
 
       {/* Wallpaper + scrim — outside KAV so the keyboard never shifts it */}
       <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
@@ -1204,20 +1223,18 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
               top: headerH,
               left: 0, right: 0,
               zIndex: 5,
-              paddingHorizontal: stickyPaddingH,
               opacity: stickyOpacity,
+              transform: [{ translateY: stickyTranslateY }],
             }}
           >
-            <Animated.View style={{ borderRadius: stickyRadius, overflow: 'hidden' }}>
-              <BlurView
-                intensity={theme.dark ? 70 : 100}
-                tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-              >
-                <View style={[styles.stickyCardInner, { borderColor: stickyBorderColor }]}>
-                  {allocationCardBody()}
-                </View>
-              </BlurView>
-            </Animated.View>
+            <BlurView
+              intensity={theme.dark ? 70 : 100}
+              tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+            >
+              <View style={[styles.stickyCardInner, { borderColor: stickyBorderColor }]}>
+                {allocationBarBody()}
+              </View>
+            </BlurView>
           </Animated.View>
 
           {/* Scrollable content */}
@@ -1227,12 +1244,9 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
             contentContainerStyle={{ paddingBottom: 140 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            scrollEventThrottle={8}
+            scrollEventThrottle={16}
             onScrollBeginDrag={dismissOpenSwipe}
-            onScroll={Animated.event(
-              [{ nativeEvent: { contentOffset: { y: scrollRaw } } }],
-              { useNativeDriver: false },
-            )}
+            onScroll={handleScroll}
           >
 
             <View
@@ -1265,25 +1279,20 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                     onPressAction={({ nativeEvent }) => setSelectedMonth(nativeEvent.event)}
                     style={styles.monthPickerHost}
                   >
-                    <View style={styles.heroMonthBtn}>
+                    <View
+                      style={styles.heroMonthBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Change month, currently ${monthLabel(selectedMonth)}`}
+                    >
                       <Text style={[styles.heroMonthText, { color: pWallpaper.text }, shadow]}>{monthLabel(selectedMonth)}</Text>
                       <Icon name="chevDown" size={11} color={pWallpaper.text} stroke={2} />
                     </View>
                   </MenuView>
                 </View>
 
-                {!selectedMonthHasBudgets && (
-                  <TouchableOpacity onPress={copyFromPreviousMonth} activeOpacity={0.7} style={styles.heroCopyBtn}
-                    accessibilityRole="button" accessibilityLabel={`Copy budget from ${monthLabel(monthKeyFromOffset(selectedMonth, -1))}`}>
-                    <Icon name="repeat" size={12} color={pWallpaper.text} stroke={1.8} />
-                    <Text style={[TYPE.captionEm, { color: pWallpaper.text }, shadow]}>
-                      Copy {monthLabel(monthKeyFromOffset(selectedMonth, -1))}
-                    </Text>
-                  </TouchableOpacity>
-                )}
               </View>
 
-              {/* Allocation card — budget bar + legend + income/assigned */}
+              {/* Allocation bar card — animated sticky */}
               <Animated.View
                 onLayout={e => {
                   allocCardYRef.current = e.nativeEvent.layout.y;
@@ -1292,9 +1301,12 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                 style={{ opacity: allocCardOpacity }}
               >
                 <SectionCard dark={theme.dark}>
-                  {allocationCardBody()}
+                  {allocationBarBody()}
                 </SectionCard>
               </Animated.View>
+
+              {/* Income button — own card, not animated */}
+              {incomeButtonCard()}
 
               {/* Spending group cards */}
               {visibleSpendGroups.map(g => {
@@ -1342,16 +1354,18 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
 	                          <Text style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
 	                        </View>
 	                        <Text style={[TYPE.caption, { color: groupIsOver ? OVER_DOT : p.textSec }]}>
-	                          {`Target ${fmtPct(g.targetPct)} · $${fmtMoney(groupTarget)} · ${visibleItemCount} ${visibleItemCount === 1 ? 'category' : 'categories'}${groupIsOver ? ` · Over $${fmtMoney(groupDelta)}` : ''}`}
+	                          {groupIsOver ? `\$${fmtMoney(groupDelta)} over target` : `\$${fmtMoney(groupTarget)} target · ${fmtPct(g.targetPct)}`}
 	                        </Text>
 	                      </View>
 	                      <View style={styles.groupHeadAmount}>
 	                        <Text style={[TYPE.subsectionTitle, { color: groupColor }]}>${groupTotal.toLocaleString()}</Text>
-	                        <Icon name={isCollapsed ? 'chevDown' : 'chevUp'} size={11} color={p.textTer} stroke={2} />
+	                        <RotatingChevron open={!isCollapsed} color={p.textTer} />
 	                      </View>
 	                    </Pressable>
 
-	                    {!isCollapsed && regularOrigSubs.map((sub, si) => {
+	                    <Collapsible open={!isCollapsed}>
+	                    <View>
+	                    {regularOrigSubs.map((sub, si) => {
                       const isLast = si === regularOrigSubs.length - 1 && regularCustoms.length === 0 && !hasRecurringSection;
                       const rowKey = bKey(g.key, sub.label);
                       const isRemoving = pendingRemoveKeys.has(rowKey);
@@ -1395,14 +1409,13 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       );
                     })}
 
-	                    {!isCollapsed && regularCustoms.map((sub, ci) => {
+	                    {regularCustoms.map((sub, ci) => {
                       const isLast = ci === regularCustoms.length - 1 && !hasRecurringSection;
 	                      const rowKey = bKey(g.key, sub.label);
 	                      const isRemoving = pendingRemoveKeys.has(rowKey);
 	                      const customCat = categories.find(c => c.group === (g.key as GroupKey) && c.label.toLowerCase() === sub.label.toLowerCase());
 	                      const spendSub = visibleSpendGroups.find(group => group.key === g.key)?.subs.find(item => item.label.toLowerCase() === sub.label.toLowerCase());
 	                      const subBudget = budgets[rowKey] ?? spendSub?.budget ?? 0;
-	                      const subSpent = spendSub?.spent ?? 0;
 	                      return (
                         <CollapsingRow key={sub.label} removing={isRemoving}>
                           <SwipeRow onRemove={() => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
@@ -1426,7 +1439,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       );
                     })}
 
-	                    {!isCollapsed && hasRecurringSection && (
+	                    {hasRecurringSection && (
                       <>
                         <View style={[styles.billsDivider, { borderTopColor: p.hairline }]}>
                           <Icon name="repeat" size={11} color={p.textTer} stroke={1.6} />
@@ -1452,7 +1465,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                                   </View>
 	                                  <View style={{ flex: 1, minWidth: 0 }}>
 	                                    <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
-	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{nextDate}</Text>}
+	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{formatDateShort(nextDate)}</Text>}
 	                                  </View>
 	                                  <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
 	                                    ${fmtMoney(subBudget)}
@@ -1470,7 +1483,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
 	                          const nextDate = customCat && typeof customCat.meta?.recurringDate === 'string' ? customCat.meta.recurringDate as string : null;
 	                          const spendSub = visibleSpendGroups.find(group => group.key === g.key)?.subs.find(item => item.label.toLowerCase() === sub.label.toLowerCase());
 	                          const subBudget = budgets[rowKey] ?? spendSub?.budget ?? 0;
-	                          const subSpent = spendSub?.spent ?? 0;
 	                          return (
                             <CollapsingRow key={sub.label} removing={isRemoving}>
                               <SwipeRow onRemove={() => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
@@ -1484,7 +1496,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                                   </View>
 	                                  <View style={{ flex: 1, minWidth: 0 }}>
 	                                    <Text style={[TYPE.body, { color: p.text }]}>{sub.label}</Text>
-	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{nextDate}</Text>}
+	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{formatDateShort(nextDate)}</Text>}
 	                                  </View>
 	                                  <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
 	                                    ${fmtMoney(subBudget)}
@@ -1523,7 +1535,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       </>
 	                    )}
 
-	                    {!isCollapsed && (
 	                    <TouchableOpacity
                       onPress={() => {
                         setAddingForGroup(g.key);
@@ -1547,7 +1558,8 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       <Icon name="plus" size={13} color={theme.accent.dot} stroke={2} />
                       <Text style={[TYPE.captionEm, { color: theme.accent.dot }]}>Add category</Text>
 	                    </TouchableOpacity>
-	                    )}
+	                    </View>
+	                    </Collapsible>
                   </SectionCard>
                 );
               })}
@@ -1688,6 +1700,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                           <TextInput
                             value={incomeSource}
                             onChangeText={setIncomeSource}
+                            accessibilityLabel="Income source name"
                             placeholder="e.g. Salary, Weekend job"
                             placeholderTextColor={theme.textTer}
                             keyboardAppearance={theme.dark ? 'dark' : 'light'}
@@ -1707,11 +1720,12 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                             placeholderTextColor={theme.textTer}
                             returnKeyType="done"
                             selectTextOnFocus
+                            accessibilityLabel="Income amount"
                             style={[styles.catFieldInput, styles.incomeAmountInput, { color: theme.text }]}
                           />
                         </View>
                         <View style={styles.catFieldRow}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Cadence</Text>
+                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
                           <Host matchContents>
                             <Picker
                               selection={cadence}
@@ -1768,7 +1782,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                               accessibilityRole="button"
                               accessibilityLabel="Set income end date"
                             >
-                              <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>No end date</Text>
+                              <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set end date</Text>
                             </Pressable>
                           )}
                         </View>
@@ -1788,7 +1802,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       />
                       {editingIncomeId && regularIncomes.some(i => i.id === editingIncomeId) && (
                         <Pressable
-                          onPress={() => { confirmRemoveIncome(editingIncomeId); }}
+                          onPress={() => removeIncome(editingIncomeId)}
                           pointerEvents="box-only"
                           accessibilityRole="button"
                           accessibilityLabel="Remove income source"
@@ -1822,7 +1836,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                                     {inc.source === 'One-time income' ? 'One-time income' : inc.source}
                                   </SwiftText>
                                 ))}
-                                <SwiftText key="__new__" modifiers={[tag('__new__')]}>New</SwiftText>
+                                <SwiftText key="__new__" modifiers={[tag('__new__')]}>Add new</SwiftText>
                               </Picker>
                             </Host>
                           </View>
@@ -1832,6 +1846,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                           <TextInput
                             value={incomeSource}
                             onChangeText={setIncomeSource}
+                            accessibilityLabel="One-time income name"
                             placeholder="Optional"
                             placeholderTextColor={theme.textTer}
                             keyboardAppearance={theme.dark ? 'dark' : 'light'}
@@ -1851,6 +1866,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                             placeholderTextColor={theme.textTer}
                             returnKeyType="done"
                             selectTextOnFocus
+                            accessibilityLabel="One-time income amount"
                             style={[styles.catFieldInput, styles.incomeAmountInput, { color: theme.text, textAlign: 'right' }]}
                           />
                         </View>
@@ -1868,7 +1884,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       </View>
 
                       <SheetPrimaryButton
-                        label={editingIncomeId ? 'Save one-time income' : 'Log income'}
+                        label={editingIncomeId ? 'Save income' : 'Log income'}
                         onPress={commitIncome}
                         theme={theme}
                         disabled={!canCommitIncome}
@@ -1876,7 +1892,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
                       />
                       {editingIncomeId && oneTimeIncomesForSelectedMonth.some(i => i.id === editingIncomeId) && (
                         <Pressable
-                          onPress={() => { confirmRemoveIncome(editingIncomeId); }}
+                          onPress={() => removeIncome(editingIncomeId)}
                           pointerEvents="box-only"
                           accessibilityRole="button"
                           accessibilityLabel="Remove one-time income"
@@ -2024,7 +2040,10 @@ function CategoryEditSheet({
   const goalPct = rawGoalTarget > 0 ? Math.min(100, Math.round(rawGoalSaved / rawGoalTarget * 100)) : 0;
   const selectedGroupIdx = GROUP_OPTIONS.findIndex(o => o.value === group);
   const keyboardAppearance = theme.dark ? 'dark' : 'light';
-  const compactSheet = showGoalFields;
+  // Keep the sheet's top/hero/segmented spacing constant across all groups so
+  // switching to Savings only appends the goal fields at the bottom — nothing
+  // above them shifts up or down. (Detent is a fixed 'large', so there's room.)
+  const compactSheet = true;
   const sheetTopPadding = compactSheet
     ? Math.max(insets.top, 10) + 8
     : Math.max(insets.top, 16) + 18;
@@ -2141,7 +2160,11 @@ function CategoryEditSheet({
                     onIconChange(nativeEvent.event);
                   }}
                 >
-                  <View style={{ width: 52, height: 52 }}>
+                  <View
+                    style={{ width: 52, height: 52 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose category icon"
+                  >
                     <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
                       <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
                     </View>
@@ -2151,7 +2174,7 @@ function CategoryEditSheet({
                   </View>
                 </MenuView>
                 <Text style={[TYPE.headline, { color: theme.text, textAlign: 'center', marginTop: compactSheet ? 4 : 8 }]} numberOfLines={1}>
-                  {label.trim() || (isAddMode ? 'New Category' : category?.label ?? 'Category')}
+                  {label.trim() || (isAddMode ? 'New category' : category?.label ?? 'Category')}
                 </Text>
               </View>
 
@@ -2174,6 +2197,7 @@ function CategoryEditSheet({
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
                   <TextInput
                     value={label}
+                    accessibilityLabel="Category name"
                     onChangeText={(next) => {
                       onLabelChange(next);
                       if (!iconManuallySet.current) onIconChange(inferCategoryIcon(next));
@@ -2191,6 +2215,7 @@ function CategoryEditSheet({
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Monthly budget</Text>
                   <TextInput
                     value={budgetDisplay}
+                    accessibilityLabel="Monthly budget amount"
                     onChangeText={(t) => {
                       const g = guardDollar(t);
                       setBudgetDisplay(g);
@@ -2208,6 +2233,7 @@ function CategoryEditSheet({
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Recurring</Text>
                   <Switch
                     value={recurring}
+                    accessibilityLabel="Recurring expense"
                     onValueChange={onRecurringChange}
                     trackColor={{ false: theme.hairline, true: theme.accent.dot }}
                     thumbColor="#FBF8FF"
@@ -2216,7 +2242,7 @@ function CategoryEditSheet({
 	                {recurring && (
 	                  <>
 	                    <View style={[fieldRowStyle, sep]}>
-	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Cadence</Text>
+	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
 	                      <Host matchContents>
 	                        <Picker
 	                          selection={recurringCadence}
@@ -2261,8 +2287,9 @@ function CategoryEditSheet({
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Notes</Text>
                   <TextInput
                     value={notes}
+                    accessibilityLabel="Category notes"
                     onChangeText={onNotesChange}
-                    placeholder="Optional"
+                    placeholder=""
                     placeholderTextColor={theme.textTer}
                     keyboardAppearance={keyboardAppearance}
                     returnKeyType="done"
@@ -2285,6 +2312,7 @@ function CategoryEditSheet({
                       <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target</Text>
                       <TextInput
                         value={goalTargetDisplay}
+                        accessibilityLabel="Savings target amount"
                         onChangeText={(t) => {
                           const g = guardDollar(t);
                           setGoalTargetDisplay(g);
@@ -2292,7 +2320,7 @@ function CategoryEditSheet({
                         }}
                         keyboardType="decimal-pad"
                         keyboardAppearance={keyboardAppearance}
-                        placeholder="Optional"
+                        placeholder="$0"
                         placeholderTextColor={theme.textTer}
                         selectTextOnFocus
                         style={[styles.catFieldInput, { color: theme.text, textAlign: 'right', minWidth: 60 }]}
@@ -2302,6 +2330,7 @@ function CategoryEditSheet({
                       <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Saved so far</Text>
                       <TextInput
                         value={goalSavedDisplay}
+                        accessibilityLabel="Amount saved so far"
                         onChangeText={(t) => {
                           const g = guardDollar(t);
                           setGoalSavedDisplay(g);
@@ -2309,7 +2338,7 @@ function CategoryEditSheet({
                         }}
                         keyboardType="decimal-pad"
                         keyboardAppearance={keyboardAppearance}
-                        placeholder="Optional"
+                        placeholder="$0"
                         placeholderTextColor={theme.textTer}
                         selectTextOnFocus
                         style={[styles.catFieldInput, { color: theme.text, textAlign: 'right', minWidth: 60 }]}
@@ -2394,7 +2423,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   stickyCardInner: {
-    borderWidth: 1,
+    borderBottomWidth: 1,
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 14,
@@ -2440,20 +2469,9 @@ const styles = StyleSheet.create({
     ...TYPE.onMediaStatusSub,
     fontWeight: '500' as const,
   },
-  heroCopyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 10,
-    alignSelf: 'flex-start',
-  },
-  heroFigure: {
-    marginBottom: 12,
-  },
   allocationIncomeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
     paddingVertical: 10,
     paddingHorizontal: 6,
     borderRadius: 10,
@@ -2504,18 +2522,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  goalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-  },
-  goalsEmpty: {
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-    alignItems: 'center',
-  },
   incomeNativeSheet: {
     flex: 1,
     paddingHorizontal: 20,
@@ -2559,60 +2565,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 7,
   },
-  incomeListHead: {
-    marginTop: 14,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  incomeAddPill: {
-    minHeight: 30,
-    borderRadius: 15,
-    paddingHorizontal: 11,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  incomeSourceList: {
-    gap: 8,
-  },
-  incomeSourceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  incomeSourceIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  incomeEmptyState: {
-    minHeight: 48,
-    borderRadius: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-  },
-  incomeInlineAmount: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 0,
-    flex: 1,
-    minWidth: 90,
-  },
   incomeAmountInput: {
     minWidth: 60,
     textAlign: 'right',
@@ -2630,19 +2582,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingVertical: 12,
-  },
-  rowCategoryButton: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  subGoalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 5,
   },
   subGoalTrack: {
     width: 56,
@@ -2666,45 +2605,6 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
     borderTopWidth: 1,
   },
-  amountField: {
-    width: 92,
-    height: 32,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    flexShrink: 0,
-  },
-  amountInput: {
-    width: 72,
-    height: 30,
-    paddingVertical: 0,
-    ...TYPE.bodySmEm,
-    textAlign: 'right',
-    includeFontPadding: false,
-  },
-  amountError: {
-    marginTop: 4,
-    textAlign: 'right',
-  },
-  keyboardDismissWrap: {
-    position: 'absolute',
-    right: 16,
-    bottom: 10,
-    zIndex: 30,
-    alignItems: 'flex-end',
-  },
-  keyboardDismissButton: {
-    minWidth: 66,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
   addCatBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2721,13 +2621,6 @@ const styles = StyleSheet.create({
   categorySheetContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-  },
-  categoryNameInput: {
-    paddingVertical: 0,
-  },
-  categoryGoalRow: {
-    flexDirection: 'row',
-    gap: 10,
   },
   categoryGoalPreview: {
     marginTop: 10,

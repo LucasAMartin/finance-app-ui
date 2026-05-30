@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, DatePicker, Group, Host, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
-import { background, controlSize, datePickerStyle, fixedSize, font, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { BottomSheet, DatePicker, Group, Host, RNHostView } from '@expo/ui/swift-ui';
+import { background, datePickerStyle, presentationDetents, presentationDragIndicator, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { MenuView } from '@react-native-menu/menu';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 
 const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
@@ -412,30 +413,26 @@ function EditSection({
         <View style={[S.subcategoryRow, { borderTopColor: theme.hairline }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Subcategory</Text>
           {subcats.length > 0 ? (
-            <Host matchContents>
-              <Picker
-                selection={selectedSubIdx}
-                onSelectionChange={(val) => {
-                  const idx = Number(val);
-                  const next = subcats[idx];
-                  if (next) setEditCat(next.id);
-                }}
-                modifiers={[
-                  pickerStyle('menu'),
-                  tint(theme.text),
-                  controlSize('small'),
-                  font({ size: 15, weight: 'medium' }),
-                  environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-                  fixedSize({ horizontal: true, vertical: false }),
-                ]}
-              >
-                {subcats.map((cat, idx) => (
-                  <SwiftText key={cat.id} modifiers={[tag(idx)]}>
-                    {cats[cat.id]?.label ?? cat.label}
-                  </SwiftText>
-                ))}
-              </Picker>
-            </Host>
+            <MenuView
+              shouldOpenOnLongPress={false}
+              themeVariant={theme.dark ? 'dark' : 'light'}
+              actions={subcats.map((cat, idx) => ({
+                id: String(idx),
+                title: cats[cat.id]?.label ?? cat.label,
+                state: idx === selectedSubIdx ? 'on' : 'off',
+              }))}
+              onPressAction={({ nativeEvent }) => {
+                const next = subcats[Number(nativeEvent.event)];
+                if (next) setEditCat(next.id);
+              }}
+            >
+              <View style={S.subcatMenuTrigger}>
+                <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
+                  {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
+                </Text>
+                <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+              </View>
+            </MenuView>
           ) : (
             <Text style={[TYPE.bodySm, { color: theme.textTer }]}>No subcategories</Text>
           )}
@@ -606,6 +603,19 @@ const S = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 11,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  subcatMenuTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+    paddingLeft: 8,
+    flexShrink: 1,
+  },
+  subcatMenuText: {
+    ...TYPE.body,
+    fontWeight: '500',
+    flexShrink: 1,
   },
   saveBtn: {
     marginTop: 28,

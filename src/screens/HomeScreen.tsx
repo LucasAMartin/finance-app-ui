@@ -158,6 +158,10 @@ function SectionCard({ children, style, dark }: { children: React.ReactNode; sty
   );
 }
 
+// All amounts on the home screen read as dollars-and-cents, e.g. $1,234.00 / $1,234.50.
+const fmtAmount = (n: number) =>
+  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 interface Props {
   theme: Theme;
   onViewSpending: () => void;
@@ -464,7 +468,7 @@ export function HomeScreen({ theme, onViewSpending, onViewActivity, onOpenDrawer
                 <BillsSkeleton dark={theme.dark} />
               ) : (
                 upcomingBills.map((b, i) => {
-                  const amountStr = `${b.estimate ? '~' : ''}$${b.amount.toFixed(b.amount % 1 === 0 ? 0 : 2)}`;
+                  const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
                   const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
                   return (
                     <SwipeBillRow
@@ -729,7 +733,7 @@ const TxRow = React.memo(function TxRow({
   categories: Category[];
 }) {
   const cat = cats[tx.cat];
-  const a11yLabel = `${tx.merchant}, ${cat?.label ?? 'transaction'}, ${tx.time}, $${tx.amount.toFixed(2)}`;
+  const a11yLabel = `${tx.merchant}, ${cat?.label ?? 'transaction'}, ${tx.time}, $${fmtAmount(tx.amount)}`;
   return (
     <GHTouchableOpacity
       onPress={onPress}
@@ -746,7 +750,7 @@ const TxRow = React.memo(function TxRow({
         <Text style={[styles.rowTitle, { color: p.text }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
         <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Text style={[styles.rowAmt, { color: p.text }]}>${tx.amount.toFixed(2)}</Text>
+      <Text style={[styles.rowAmt, { color: p.text }]}>${fmtAmount(tx.amount)}</Text>
     </GHTouchableOpacity>
   );
 });

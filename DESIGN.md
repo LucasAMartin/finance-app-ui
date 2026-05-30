@@ -221,7 +221,7 @@ All tokens are defined once in `src/typography.ts` and applied via `import { TYP
 **Two surface modes coexist.** Flat-first is the default; the media wallpaper treatment is the current direction for the primary content screens.
 
 - **Flat surfaces** (default): distinguished by 1px hairline borders and tonal fill differences, not shadows. The default card variant uses `borderWidth: 1` with a hairline-opacity border and no shadow at rest. Used for sheets, forms, and any surface sitting on a solid page background.
-- **Media wallpaper surfaces** (Home, Spending, History): these screens render over a full-bleed photographic `ImageBackground` with a `LinearGradient` scrim. Content sits in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). Here the blur is **structural, not decorative**: it is what makes content legible against the wallpaper and what separates a card from the photograph behind it. Text colors come from the `MEDIA` / wallpaper palette, not the flat-surface tokens.
+- **Media wallpaper surfaces** (Home, Spending, History, Budget): these screens render over a full-bleed photographic `ImageBackground` with a `LinearGradient` scrim. Content sits in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). Here the blur is **structural, not decorative**: it is what makes content legible against the wallpaper and what separates a card from the photograph behind it. Text colors come from the `MEDIA` / wallpaper palette, not the flat-surface tokens.
 
 Elevation (shadow) enters only for chrome that physically layers above content:
 

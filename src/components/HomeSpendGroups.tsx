@@ -14,6 +14,10 @@ interface Props {
   onMedia?: boolean;
 }
 
+// Spending amounts always read as dollars-and-cents, e.g. $1,234.00 / $1,234.50.
+const fmtAmount = (n: number) =>
+  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 export function HomeSpendGroups({ theme, groups, income, compact, onMedia }: Props) {
   return (
     <View>
@@ -117,7 +121,7 @@ function GroupPanel({
             </View>
             <View style={s.totalRow}>
               <Text style={[s.groupTotal, { color: textColor }]}>
-                ${groupTotal.toLocaleString()}
+                ${fmtAmount(groupTotal)}
               </Text>
               <Animated.View style={{ transform: [{ rotate: chevRotate }] }}>
                 <Icon name="chevDown" size={14} color={color} stroke={2.2} />
@@ -185,11 +189,11 @@ function DetailRows({
                     <Text style={[s.check, { color }]}>✓{'  '}</Text>
                   )}
                   <Text style={[s.subSpent, { color: over ? OVER_DOT : textColor }]}>
-                    ${sub.spent.toLocaleString()}
+                    ${fmtAmount(sub.spent)}
                   </Text>
                   {(!funded || over) && (
                     <Text style={[s.subBudget, { color: textTerColor }]}>
-                      {'  /  $'}{sub.budget.toLocaleString()}
+                      {'  /  $'}{fmtAmount(sub.budget)}
                     </Text>
                   )}
                 </View>
@@ -255,7 +259,7 @@ function WantsChips({
               {sub.label}
             </Text>
             <Text style={[s.wantAmt, { color: textColor }]}>
-              ${sub.spent.toLocaleString()}
+              ${fmtAmount(sub.spent)}
             </Text>
           </View>
         ))}

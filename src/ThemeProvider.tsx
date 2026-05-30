@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useMemo } from 'react';
-import { useColorScheme } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
+import { Appearance, useColorScheme } from 'react-native';
 import { makeTheme, Theme, AccentKey, CardStyle } from './theme';
 import { CUSTOM_WALLPAPER_ID, DEFAULT_WALLPAPER_ID, findWallpaperById, Wallpaper } from './wallpapers';
 import { useRepositories, useRepositoryList } from './repositories/RepositoryProvider';
@@ -60,6 +60,15 @@ export function ThemeProvider({
     () => makeTheme(dark, accentKey, cardStyle),
     [dark, accentKey, cardStyle],
   );
+
+  // The app drives its own dark/light theme independent of the OS. app.json locks
+  // userInterfaceStyle to "light", so without this the UIKit window stays light even
+  // in our dark theme — and native sheet presentation containers (SwiftUI .sheet)
+  // render a white backing that flashes at the edges when a sheet resizes or closes.
+  // Forcing the UIKit interface style to match keeps those containers themed.
+  useEffect(() => {
+    Appearance.setColorScheme(dark ? 'dark' : 'light');
+  }, [dark]);
 
   const wallpaper = useMemo(() => {
     if (wallpaperId === CUSTOM_WALLPAPER_ID && customWallpaperUri) {
