@@ -28,6 +28,8 @@ import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { useMorphSource } from '../components/useMorphSource';
+import type { SourceRect } from '../components/ContainerTransform';
 import { TYPE } from '../typography';
 
 // ── Budget progress bar ──────────────────────────────────────────
@@ -93,45 +95,44 @@ function HeroAmount({ value, prefix, color, shadow }: { value: number; prefix: s
 }
 
 // ── Quick-action tile ─────────────────────────────────────────────
-// All colors adapt dark/light via the adaptive palette.
-// `primary` swaps the circle to the accent fill — used for Voice, the
-// signature capture action, so it visually rhymes with the tab-bar mic.
+// All colors adapt dark/light via the adaptive palette. Every tile shares the
+// same soft, slightly-opaque fill (neutral black tint in dark, like the cards).
 const QuickAction = React.forwardRef<View, {
   icon: string;
   label: string;
   onPress: () => void;
+  // Fire on finger-down instead of finger-up. RN's onPress waits for release and,
+  // inside a ScrollView, for scroll arbitration — that gap is the perceived lag.
+  // onPressIn fires immediately, so the action feels instant. Use for actions
+  // that open a screen/sheet where mis-firing on a stray touch is harmless.
+  instant?: boolean;
   dark: boolean;
   p: P;
   shadow?: object;
-  primary?: boolean;
-  accent?: { fill: string; ink: string };
 }>(function QuickAction(
-  { icon, label, onPress, dark, p, shadow, primary, accent },
+  { icon, label, onPress, instant, dark, p, shadow },
   ref,
 ) {
-  const circleBg     = primary && accent
-    ? accent.fill
-    : dark ? 'rgba(28,22,56,0.55)' : 'rgba(255,255,255,0.92)';
-  const circleBorder = primary && accent
-    ? 'transparent'
-    : dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
-  const iconColor = primary && accent
-    ? accent.ink
-    : dark ? p.text : '#0E0C18';
-  const handlePress = () => {
+  const circleBg     = dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
+  const circleBorder = dark ? 'rgba(235,239,242,0.16)' : 'rgba(14,12,24,0.10)';
+  const iconColor    = dark ? p.text : '#0E0C18';
+  const fire = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
   };
   return (
-    <View ref={ref} collapsable={false} style={styles.qa}>
+    <View style={styles.qa}>
       <Pressable
-        onPress={handlePress}
+        onPressIn={instant ? fire : undefined}
+        onPress={instant ? undefined : fire}
         style={({ pressed }) => [styles.qaInner, { opacity: pressed ? 0.7 : 1 }]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         accessibilityRole="button"
         accessibilityLabel={label}
       >
-        <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
+        {/* ref is on the circle so a container transform grows from the circle
+            itself (not the icon+label column). */}
+        <View ref={ref} collapsable={false} style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
           <Icon name={icon} size={20} color={iconColor} stroke={1.7} />
         </View>
         <Text style={[styles.qaLabel, { color: p.text }, shadow]}>{label}</Text>
@@ -170,7 +171,7 @@ interface Props {
   onAddVoice: () => void;
   onAddManual: () => void;
   onAddRecurring: () => void;
-  onLogIncome: () => void;
+  onLogIncome: (source: SourceRect) => void;
   onOpenTheme: () => void;
   onOpenTx: (tx: Transaction) => void;
   onDeleteTx: (tx: Transaction) => void;
@@ -179,6 +180,10 @@ interface Props {
 
 export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
+  // Source for the income container-transform. Measured at press time so the
+  // morph grows from the button wherever it sits after scrolling. Radius 28 =
+  // the circle's own radius (56px circle), so the card starts as the circle.
+  const incomeMorph = useMorphSource(28);
   const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
   const budgets = useRepositoryList(budgetsRepo);
@@ -417,21 +422,11 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
 
           {/* ─── Quick actions ─────────────────────── */}
           {/* Three capture modes (voice / manual / income) plus a More menu */}
-          {/* for less-frequent options. Voice carries the accent fill so it */}
-          {/* visually rhymes with the tab-bar mic button: same action. */}
+          {/* for less-frequent options — all share the same soft button fill. */}
           <View style={styles.quickRow}>
-            <QuickAction
-              icon="mic"
-              label="Voice"
-              onPress={onAddVoice}
-              dark={theme.dark}
-              p={pWallpaper}
-              shadow={shadow}
-              primary
-              accent={{ fill: theme.accent.fill, ink: theme.accent.ink }}
-            />
-            <QuickAction icon="keypad"   label="Manual"   onPress={onAddManual}     dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction icon="plus"     label="Income"   onPress={onLogIncome} dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction icon="mic"      label="Voice"    instant onPress={onAddVoice}      dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction icon="keypad"   label="Manual"   instant onPress={onAddManual}     dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={incomeMorph.ref} icon="plus" label="Income" instant onPress={() => incomeMorph.measure(onLogIncome)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
             <MoreMenuButton
               dark={theme.dark}
               p={pWallpaper}
@@ -768,8 +763,8 @@ function MoreMenuButton({
   onEditTheme: () => void;
   onAddRecurring: () => void;
 }) {
-  const circleBg     = dark ? 'rgba(28,22,56,0.55)' : 'rgba(255,255,255,0.92)';
-  const circleBorder = dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
+  const circleBg     = dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
+  const circleBorder = dark ? 'rgba(235,239,242,0.16)' : 'rgba(14,12,24,0.10)';
   const iconColor    = dark ? p.text : '#0E0C18';
   return (
     <MenuView

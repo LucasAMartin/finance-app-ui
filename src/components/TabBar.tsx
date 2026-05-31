@@ -101,9 +101,14 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
         pointerEvents="box-only"
         accessibilityRole="button"
         accessibilityLabel="Add expense"
-        style={[styles.tabBtn, { backgroundColor: theme.accent.fill }]}
+        style={[
+          styles.tabBtn,
+          // Soft, slightly-opaque fill instead of the bright solid accent —
+          // a subtle contrast against the blur pill, matching the other buttons.
+          { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
+        ]}
       >
-        <Icon name="plus" size={24} color={theme.accent.ink} stroke={2} />
+        <Icon name="plus" size={24} color={theme.text} stroke={2} />
       </Pressable>
     </View>
   );
@@ -118,7 +123,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
             styles.blurPill,
             {
               borderColor: theme.dark
-                ? 'rgba(235,225,255,0.32)'
+                ? 'rgba(235,239,242,0.32)'
                 : 'rgba(14,12,24,0.22)',
               shadowColor: '#000',
               shadowOffset: { width: 0, height: 10 },
@@ -136,7 +141,7 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
             {
               backgroundColor: theme.dark ? 'rgba(20,20,24,0.95)' : 'rgba(255,255,255,0.95)',
               borderColor: theme.dark
-                ? 'rgba(235,225,255,0.32)'
+                ? 'rgba(235,239,242,0.32)'
                 : 'rgba(14,12,24,0.22)',
               elevation: 12,
             },

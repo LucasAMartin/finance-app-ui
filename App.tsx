@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Animated,
@@ -23,12 +23,18 @@ import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { TabBar } from './src/components/TabBar';
-import { VoiceSheet, type SavedExpenseInfo } from './src/components/VoiceSheet';
+import { type SavedExpenseInfo } from './src/components/VoiceSheet';
 import { Toast } from './src/components/Toast';
-import { RecurringSheet } from './src/components/RecurringSheet';
-import { TxSheet } from './src/components/TxSheet';
-import { BillSheet } from './src/components/BillSheet';
 import { Drawer } from './src/components/Drawer';
+import type { SourceRect } from './src/components/ContainerTransform';
+import type { SavedIncomeInfo } from './src/components/IncomeFlow';
+import { IncomeMorphMount, type IncomeMorphHandle } from './src/components/IncomeMorphMount';
+import {
+  VoiceSheetMount, type VoiceSheetHandle,
+  TxSheetMount, type TxSheetHandle,
+  BillSheetMount, type BillSheetHandle,
+  RecurringSheetMount, type RecurringSheetHandle,
+} from './src/components/sheetMounts';
 import type { Bill, Transaction } from './src/repositories/types';
 
 type Screen = 'home' | 'insights' | 'activity' | 'budget';
@@ -64,46 +70,60 @@ function AnimatedScreen({
 
 function AppInner() {
   const { theme, dark } = useTheme();
-  const { transactionsRepo } = useRepositories();
+  const { transactionsRepo, incomeRepo } = useRepositories();
 
   // `screen` is only used for TabBar active state and pointerEvents.
   // The actual visual positions are driven imperatively via TX refs.
   const [screen, setScreen] = useState<Screen>('home');
-  const [adding, setAdding] = useState(false);
-  const [addingMode, setAddingMode] = useState<'voice' | 'manual'>('voice');
-  const [recurringOpen, setRecurringOpen] = useState(false);
-  const [incomeSheetToken, setIncomeSheetToken] = useState(0);
+  const [incomeSheetToken] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
   const [activityFilterToken, setActivityFilterToken] = useState(0);
-  // Sheets hoisted out of HomeScreen so their SwiftUI BottomSheet host
-  // isn't a sibling of HomeScreen's menu Hosts (the month picker / More
-  // dropdown). Sibling SwiftUI hosts that present/dismiss caused those
-  // menus to drift down on re-evaluation.
-  const [sheetTx, setSheetTx] = useState<Transaction | null>(null);
-  const [sheetBill, setSheetBill] = useState<Bill | null>(null);
   const [toast, setToast] = useState<{ message: string; onUndo: () => void } | null>(null);
 
-  const openAdd = (mode: 'voice' | 'manual' = 'voice') => {
-    setAddingMode(mode);
-    setAdding(true);
-  };
+  // Every sheet/morph owns its own open state inside a leaf mount, poked via these
+  // refs. Opening one re-renders only that mount — not App and its four mounted
+  // screens — so there's no whole-tree re-render between press and present.
+  // (The mounts stay hoisted to App level so their SwiftUI BottomSheet hosts
+  // aren't siblings of HomeScreen's menu hosts, which caused those to drift.)
+  const incomeMorphRef = useRef<IncomeMorphHandle>(null);
+  const voiceRef = useRef<VoiceSheetHandle>(null);
+  const txSheetRef = useRef<TxSheetHandle>(null);
+  const billSheetRef = useRef<BillSheetHandle>(null);
+  const recurringRef = useRef<RecurringSheetHandle>(null);
 
-  const handleSaved = (info: SavedExpenseInfo) => {
+  const openAdd = useCallback((mode: 'voice' | 'manual' = 'voice') => {
+    voiceRef.current?.open(mode);
+  }, []);
+  const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
+  const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
+  const openRecurring = useCallback(() => recurringRef.current?.open(), []);
+  const openIncomeMorph = useCallback((source: SourceRect) => {
+    incomeMorphRef.current?.open(source);
+  }, []);
+
+  const handleSaved = useCallback((info: SavedExpenseInfo) => {
     setToast({
       message: `Added $${info.amount.toFixed(2)} to ${info.catLabel}`,
       onUndo: () => transactionsRepo.delete(info.id),
     });
-  };
+  }, [transactionsRepo]);
 
-  const handleDeleteTx = (tx: Transaction) => {
+  const handleIncomeSaved = useCallback((info: SavedIncomeInfo) => {
+    setToast({
+      message: `Added $${info.amount.toFixed(2)} from ${info.source}`,
+      onUndo: () => incomeRepo.delete(info.id),
+    });
+  }, [incomeRepo]);
+
+  const handleDeleteTx = useCallback((tx: Transaction) => {
     transactionsRepo.delete(tx.id);
     setToast({
       message: 'Transaction deleted',
       onUndo: () => transactionsRepo.create(txToCreateInput(tx)),
     });
-  };
+  }, [transactionsRepo]);
 
   const runToastUndo = () => {
     toast?.onUndo();
@@ -208,15 +228,12 @@ function AppInner() {
             onOpenDrawer={openDrawer}
             onAddVoice={() => openAdd('voice')}
             onAddManual={() => openAdd('manual')}
-            onAddRecurring={() => setRecurringOpen(true)}
-            onLogIncome={() => {
-              navigate('budget');
-              setIncomeSheetToken(t => t + 1);
-            }}
+            onAddRecurring={openRecurring}
+            onLogIncome={openIncomeMorph}
             onOpenTheme={() => setThemeOpen(true)}
-            onOpenTx={setSheetTx}
+            onOpenTx={openTx}
             onDeleteTx={handleDeleteTx}
-            onOpenBill={setSheetBill}
+            onOpenBill={openBill}
           />
         </AnimatedScreen>
 
@@ -269,28 +286,17 @@ function AppInner() {
           />
         </View>
 
-        <VoiceSheet
-          theme={theme}
-          visible={adding}
-          initialMode={addingMode}
-          onSaved={handleSaved}
-          onClose={() => setAdding(false)}
-        />
-
-        <RecurringSheet
-          theme={theme}
-          visible={recurringOpen}
-          onClose={() => setRecurringOpen(false)}
-        />
+        <IncomeMorphMount ref={incomeMorphRef} onSaved={handleIncomeSaved} />
+        <VoiceSheetMount ref={voiceRef} onSaved={handleSaved} />
+        <RecurringSheetMount ref={recurringRef} />
+        <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
+        <BillSheetMount ref={billSheetRef} />
 
         <ThemeScreen
           theme={theme}
           visible={themeOpen}
           onClose={() => setThemeOpen(false)}
         />
-
-        <TxSheet tx={sheetTx} theme={theme} onClose={() => setSheetTx(null)} onDeleted={handleDeleteTx} />
-        <BillSheet bill={sheetBill} theme={theme} onClose={() => setSheetBill(null)} />
 
         <Toast
           theme={theme}
