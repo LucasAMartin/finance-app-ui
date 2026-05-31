@@ -29,6 +29,7 @@ import { Icon } from '../components/Icon';
 import { Collapsible } from '../components/Collapsible';
 import { SheetPrimaryButton } from '../components/shared';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { TYPE } from '../typography';
 import { makeP, DARK_TEXT_SHADOW, makeScrim } from '../wallpaperPalette';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
@@ -63,7 +64,7 @@ import { useTheme } from '../ThemeProvider';
 interface Props {
   theme: Theme;
   onOpenDrawer: () => void;
-  incomeSheetToken?: number;
+  onOpenIncome?: (ref: View) => void;
 }
 
 type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
@@ -316,7 +317,7 @@ function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, w
   );
 }
 
-export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Props) {
+export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
@@ -362,6 +363,11 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
   const pinnedRef = useRef(false);
   const pinAnim = useRef(new Animated.Value(0)).current;
 
+  // Native-driven scroll position for the wallpaper parallax. handleScroll still
+  // runs as the JS listener to drive the (layout-dependent) pin state.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const bgTranslateY = makeBgTranslateY(scrollY);
+
   const handleScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
     const y = e.nativeEvent.contentOffset.y;
     const cardAbsY = sectionStackYRef.current + allocCardYRef.current;
@@ -389,16 +395,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
 
   // ── Budget state ──────────────────────────────────────────────
   const [income, setIncome] = useState(initialIncome);
-  const [cadence, setCadence] = useState<Cadence>('Mo');
-  const [incomeKind, setIncomeKind] = useState<'regular' | 'irregular'>('regular');
-  const [incomeSheetOpen, setIncomeSheetOpen] = useState(false);
-  const [incomeDraft, setIncomeDraft] = useState('');
-  const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
-  const [incomeSource, setIncomeSource] = useState('');
-  const [incomeStartDate, setIncomeStartDate] = useState<Date>(() => defaultIncomeDateForMonth(CURRENT_MONTH));
-  const [incomeEndDate, setIncomeEndDate] = useState<Date | null>(null);
-  const [incomeReceivedDate, setIncomeReceivedDate] = useState<Date>(() => defaultIncomeDateForMonth(CURRENT_MONTH));
-  const [incomeFeedback, setIncomeFeedback] = useState('');
   const [budgets, setBudgets] = useState<Record<string, number>>(() => initBudgets(visibleSpendGroups, upcomingBills, categories));
   const [undoVisible, setUndoVisible] = useState(false);
   const [undoLabel, setUndoLabel] = useState('');
@@ -494,68 +490,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
     [incomes, selectedMonth],
   );
 
-  const loadIncomeForEdit = (inc: Income) => {
-    setIncomeKind('regular');
-    setEditingIncomeId(inc.id);
-    setIncomeSource(inc.source);
-    setCadence(INCOME_TO_CADENCE[inc.cadence] ?? 'Mo');
-    setIncomeDraft(`$${inc.amount}`);
-    setIncomeStartDate(dateFromYMD(inc.startDate));
-    setIncomeEndDate(inc.endDate ? dateFromYMD(inc.endDate) : null);
-    setIncomeFeedback('');
-  };
-
-  const loadOneTimeIncomeForEdit = (inc: Income) => {
-    setIncomeKind('irregular');
-    setEditingIncomeId(inc.id);
-    setIncomeSource(inc.source === 'One-time income' ? '' : inc.source);
-    setIncomeDraft(`$${inc.amount}`);
-    setIncomeReceivedDate(dateFromYMD(inc.receivedAt ?? inc.startDate));
-    setIncomeFeedback('');
-  };
-
-  const startNewIncome = () => {
-    setIncomeKind('regular');
-    setEditingIncomeId(null);
-    setIncomeSource('');
-    setCadence('Mo');
-    setIncomeDraft('');
-    setIncomeStartDate(defaultIncomeDateForMonth(selectedMonth));
-    setIncomeEndDate(null);
-    setIncomeFeedback('');
-  };
-
-  const startNewOneTimeIncome = () => {
-    setIncomeKind('irregular');
-    setEditingIncomeId(null);
-    setIncomeSource('');
-    setIncomeDraft('');
-    setIncomeReceivedDate(defaultIncomeDateForMonth(selectedMonth));
-    setIncomeFeedback('');
-  };
-
-  const removeIncome = (id: string) => {
-    const removed = incomes.find(item => item.id === id);
-    if (!removed) return;
-    saveSnapshot({ deletedIncome: removed });
-    const nextRegularIncome = regularIncomes.find(item => item.id !== id) ?? null;
-    const nextOneTimeIncome = oneTimeIncomesForSelectedMonth.find(item => item.id !== id) ?? null;
-    incomeRepo.delete(id);
-    if (editingIncomeId === id) {
-      if ((removed.kind ?? 'regular') === 'regular') {
-        if (nextRegularIncome) loadIncomeForEdit(nextRegularIncome); else startNewIncome();
-      } else {
-        if (nextOneTimeIncome) loadOneTimeIncomeForEdit(nextOneTimeIncome); else startNewOneTimeIncome();
-      }
-    }
-    showUndo(`Removed ${removed.source}`);
-  };
-
-  const openIncomeSheet = () => {
-    const primary = regularIncomes[0];
-    if (primary) loadIncomeForEdit(primary); else startNewIncome();
-    setIncomeSheetOpen(true);
-  };
 
   // ── Month control ─────────────────────────────────────────────
   const monthOptions = useMemo(
@@ -588,72 +522,7 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
       });
   };
 
-  useEffect(() => {
-    if (incomeSheetToken > 0) openIncomeSheet();
-  }, [incomeSheetToken]);
 
-  const commitIncome = () => {
-    const v = parseAmountDraft(incomeDraft);
-    if (v === null || v <= 0) return;
-    if (incomeKind === 'irregular') {
-      const source = incomeSource.trim() || 'One-time income';
-      const receivedAt = toISODateTime(incomeReceivedDate);
-      if (editingIncomeId) {
-        incomeRepo.update(editingIncomeId, {
-          kind: 'irregular',
-          amount: v,
-          source,
-          cadence: 'oneTime',
-          startDate: toYMD(incomeReceivedDate),
-          receivedAt,
-          updatedByUserId: 'local',
-        });
-        setIncomeFeedback(`Updated one-time income for ${monthLabel(selectedMonth)}`);
-      } else {
-        incomeRepo.create({
-          kind: 'irregular',
-          amount: v,
-          source,
-          cadence: 'oneTime',
-          startDate: toYMD(incomeReceivedDate),
-          receivedAt,
-          createdByUserId: 'local',
-          updatedByUserId: 'local',
-        });
-        setIncomeFeedback(`Logged one-time income for ${monthLabel(selectedMonth)}`);
-        setIncomeDraft('');
-        setIncomeSource('');
-        setIncomeReceivedDate(defaultIncomeDateForMonth(selectedMonth));
-      }
-      return;
-    }
-    // Regular: store the entered amount at its own cadence so monthlyIncome()
-    // converts and sums every source. Multiple named sources are supported.
-    const source = incomeSource.trim();
-    if (!source) return;
-    const incomeCadence = CADENCE_TO_INCOME[cadence];
-    const payload = {
-      amount: v,
-      source,
-      kind: 'regular' as const,
-      cadence: incomeCadence,
-      startDate: toYMD(incomeStartDate),
-      endDate: incomeEndDate ? toYMD(incomeEndDate) : undefined,
-      updatedByUserId: 'local',
-    };
-    if (editingIncomeId) {
-      incomeRepo.update(editingIncomeId, payload);
-      setIncomeFeedback(`Saved ${source}`);
-    } else {
-      const created = incomeRepo.create({
-        ...payload,
-        createdByUserId: 'local',
-      });
-      setEditingIncomeId(created.id);
-      setIncomeFeedback(`Added ${source}`);
-    }
-    // income state resyncs from monthlyIncome(incomes) via the effect below.
-  };
 
   const syncBudgetRecord = (key: string, v: number) => {
     if (key.startsWith('bill:')) {
@@ -1090,8 +959,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
           updatedByUserId: 'local',
           meta: snap.deletedIncome.meta,
         });
-        if ((recreated.kind ?? 'regular') === 'regular') loadIncomeForEdit(recreated);
-        else loadOneTimeIncomeForEdit(recreated);
       }
       prevActionSnapshot.current = null;
     }
@@ -1145,16 +1012,17 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
     </>
   );
 
+  const incomeBtnRef = useRef<View>(null);
   const incomeButtonCard = () => (
     <SectionCard dark={theme.dark}>
       <TouchableOpacity
-        onPress={openIncomeSheet}
+        onPress={() => { if (incomeBtnRef.current) onOpenIncome?.(incomeBtnRef.current); }}
         activeOpacity={0.7}
         style={[styles.allocationIncomeBtn, { backgroundColor: p.trackBg }]}
         accessibilityRole="button"
         accessibilityLabel={`Income $${fmtMoney(income)}, assigned $${fmtMoney(totalBudgeted)}`}
       >
-        <View style={{ flex: 1, alignItems: 'center' }}>
+        <View ref={incomeBtnRef} collapsable={false} style={{ flex: 1, alignItems: 'center' }}>
           <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(income)}</Text>
           <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.labelSm, { color: p.textSec }]}>INCOME</Text>
         </View>
@@ -1168,24 +1036,30 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
   );
 
   const stickyBorderColor = theme.dark ? 'rgba(235,225,255,0.16)' : 'rgba(14,12,24,0.08)';
-  const incomeAmountValue = parseAmountDraft(incomeDraft);
-  const incomeDateRangeValid = !incomeEndDate || incomeEndDate >= incomeStartDate;
-  const canCommitIncome = incomeAmountValue !== null
-    && incomeAmountValue > 0
-    && (incomeKind === 'irregular' || (incomeSource.trim().length > 0 && incomeDateRangeValid));
-  const incomeSep = { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth };
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
 
-      {/* Wallpaper + scrim — outside KAV so the keyboard never shifts it */}
-      <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
-        <LinearGradient pointerEvents="none"
-          colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}
-          locations={[0, 0.28, 0.60, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </ImageBackground>
+      {/* Wallpaper + scrim — outside KAV so the keyboard never shifts it.
+          Photo drifts up at half the scroll speed; container extends below the
+          screen so the upward shift never reveals a gap. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
+        ]}
+      >
+        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+      </Animated.View>
+
+      {/* Scrim — fixed to the screen so its gradient stays tuned to screen height
+          while the photo behind it parallaxes. */}
+      <LinearGradient pointerEvents="none"
+        colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}
+        locations={[0, 0.28, 0.60, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {/* Layout column — TapGestureHandler fires on touch start (State.BEGAN) anywhere
@@ -1246,7 +1120,10 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={16}
             onScrollBeginDrag={dismissOpenSwipe}
-            onScroll={handleScroll}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: true, listener: handleScroll },
+            )}
           >
 
             <View
@@ -1595,323 +1472,6 @@ export function BudgetScreen({ theme, onOpenDrawer, incomeSheetToken = 0 }: Prop
         </View>
         </TapGestureHandler>
       </KeyboardAvoidingView>
-
-      <Host
-        colorScheme={theme.dark ? 'dark' : 'light'}
-        ignoreSafeArea="keyboard"
-        style={{ width: 0, height: 0, position: 'absolute' }}
-      >
-        <BottomSheet
-          isPresented={incomeSheetOpen}
-          onIsPresentedChange={(v) => { if (!v) setIncomeSheetOpen(false); }}
-        >
-          <Group modifiers={[
-            presentationDetents([INCOME_DETENT]),
-            presentationDragIndicator('visible'),
-            environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-            background(theme.surface),
-            ignoreSafeArea({ regions: 'keyboard', edges: 'bottom' }),
-          ]}>
-            <RNHostView>
-              <View style={[styles.incomeNativeSheet, {
-                backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.52)',
-              }]}>
-                <View style={[styles.sheetHead, { justifyContent: 'flex-end' }]}>
-                  <Pressable onPress={() => setIncomeSheetOpen(false)}
-                    pointerEvents="box-only"
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={[styles.sheetCloseBtn, { backgroundColor: theme.chipBg }]}
-                  >
-                    <Icon name="close" size={15} color={theme.textSec} stroke={1.8} />
-                  </Pressable>
-                </View>
-
-                <View style={{ flex: 1, paddingBottom: Math.max(insets.bottom, 16) + 16 }}>
-                  <View style={styles.incomeHero}>
-                    <View style={[styles.incomeHeroCircle, { backgroundColor: theme.accent.fill }]}>
-                      <Icon name="wallet" size={18} color={theme.accent.ink} stroke={1.7} />
-                    </View>
-                    <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: 12 }]}>Monthly income</Text>
-                    <Text style={[TYPE.headline, { color: theme.text, marginTop: 2 }]}>
-                      ${fmtMoney(income)}
-                    </Text>
-                    <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
-                      For {monthLabel(selectedMonth)}
-                    </Text>
-                    {oneTimeIncomeThisMonth > 0 && (
-                      <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2, textAlign: 'center' }]}>
-                        Includes ${fmtMoney(oneTimeIncomeThisMonth)} one-time in {monthLabel(selectedMonth)}
-                      </Text>
-                    )}
-                  </View>
-
-                  <SegmentedControl
-                    values={['Regular', 'One-time']}
-                    selectedIndex={incomeKind === 'regular' ? 0 : 1}
-                    onChange={e => {
-                      const idx = e.nativeEvent.selectedSegmentIndex;
-                      if (idx === 0) {
-                        if (incomeKind !== 'regular') startNewIncome();
-                      } else {
-                        startNewOneTimeIncome();
-                      }
-                    }}
-                    tintColor={theme.accent.dot}
-                    appearance={theme.dark ? 'dark' : 'light'}
-                    backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
-                    fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
-                    activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
-                    style={styles.incomeSegmented}
-                  />
-
-                  {incomeFeedback.length > 0 && (
-                    <View style={[styles.incomeFeedback, { backgroundColor: theme.accent.fill }]}>
-                      <Icon name="check" size={13} color={theme.accent.ink} stroke={2} />
-                      <Text style={[TYPE.captionEm, { color: theme.accent.ink }]}>{incomeFeedback}</Text>
-                    </View>
-                  )}
-
-                  {incomeKind === 'regular' ? (
-                    <>
-                      <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: 12 }]}>
-                        {regularIncomes.length > 0 && (
-                          <View style={[styles.catFieldRow, incomeSep]}>
-                            <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Source</Text>
-                            <Host matchContents>
-                              <Picker
-                                selection={editingIncomeId ?? '__new__'}
-                                onSelectionChange={(val) => {
-                                  const id = String(val);
-                                  if (id === '__new__') startNewIncome();
-                                  else {
-                                    const inc = regularIncomes.find(i => i.id === id);
-                                    if (inc) loadIncomeForEdit(inc);
-                                  }
-                                }}
-                                modifiers={[pickerStyle('menu'), tint(theme.text), fixedSize({ horizontal: true, vertical: false })]}
-                              >
-                                {regularIncomes.map(inc => (
-                                  <SwiftText key={inc.id} modifiers={[tag(inc.id)]}>{inc.source}</SwiftText>
-                                ))}
-                                <SwiftText key="__new__" modifiers={[tag('__new__')]}>New source</SwiftText>
-                              </Picker>
-                            </Host>
-                          </View>
-                        )}
-                        <View style={[styles.catFieldRow, incomeSep]}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
-                          <TextInput
-                            value={incomeSource}
-                            onChangeText={setIncomeSource}
-                            accessibilityLabel="Income source name"
-                            placeholder="e.g. Salary, Weekend job"
-                            placeholderTextColor={theme.textTer}
-                            keyboardAppearance={theme.dark ? 'dark' : 'light'}
-                            returnKeyType="done"
-                            selectTextOnFocus
-                            style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
-                          />
-                        </View>
-                        <View style={[styles.catFieldRow, incomeSep]}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Amount</Text>
-                          <TextInput
-                            value={incomeDraft}
-                            onChangeText={(t) => setIncomeDraft(guardDollar(t))}
-                            keyboardType="decimal-pad"
-                            keyboardAppearance={theme.dark ? 'dark' : 'light'}
-                            placeholder="$0"
-                            placeholderTextColor={theme.textTer}
-                            returnKeyType="done"
-                            selectTextOnFocus
-                            accessibilityLabel="Income amount"
-                            style={[styles.catFieldInput, styles.incomeAmountInput, { color: theme.text }]}
-                          />
-                        </View>
-                        <View style={styles.catFieldRow}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
-                          <Host matchContents>
-                            <Picker
-                              selection={cadence}
-                              onSelectionChange={(val) => setCadence(val as Cadence)}
-                              modifiers={[
-                                pickerStyle('menu'),
-                                tint(theme.text),
-                                fixedSize({ horizontal: true, vertical: false }),
-                              ]}
-                            >
-                              {CADENCES.map(c => (
-                                <SwiftText key={c.value} modifiers={[tag(c.value)]}>{c.label}</SwiftText>
-                              ))}
-                            </Picker>
-                          </Host>
-                        </View>
-                        <View style={[styles.catFieldRow, incomeSep]}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Starts</Text>
-                          <Host matchContents>
-                            <DatePicker
-                              selection={incomeStartDate}
-                              onDateChange={setIncomeStartDate}
-                              displayedComponents={['date']}
-                              modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
-                            />
-                          </Host>
-                        </View>
-                        <View style={styles.catFieldRow}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Ends</Text>
-                          {incomeEndDate ? (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <Host matchContents>
-                                <DatePicker
-                                  selection={incomeEndDate}
-                                  onDateChange={setIncomeEndDate}
-                                  displayedComponents={['date']}
-                                  modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
-                                />
-                              </Host>
-                              <Pressable
-                                onPress={() => setIncomeEndDate(null)}
-                                pointerEvents="box-only"
-                                hitSlop={8}
-                                accessibilityRole="button"
-                                accessibilityLabel="Clear income end date"
-                              >
-                                <Icon name="close" size={11} color={theme.textTer} stroke={2} />
-                              </Pressable>
-                            </View>
-                          ) : (
-                            <Pressable
-                              onPress={() => setIncomeEndDate(monthEndDate(selectedMonth))}
-                              pointerEvents="box-only"
-                              accessibilityRole="button"
-                              accessibilityLabel="Set income end date"
-                            >
-                              <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set end date</Text>
-                            </Pressable>
-                          )}
-                        </View>
-                      </View>
-                      {!incomeDateRangeValid && (
-                        <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 6 }]}>
-                          End date must be after the start date
-                        </Text>
-                      )}
-
-                      <SheetPrimaryButton
-                        label={editingIncomeId ? 'Save income' : 'Add income'}
-                        onPress={commitIncome}
-                        theme={theme}
-                        disabled={!canCommitIncome}
-                        style={{ marginTop: 16 }}
-                      />
-                      {editingIncomeId && regularIncomes.some(i => i.id === editingIncomeId) && (
-                        <Pressable
-                          onPress={() => removeIncome(editingIncomeId)}
-                          pointerEvents="box-only"
-                          accessibilityRole="button"
-                          accessibilityLabel="Remove income source"
-                          style={[styles.categoryDeleteButton]}
-                        >
-                          <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Remove income source</Text>
-                        </Pressable>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: 12 }]}>
-                        {oneTimeIncomesForSelectedMonth.length > 0 && (
-                          <View style={[styles.catFieldRow, incomeSep]}>
-                            <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Income</Text>
-                            <Host matchContents>
-                              <Picker
-                                selection={editingIncomeId ?? '__new__'}
-                                onSelectionChange={(val) => {
-                                  const id = String(val);
-                                  if (id === '__new__') startNewOneTimeIncome();
-                                  else {
-                                    const inc = oneTimeIncomesForSelectedMonth.find(i => i.id === id);
-                                    if (inc) loadOneTimeIncomeForEdit(inc);
-                                  }
-                                }}
-                                modifiers={[pickerStyle('menu'), tint(theme.text), fixedSize({ horizontal: true, vertical: false })]}
-                              >
-                                {oneTimeIncomesForSelectedMonth.map(inc => (
-                                  <SwiftText key={inc.id} modifiers={[tag(inc.id)]}>
-                                    {inc.source === 'One-time income' ? 'One-time income' : inc.source}
-                                  </SwiftText>
-                                ))}
-                                <SwiftText key="__new__" modifiers={[tag('__new__')]}>Add new</SwiftText>
-                              </Picker>
-                            </Host>
-                          </View>
-                        )}
-                        <View style={[styles.catFieldRow, incomeSep]}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
-                          <TextInput
-                            value={incomeSource}
-                            onChangeText={setIncomeSource}
-                            accessibilityLabel="One-time income name"
-                            placeholder="Optional"
-                            placeholderTextColor={theme.textTer}
-                            keyboardAppearance={theme.dark ? 'dark' : 'light'}
-                            returnKeyType="done"
-                            selectTextOnFocus
-                            style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
-                          />
-                        </View>
-                        <View style={styles.catFieldRow}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Amount</Text>
-                          <TextInput
-                            value={incomeDraft}
-                            onChangeText={(t) => setIncomeDraft(guardDollar(t))}
-                            keyboardType="decimal-pad"
-                            keyboardAppearance={theme.dark ? 'dark' : 'light'}
-                            placeholder="$0"
-                            placeholderTextColor={theme.textTer}
-                            returnKeyType="done"
-                            selectTextOnFocus
-                            accessibilityLabel="One-time income amount"
-                            style={[styles.catFieldInput, styles.incomeAmountInput, { color: theme.text, textAlign: 'right' }]}
-                          />
-                        </View>
-                        <View style={[styles.catFieldRow, { borderTopColor: theme.sep, borderTopWidth: StyleSheet.hairlineWidth }]}>
-                          <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Received</Text>
-                          <Host matchContents>
-                            <DatePicker
-                              selection={incomeReceivedDate}
-                              onDateChange={setIncomeReceivedDate}
-                              displayedComponents={['date']}
-                              modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
-                            />
-                          </Host>
-                        </View>
-                      </View>
-
-                      <SheetPrimaryButton
-                        label={editingIncomeId ? 'Save income' : 'Log income'}
-                        onPress={commitIncome}
-                        theme={theme}
-                        disabled={!canCommitIncome}
-                        style={{ marginTop: 16 }}
-                      />
-                      {editingIncomeId && oneTimeIncomesForSelectedMonth.some(i => i.id === editingIncomeId) && (
-                        <Pressable
-                          onPress={() => removeIncome(editingIncomeId)}
-                          pointerEvents="box-only"
-                          accessibilityRole="button"
-                          accessibilityLabel="Remove one-time income"
-                          style={[styles.categoryDeleteButton]}
-                        >
-                          <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Remove income</Text>
-                        </Pressable>
-                      )}
-                    </>
-                  )}
-                </View>
-              </View>
-            </RNHostView>
-          </Group>
-        </BottomSheet>
-      </Host>
 
       <CategoryEditSheet
         theme={theme}

@@ -58,7 +58,7 @@ import {
   type ActivityInitialFilter,
 } from '../selectors/spending';
 import { Icon } from '../components/Icon';
-import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
+import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
 import {
   InsightBarChart,
@@ -822,7 +822,7 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
     [ranges.current.from, ranges.current.to],
   );
 
-  const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
+  const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   const spendDisplay = (() => {
     const whole = Math.floor(total).toLocaleString();
@@ -847,19 +847,28 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
-      <ImageBackground
-        source={wallpaper.source}
-        resizeMode="cover"
-        style={StyleSheet.absoluteFillObject}
+      {/* Wallpaper photo — drifts up at half the scroll speed; container extends
+          below the screen so the upward shift never reveals a gap. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
+        ]}
       >
-        <LinearGradient
-          pointerEvents="none"
-          colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
-          locations={[0, 0.28, 0.6, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
+        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+      </Animated.View>
 
-        {/* ─── Header ─────────────────────────────── */}
+      {/* Scrim — fixed to the screen so its gradient stays tuned to screen height
+          while the photo behind it parallaxes. */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
+        locations={[0, 0.28, 0.6, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* ─── Header ─────────────────────────────── */}
         <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
           <Animated.View
             pointerEvents="none"
@@ -1596,7 +1605,6 @@ export function InsightsScreen({ theme, onOpenDrawer, onViewActivity }: Props) {
           onClose={() => setInsightDetail(null)}
           onViewActivity={onViewActivity}
         />
-      </ImageBackground>
     </View>
   );
 }

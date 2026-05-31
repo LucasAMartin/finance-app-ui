@@ -23,14 +23,14 @@ import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { TabBar } from './src/components/TabBar';
-import { type SavedExpenseInfo } from './src/components/VoiceSheet';
+import { type SavedExpenseInfo } from './src/components/ExpenseFlow';
 import { Toast } from './src/components/Toast';
 import { Drawer } from './src/components/Drawer';
 import type { SourceRect } from './src/components/ContainerTransform';
 import type { SavedIncomeInfo } from './src/components/IncomeFlow';
 import { IncomeMorphMount, type IncomeMorphHandle } from './src/components/IncomeMorphMount';
+import { ExpenseMorphMount, type ExpenseMorphHandle } from './src/components/ExpenseMorphMount';
 import {
-  VoiceSheetMount, type VoiceSheetHandle,
   TxSheetMount, type TxSheetHandle,
   BillSheetMount, type BillSheetHandle,
   RecurringSheetMount, type RecurringSheetHandle,
@@ -75,7 +75,6 @@ function AppInner() {
   // `screen` is only used for TabBar active state and pointerEvents.
   // The actual visual positions are driven imperatively via TX refs.
   const [screen, setScreen] = useState<Screen>('home');
-  const [incomeSheetToken] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
@@ -88,14 +87,11 @@ function AppInner() {
   // (The mounts stay hoisted to App level so their SwiftUI BottomSheet hosts
   // aren't siblings of HomeScreen's menu hosts, which caused those to drift.)
   const incomeMorphRef = useRef<IncomeMorphHandle>(null);
-  const voiceRef = useRef<VoiceSheetHandle>(null);
+  const expenseMorphRef = useRef<ExpenseMorphHandle>(null);
   const txSheetRef = useRef<TxSheetHandle>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
   const recurringRef = useRef<RecurringSheetHandle>(null);
 
-  const openAdd = useCallback((mode: 'voice' | 'manual' = 'voice') => {
-    voiceRef.current?.open(mode);
-  }, []);
   const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
   const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
   const openRecurring = useCallback(() => recurringRef.current?.open(), []);
@@ -226,8 +222,8 @@ function AppInner() {
             onViewInsights={() => navigate('insights')}
             onViewActivity={() => navigate('activity')}
             onOpenDrawer={openDrawer}
-            onAddVoice={() => openAdd('voice')}
-            onAddManual={() => openAdd('manual')}
+            onAddVoice={(source) => expenseMorphRef.current?.open('voice', source, 'mic')}
+            onAddManual={(source) => expenseMorphRef.current?.open('manual', source, 'keypad')}
             onAddRecurring={openRecurring}
             onLogIncome={openIncomeMorph}
             onOpenTheme={() => setThemeOpen(true)}
@@ -246,13 +242,15 @@ function AppInner() {
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.budget} active={screen === 'budget'}>
-          <BudgetScreen theme={theme} onOpenDrawer={openDrawer} incomeSheetToken={incomeSheetToken} />
+          <BudgetScreen theme={theme} onOpenDrawer={openDrawer} onOpenIncome={(node) => {
+            node.measureInWindow((x, y, w, h) => incomeMorphRef.current?.open({ x, y, width: w, height: h, radius: 8 }));
+          }} />
         </AnimatedScreen>
 
         <TabBar
           theme={theme}
           active={screen === 'activity' ? 'profile' : screen === 'insights' ? 'spending' : screen}
-          onAdd={() => openAdd('voice')}
+          onAdd={(source) => expenseMorphRef.current?.open('voice', source, 'mic')}
           onTabPress={(id) => {
             if      (id === 'home')     navigate('home');
             else if (id === 'spending') navigate('insights');
@@ -287,7 +285,7 @@ function AppInner() {
         </View>
 
         <IncomeMorphMount ref={incomeMorphRef} onSaved={handleIncomeSaved} />
-        <VoiceSheetMount ref={voiceRef} onSaved={handleSaved} />
+        <ExpenseMorphMount ref={expenseMorphRef} onSaved={handleSaved} />
         <RecurringSheetMount ref={recurringRef} />
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
         <BillSheetMount ref={billSheetRef} />

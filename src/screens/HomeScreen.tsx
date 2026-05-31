@@ -9,6 +9,7 @@ import {
   RefreshControl,
   ImageBackground,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
 import { Swipeable, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
@@ -18,19 +19,21 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
-import { MEDIA, DARK_TEXT_SHADOW, makeP, WallpaperP as P } from '../wallpaperPalette';
+import { MEDIA, DARK_TEXT_SHADOW, makeP, deriveFloor, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Bill, Category, Transaction } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
-import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
+import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useMorphSource } from '../components/useMorphSource';
 import type { SourceRect } from '../components/ContainerTransform';
 import { TYPE } from '../typography';
+
+const { height: SCREEN_H } = Dimensions.get('window');
 
 // ── Budget progress bar ──────────────────────────────────────────
 function BudgetBar({ pct, trackBg }: { pct: number; trackBg: string }) {
@@ -168,8 +171,8 @@ interface Props {
   onViewInsights: () => void;
   onViewActivity: () => void;
   onOpenDrawer: () => void;
-  onAddVoice: () => void;
-  onAddManual: () => void;
+  onAddVoice: (source: SourceRect) => void;
+  onAddManual: (source: SourceRect) => void;
   onAddRecurring: () => void;
   onLogIncome: (source: SourceRect) => void;
   onOpenTheme: () => void;
@@ -180,9 +183,9 @@ interface Props {
 
 export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
-  // Source for the income container-transform. Measured at press time so the
-  // morph grows from the button wherever it sits after scrolling. Radius 28 =
-  // the circle's own radius (56px circle), so the card starts as the circle.
+  // Morph sources — all measured at press time from the circle (radius 28).
+  const voiceMorph  = useMorphSource(28);
+  const manualMorph = useMorphSource(28);
   const incomeMorph = useMorphSource(28);
   const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
@@ -191,7 +194,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   const recurringRules = useRepositoryList(recurringRulesRepo);
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
-  const { wallpaper } = useTheme();
+  const { wallpaper, wallpaperFloorBase } = useTheme();
   const insets = useSafeAreaInsets();
   // pWallpaper: hero, header, quick-actions — always on the wallpaper, always white.
   // p: card interiors — adaptive (dark text in light mode reads on light frosted glass).
@@ -259,7 +262,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
     onOpenTheme();
   };
 
-  const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
+  const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   useEffect(() => {
     const t = setTimeout(() => setLoading(false), 1100);
@@ -278,23 +281,54 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   const overage = mb.spent - mb.budget;
   const over = mb.spent > mb.budget;
 
+  // Solid color the wallpaper fades into as the user scrolls away from it.
+  // Hue comes from the wallpaper; deriveFloor bends it dark/light per mode.
+  const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
+
   // Dark mode: violet-black scrim — cards are dark glass on a darkened scene.
-  // Light mode: no tint — wallpaper shows through fully; light frosted glass
-  // cards sit directly on the vivid wallpaper.
-  const scrimTop    = theme.dark ? 'rgba(8,6,20,0.55)' : 'rgba(8,6,20,0.3)' ;
-  const scrimMid    = theme.dark ? 'rgba(8,6,20,0.34)' : 'rgba(8,6,20,0.3)' ;
-  const scrimLower  = theme.dark ? 'rgba(8,6,20,0.68)' : 'rgba(8,6,20,0.2)' ;
+  // Light mode: subtle tint — wallpaper shows through vividly.
+  const scrimTop    = theme.dark ? 'rgba(8,6,20,0.55)' : 'rgba(8,6,20,0.3)';
+  const scrimMid    = theme.dark ? 'rgba(8,6,20,0.34)' : 'rgba(8,6,20,0.3)';
+  const scrimLower  = theme.dark ? 'rgba(8,6,20,0.68)' : 'rgba(8,6,20,0.2)';
   const scrimBottom = theme.dark ? 'rgba(8,6,20,0.88)' : 'transparent';
 
+  // The wallpaper is a fixed backdrop; as content scrolls up over it, the floor
+  // overlay fades in so the backdrop dissolves into the solid floor color by the
+  // time the user has scrolled ~60% of a screen.
+  const floorOpacity = scrollY.interpolate({
+    inputRange: [0, SCREEN_H * 0.6],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.dark ? '#000' : '#F8F6FF' }}>
-      <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
-        <LinearGradient
-          pointerEvents="none"
-          colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
-          locations={[0, 0.28, 0.60, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
+    <View style={{ flex: 1, backgroundColor: floorColor }}>
+      {/* Wallpaper photo — drifts up at half the scroll speed; container extends
+          below the screen so the upward shift never reveals a gap. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
+        ]}
+      >
+        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+      </Animated.View>
+
+      {/* Scrim — fixed to the screen so its gradient stays tuned to screen height
+          while the photo behind it parallaxes. */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
+        locations={[0, 0.28, 0.60, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* Floor — fades in over the wallpaper as the user scrolls down */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
+      />
 
         {/* ─── Header ─────────────────────────────── */}
         <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
@@ -424,8 +458,8 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
           {/* Three capture modes (voice / manual / income) plus a More menu */}
           {/* for less-frequent options — all share the same soft button fill. */}
           <View style={styles.quickRow}>
-            <QuickAction icon="mic"      label="Voice"    instant onPress={onAddVoice}      dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction icon="keypad"   label="Manual"   instant onPress={onAddManual}     dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={voiceMorph.ref}  icon="mic"    label="Voice"  instant onPress={() => voiceMorph.measure(onAddVoice)}   dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={manualMorph.ref} icon="keypad" label="Manual" instant onPress={() => manualMorph.measure(onAddManual)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
             <QuickAction ref={incomeMorph.ref} icon="plus" label="Income" instant onPress={() => incomeMorph.measure(onLogIncome)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
             <MoreMenuButton
               dark={theme.dark}
@@ -543,7 +577,6 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
           </View>
         </Animated.ScrollView>
 
-      </ImageBackground>
     </View>
   );
 }

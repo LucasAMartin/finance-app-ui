@@ -57,7 +57,7 @@ import { TxSheet } from '../components/TxSheet';
 import { Toast } from '../components/Toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
-import { HeaderIcon, useHeaderScroll } from '../components/headerScroll';
+import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim } from '../wallpaperPalette';
 import { TYPE } from '../typography';
@@ -309,7 +309,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
     setSelectedDay(null);
   }, [filterToken]);
 
-  const { scrollY, headerBgOpacity, iconScrolledOpacity } = useHeaderScroll();
+  const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   // Calendar-driven month filter: when the user navigates the calendar
   // away from the default month, the transaction list narrows to that
@@ -450,15 +450,28 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.dark ? '#0F0B1C' : '#F5F4F8' }}>
-      <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFillObject}>
-        <LinearGradient
-          pointerEvents="none"
-          colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
-          locations={[0, 0.30, 0.70, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
+      {/* Wallpaper photo — drifts up at half the scroll speed; container extends
+          below the screen so the upward shift never reveals a gap. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
+        ]}
+      >
+        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+      </Animated.View>
 
-        {/* ── Header — pinned ─────────────────────────────────────── */}
+      {/* Scrim — fixed to the screen so its gradient stays tuned to screen height
+          while the photo behind it parallaxes. */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
+        locations={[0, 0.30, 0.70, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* ── Header — pinned ─────────────────────────────────────── */}
         <View style={[S.header, { paddingTop: insets.top + 8 }]}>
           <Animated.View
             pointerEvents="none"
@@ -862,7 +875,6 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
           onAction={handleUndoDelete}
           onDismiss={() => setPendingUndo(null)}
         />
-      </ImageBackground>
     </View>
   );
 }

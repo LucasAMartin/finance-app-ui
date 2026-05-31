@@ -5,11 +5,12 @@ import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { Theme } from '../theme';
+import type { SourceRect } from './ContainerTransform';
 
 interface TabBarProps {
   theme: Theme;
   active: string;
-  onAdd: () => void;
+  onAdd: (source: SourceRect) => void;
   onTabPress?: (id: string) => void;
 }
 
@@ -31,6 +32,8 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
   const [localActive, setLocalActive] = useState(active);
   const activeRef = useRef(active);
   const pressCommitted = useRef(false);
+  const addBtnRef = useRef<View>(null);
+  const addSourceCache = useRef<SourceRect | null>(null);
 
   useEffect(() => {
     activeRef.current = active;
@@ -94,17 +97,29 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
       <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
 
       <Pressable
+        ref={addBtnRef}
+        onPressIn={() => {
+          addBtnRef.current?.measureInWindow((x, y, w, h) => {
+            addSourceCache.current = { x, y, width: w, height: h, radius: TAB_W / 2 };
+          });
+        }}
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onAdd();
+          const src = addSourceCache.current ?? null;
+          addSourceCache.current = null;
+          if (src) {
+            onAdd(src);
+          } else {
+            addBtnRef.current?.measureInWindow((x, y, w, h) => {
+              onAdd({ x, y, width: w, height: h, radius: TAB_W / 2 });
+            });
+          }
         }}
         pointerEvents="box-only"
         accessibilityRole="button"
         accessibilityLabel="Add expense"
         style={[
           styles.tabBtn,
-          // Soft, slightly-opaque fill instead of the bright solid accent —
-          // a subtle contrast against the blur pill, matching the other buttons.
           { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
         ]}
       >

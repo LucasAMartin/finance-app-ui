@@ -1,8 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Appearance, useColorScheme } from 'react-native';
 import { makeTheme, Theme, AccentKey, CardStyle } from './theme';
 import { CUSTOM_WALLPAPER_ID, DEFAULT_WALLPAPER_ID, findWallpaperById, Wallpaper } from './wallpapers';
 import { useRepositories, useRepositoryList } from './repositories/RepositoryProvider';
+import { DEFAULT_FLOOR_BASE } from './wallpaperPalette';
+import { extractWallpaperColor } from './wallpaperColor';
 
 interface ThemeCtx {
   theme: Theme;
@@ -18,6 +20,9 @@ interface ThemeCtx {
   setWallpaperId: (id: string) => void;
   customWallpaperUri: string | undefined;
   setCustomWallpaperUri: (uri: string) => void;
+  // Raw representative color extracted from the active wallpaper. Screens bend
+  // this toward dark/light via deriveFloor() — see wallpaperPalette.ts.
+  wallpaperFloorBase: string;
 }
 
 const ThemeContext = createContext<ThemeCtx | null>(null);
@@ -77,6 +82,35 @@ export function ThemeProvider({
     return findWallpaperById(wallpaperId);
   }, [wallpaperId, customWallpaperUri]);
 
+  // ── Wallpaper floor color ───────────────────────────────────────
+  // One representative color is extracted from the active wallpaper and cached
+  // in settings.meta keyed by wallpaper (uri for custom photos). Extraction runs
+  // only when the wallpaper changes and no cached value exists — so it happens
+  // at selection time, never precomputed. The cached value seeds initial state
+  // so relaunches and re-selections show the right floor instantly (no flash).
+  const floorCache = (settings.meta?.wallpaperFloors ?? {}) as Record<string, string>;
+  const floorKey =
+    wallpaper.id === CUSTOM_WALLPAPER_ID ? `custom:${customWallpaperUri ?? ''}` : wallpaper.id;
+  const [floorByKey, setFloorByKey] = useState<Record<string, string>>(floorCache);
+  const wallpaperFloorBase = floorByKey[floorKey] ?? floorCache[floorKey] ?? DEFAULT_FLOOR_BASE;
+
+  useEffect(() => {
+    if (floorByKey[floorKey] || floorCache[floorKey]) return;
+    let cancelled = false;
+    extractWallpaperColor(wallpaper.source).then(color => {
+      if (cancelled) return;
+      setFloorByKey(prev => ({ ...prev, [floorKey]: color }));
+      const latest = settingsRepo.get('settings');
+      const latestMeta = latest?.meta ?? {};
+      const latestMap = (latestMeta.wallpaperFloors as Record<string, string>) ?? {};
+      settingsRepo.update('settings', {
+        meta: { ...latestMeta, wallpaperFloors: { ...latestMap, [floorKey]: color } },
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorKey]);
+
   const setDark = useCallback((v: boolean) => {
     settingsRepo.update('settings', { themeDark: v }) ?? settingsRepo.create({ ...settings, themeDark: v });
   }, [settingsRepo, settings]);
@@ -103,8 +137,9 @@ export function ThemeProvider({
       cardStyle, setCardStyle,
       wallpaperId, wallpaper, setWallpaperId,
       customWallpaperUri, setCustomWallpaperUri,
+      wallpaperFloorBase,
     }),
-    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId, customWallpaperUri, setCustomWallpaperUri],
+    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId, customWallpaperUri, setCustomWallpaperUri, wallpaperFloorBase],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
