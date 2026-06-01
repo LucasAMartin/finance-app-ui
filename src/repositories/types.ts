@@ -163,6 +163,52 @@ export interface AppSettings {
 export type RepoListener = () => void;
 export type Unsubscribe = () => void;
 
+export type TransactionSortOrder = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'cat';
+
+export interface TransactionCursor {
+  occurredAt: string;
+  id: string;
+  amount?: number;
+  cat?: string;
+  merchant?: string;
+}
+
+export interface TransactionQuery {
+  limit: number;
+  cursor?: TransactionCursor;
+  categoryIds?: string[];
+  merchantQuery?: string;
+  searchCategoryIds?: string[];
+  from?: string;
+  to?: string;
+  sort?: TransactionSortOrder;
+}
+
+export interface TransactionPage {
+  rows: Transaction[];
+  nextCursor?: TransactionCursor;
+}
+
+export interface TransactionSummaryQuery {
+  categoryIds?: string[];
+  merchantQuery?: string;
+  searchCategoryIds?: string[];
+  from?: string;
+  to?: string;
+}
+
+export interface TransactionSummary {
+  transactionCount: number;
+  expenseCount: number;
+  expenseTotal: number;
+  expenseDayCount: number;
+}
+
+export interface CalendarMarkRow {
+  day: number;
+  cat: string;
+}
+
 export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'>, UpdateInput = Partial<Omit<T, 'id'>>> {
   list(): T[];
   get(id: string): T | undefined;
@@ -172,7 +218,17 @@ export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'
   subscribe(listener: RepoListener): Unsubscribe;
 }
 
-export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, UpdateTransactionInput>;
+export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, UpdateTransactionInput> & {
+  listPage(query: TransactionQuery): TransactionPage;
+  getSummary(query: TransactionSummaryQuery): TransactionSummary;
+  getCalendarMarks(query: {
+    year: number;
+    month: number;
+    categoryIds?: string[];
+    merchantQuery?: string;
+    searchCategoryIds?: string[];
+  }): CalendarMarkRow[];
+};
 export type IncomeRepo = Repository<Income>;
 export type BillsRepo = Repository<Bill>;
 export type BudgetsRepo = Repository<Budget>;

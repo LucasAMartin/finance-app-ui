@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from 'react';
-import { useRepositories, useRepositoryList } from './repositories/RepositoryProvider';
+import { useEffect } from 'react';
+import { useRepositories, useRepositoryItem } from './repositories/RepositoryProvider';
 import type { MerchantLogo, MerchantLogosRepo, MerchantLogoStatus } from './repositories/types';
 
 const ENDPOINT = process.env.EXPO_PUBLIC_MERCHANT_LOGO_ENDPOINT
@@ -139,12 +139,8 @@ async function resolveAndCacheMerchantLogo(
 
 export function useMerchantLogo(merchant: string): MerchantLogo | undefined {
   const { merchantLogosRepo } = useRepositories();
-  const logos = useRepositoryList(merchantLogosRepo);
   const key = merchantLogoKey(merchant);
-  const entry = useMemo(
-    () => logos.find(item => item.merchantKey === key),
-    [key, logos],
-  );
+  const entry = useRepositoryItem(merchantLogosRepo, key);
 
   useEffect(() => {
     if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {

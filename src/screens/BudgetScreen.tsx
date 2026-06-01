@@ -15,8 +15,11 @@ import {
   Switch,
   ImageBackground,
   Animated,
+  Dimensions,
   Easing,
 } from 'react-native';
+
+const { height: SCREEN_H } = Dimensions.get('window');
 import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 'react-native-gesture-handler';
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
@@ -31,10 +34,10 @@ import { SheetPrimaryButton } from '../components/shared';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { TYPE } from '../typography';
-import { makeP, DARK_TEXT_SHADOW, makeScrim } from '../wallpaperPalette';
+import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor } from '../wallpaperPalette';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
-import type { Bill, Category, GroupKey, Income, RecurringRule, SpendGroup, SpendSub } from '../repositories/types';
+import type { Bill, Category, GroupKey, Income, RecurringRule, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
 import {
@@ -319,7 +322,8 @@ function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, w
 
 export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
-  const transactions = useRepositoryList(transactionsRepo);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [repoVersion, setRepoVersion] = useState(0);
   const incomes = useRepositoryList(incomeRepo);
   const budgetRecords = useRepositoryList(budgetsRepo);
   const categories = useRepositoryList(categoriesRepo);
@@ -329,6 +333,24 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
     [recurringRules, categories],
   );
   const [selectedMonth, setSelectedMonth] = useState(CURRENT_MONTH);
+  useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
+  useEffect(() => {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const baseQuery = {
+      from: new Date(year, month - 1, 1).toISOString(),
+      to: new Date(year, month, 0, 23, 59, 59, 999).toISOString(),
+      sort: 'date-desc',
+      limit: 200,
+    } as const;
+    const rows: Transaction[] = [];
+    let cursor: TransactionCursor | undefined;
+    do {
+      const page = transactionsRepo.listPage({ ...baseQuery, cursor });
+      rows.push(...page.rows);
+      cursor = page.nextCursor;
+    } while (cursor);
+    setTransactions(rows);
+  }, [selectedMonth, transactionsRepo, repoVersion]);
   const visibleSpendGroups = useMemo(
     () => spendGroups(transactions, budgetRecords, categories, selectedMonth),
     [transactions, budgetRecords, categories, selectedMonth],
@@ -342,11 +364,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   ), [incomes, selectedMonth]);
   const initialIncome = regularMonthlyIncome + oneTimeIncomeThisMonth;
   const insets = useSafeAreaInsets();
-  const { wallpaper } = useTheme();
+  const { wallpaper, wallpaperFloorBase } = useTheme();
   const pWallpaper = makeP(true);
   const p = makeP(theme.dark);
   const shadow = DARK_TEXT_SHADOW;
   const scrim = makeScrim(theme.dark);
+  const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
 
   // ── Scroll-driven sticky pin ──────────────────────────────────
   // When the allocation card meets the header it's replaced by a full-bleed
@@ -367,6 +390,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   // runs as the JS listener to drive the (layout-dependent) pin state.
   const scrollY = useRef(new Animated.Value(0)).current;
   const bgTranslateY = makeBgTranslateY(scrollY);
+  const floorOpacity = scrollY.interpolate({
+    inputRange: [0, SCREEN_H * 0.6],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
 
   const handleScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
     const y = e.nativeEvent.contentOffset.y;
@@ -1038,7 +1066,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   const stickyBorderColor = theme.dark ? 'rgba(235,225,255,0.16)' : 'rgba(14,12,24,0.08)';
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+    <View style={{ flex: 1, backgroundColor: floorColor }}>
 
       {/* Wallpaper + scrim — outside KAV so the keyboard never shifts it.
           Photo drifts up at half the scroll speed; container extends below the
@@ -1059,6 +1087,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
         colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}
         locations={[0, 0.28, 0.60, 1]}
         style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* Floor — fades in over the wallpaper as the user scrolls down */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

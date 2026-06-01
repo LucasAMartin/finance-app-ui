@@ -4,7 +4,6 @@ import {
   SEED_PERIOD_DATA,
   SEED_SPARK_7D,
   SEED_SPEND_GROUPS,
-  SEED_TRANSACTIONS,
   SEED_TREND,
 } from '../data';
 import type { Bill, Budget, Category, CreateTransactionInput, GroupKey, Income, RecurringRule, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
@@ -34,14 +33,11 @@ export function txToCreateInput(t: Transaction): CreateTransactionInput {
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
 
-const seedCatTotals = SEED_TRANSACTIONS.reduce<Record<string, number>>((acc, tx) => {
-  acc[tx.cat] = (acc[tx.cat] ?? 0) + tx.amount;
-  return acc;
-}, {});
-
 function categoryTotal(transactions: Transaction[], cat: string | undefined): number {
   if (!cat) return 0;
-  return transactions.filter(tx => tx.cat === cat).reduce((sum, tx) => sum + tx.amount, 0);
+  return transactions
+    .filter(tx => tx.type !== 'income' && tx.cat === cat)
+    .reduce((sum, tx) => sum + tx.amount, 0);
 }
 
 function monthBounds(monthKey: string): { start: string; end: string } {
@@ -79,8 +75,9 @@ export function monthlyIncome(incomes: Income[], monthKey = currentMonthKey()): 
   }, 0);
 }
 
-export function currentMonthlyBudget(budgets: Budget[]): number {
-  const monthly = budgets.find(b => b.month === '2026-05' && b.meta?.kind === 'monthly-budget');
+export function currentMonthlyBudget(budgets: Budget[], monthKey = currentMonthKey()): number {
+  const monthly = budgets.find(b => b.month === monthKey && b.meta?.kind === 'monthly-budget')
+    ?? budgets.find(b => b.meta?.kind === 'monthly-budget');
   return monthly?.amount ?? DEFAULT_MONTHLY_BUDGET;
 }
 
@@ -166,14 +163,12 @@ export function spendGroups(transactions: Transaction[], budgets: Budget[] = [],
       .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label))
       .map(cat => {
       const budget = budgets.find(b => (b.category === cat.id || b.label === cat.label) && b.month === month);
-      const seedSub = SEED_SPEND_GROUPS.flatMap(g => g.subs).find(sub => sub.cat === cat.id);
-      const baselineSpent = (seedSub?.spent ?? 0) - (seedCatTotals[cat.id] ?? 0);
       return {
         cat: cat.id,
         label: cat.label,
         icon: cat.icon,
         budget: budget?.amount ?? cat.defaultBudget,
-        spent: roundMoney(baselineSpent + categoryTotal(transactions, cat.id)),
+        spent: roundMoney(categoryTotal(transactions, cat.id)),
       };
     }),
   }));
@@ -249,16 +244,28 @@ function nextDueDate(rule: RecurringRule, today: Date): Date {
 }
 
 export function monthBudgets(transactions: Transaction[], budgets: Budget[] = []): MonthBudget[] {
-  const monthlyBudget = currentMonthlyBudget(budgets);
-  const seedTransactionTotal = SEED_TRANSACTIONS.reduce((sum, tx) => sum + tx.amount, 0);
-  const transactionTotal = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+  const monthKey = currentMonthKey();
+  const monthlyBudget = currentMonthlyBudget(budgets, monthKey);
+  const transactionTotal = transactions
+    .filter(tx => tx.type !== 'income')
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysRemaining = Math.max(0, daysInMonth - now.getDate());
+  const currentMonthLabel = now.toLocaleString('en-US', { month: 'long' });
   return SEED_MONTH_BUDGETS.map((month, idx) => {
     if (idx !== 0) return { ...month };
-    const spent = roundMoney(month.spent - seedTransactionTotal + transactionTotal);
+    const spent = roundMoney(transactionTotal);
     return {
       ...month,
+      key: monthKey,
+      month: currentMonthLabel,
       spent,
       budget: monthlyBudget,
+      expectedPct: now.getDate() / daysInMonth,
+      remainingLabel: daysRemaining === 0
+        ? 'Month complete'
+        : `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining`,
     };
   });
 }

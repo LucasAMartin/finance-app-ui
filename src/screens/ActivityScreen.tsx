@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   Easing,
   ImageBackground,
   Pressable,
@@ -12,12 +13,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
+const { height: SCREEN_H } = Dimensions.get('window');
 import {
+  FlatList as GHFlatList,
   Swipeable,
-  ScrollView as GHScrollView,
 } from 'react-native-gesture-handler';
 
-const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
+const AnimatedGHFlatList = Animated.createAnimatedComponent(GHFlatList);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
@@ -26,7 +29,7 @@ import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
-import type { Bill, Category, Transaction } from '../repositories/types';
+import type { Bill, Category, Transaction, TransactionCursor, TransactionQuery, TransactionSummary, TransactionSummaryQuery } from '../repositories/types';
 import { txToCreateInput, upcomingBillsFromRecurring } from '../selectors/finance';
 import type { ActivityInitialFilter } from '../selectors/spending';
 
@@ -39,6 +42,7 @@ const CALENDAR_YEAR  = NOW.getFullYear();
 const CALENDAR_MONTH = NOW.getMonth();
 const CALENDAR_COLLAPSE_FALLBACK_HEIGHT = 430;
 const MINI_CALENDAR_COLLAPSE_FALLBACK_HEIGHT = 360;
+const ACTIVITY_PAGE_SIZE = 80;
 const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Calendar open state persists across screen remounts (and across the rest of
@@ -60,7 +64,7 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText } from '../theme';
-import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim } from '../wallpaperPalette';
+import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim, deriveFloor } from '../wallpaperPalette';
 import { TYPE } from '../typography';
 import { useTheme } from '../ThemeProvider';
 
@@ -191,6 +195,59 @@ function fmtDate(d: Date): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
+function endOfDay(d: Date): Date {
+  const next = new Date(d);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
+
+function dateRangeForFilter(
+  dateFilter: DateFilter,
+  viewingNonDefaultMonth: boolean,
+  calViewYear: number,
+  calViewMonth: number,
+): Pick<TransactionSummaryQuery, 'from' | 'to'> {
+  if (dateFilter !== null) {
+    if (typeof dateFilter === 'string') {
+      if (dateFilter === 'today') return { from: startOfDay(NOW).toISOString(), to: endOfDay(NOW).toISOString() };
+      if (dateFilter === 'yesterday') {
+        const y = new Date(NOW);
+        y.setDate(y.getDate() - 1);
+        return { from: startOfDay(y).toISOString(), to: endOfDay(y).toISOString() };
+      }
+      if (dateFilter === 'this-week') {
+        const weekStart = new Date(NOW);
+        weekStart.setDate(weekStart.getDate() - 6);
+        return { from: startOfDay(weekStart).toISOString(), to: endOfDay(NOW).toISOString() };
+      }
+      if (dateFilter === 'this-month') {
+        return {
+          from: new Date(NOW.getFullYear(), NOW.getMonth(), 1).toISOString(),
+          to: endOfDay(new Date(NOW.getFullYear(), NOW.getMonth() + 1, 0)).toISOString(),
+        };
+      }
+    }
+    return {
+      from: startOfDay(dateFilter.from).toISOString(),
+      to: endOfDay(dateFilter.to).toISOString(),
+    };
+  }
+  if (viewingNonDefaultMonth) {
+    return {
+      from: new Date(calViewYear, calViewMonth, 1).toISOString(),
+      to: endOfDay(new Date(calViewYear, calViewMonth + 1, 0)).toISOString(),
+    };
+  }
+  return {};
+}
+
+const EMPTY_SUMMARY: TransactionSummary = {
+  transactionCount: 0,
+  expenseCount: 0,
+  expenseTotal: 0,
+  expenseDayCount: 0,
+};
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -202,13 +259,12 @@ interface Props {
 
 export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken }: Props) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
-  const transactions = useRepositoryList(transactionsRepo);
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
   const insets = useSafeAreaInsets();
-  const { wallpaper } = useTheme();
+  const { wallpaper, wallpaperFloorBase } = useTheme();
 
   const [query, setQuery]                   = useState('');
   const [catFilter, setCatFilter]           = useState<string[]>([]);
@@ -235,11 +291,15 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const [loadError, setLoadError]   = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showSwipeHint, setShowSwipeHint] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [activityRows, setActivityRows] = useState<Transaction[]>([]);
+  const [nextCursor, setNextCursor] = useState<TransactionCursor | undefined>(undefined);
+  const [activitySummary, setActivitySummary] = useState<TransactionSummary>(EMPTY_SUMMARY);
+  const [repoVersion, setRepoVersion] = useState(0);
 
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 1100);
-    return () => clearTimeout(t);
-  }, []);
+    return transactionsRepo.subscribe(() => setRepoVersion(version => version + 1));
+  }, [transactionsRepo]);
 
   // One-time swipe hint: fires when the list first appears with real rows.
   useEffect(() => {
@@ -250,11 +310,6 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
       return () => clearTimeout(t);
     }
   }, [loading, loadError]);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1100);
-  };
 
   const handleSetDateFilter = (d: DateFilter) => {
     setDateFilter(d);
@@ -268,10 +323,10 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
     setCalViewMonth(CALENDAR_MONTH);
   };
 
-  const handleDeleteTx = (t: Transaction) => {
+  const handleDeleteTx = useCallback((t: Transaction) => {
     transactionsRepo.delete(t.id);
     setPendingUndo({ tx: t });
-  };
+  }, [transactionsRepo]);
   const handleUndoDelete = () => {
     if (pendingUndo) transactionsRepo.create(txToCreateInput(pendingUndo.tx));
     setPendingUndo(null);
@@ -279,7 +334,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
 
   // Swipe-to-delete coordination (mirrors BudgetScreen): only one row open at a
   // time, and any open row closes when the user scrolls or taps elsewhere.
-  const scrollViewRef = useRef<GHScrollView>(null);
+  const scrollViewRef = useRef<any>(null);
   const openSwipeRef  = useRef<Swipeable | null>(null);
 
   const handleSwipeOpen = useCallback((ref: Swipeable) => {
@@ -319,82 +374,98 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const isViewingNonDefaultMonth =
     calViewMonth !== CALENDAR_MONTH || calViewYear !== CALENDAR_YEAR;
 
-  const filtered = useMemo(() => {
-    const result = transactions.filter(t => {
-      if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
-      if (isViewingNonDefaultMonth && dateFilter === null) {
-        const txd = txDate(t);
-        if (!txd || txd.getMonth() !== calViewMonth || txd.getFullYear() !== calViewYear) return false;
-      }
-      if (dateFilter !== null) {
-        if (typeof dateFilter === 'string') {
-          if (dateFilter === 'today'     && t.when !== 'today')     return false;
-          if (dateFilter === 'yesterday' && t.when !== 'yesterday') return false;
-          if (dateFilter === 'this-week' && t.when === 'earlier')   return false;
-          if (dateFilter === 'this-month') {
-            const txd = txDate(t);
-            if (!txd || txd.getMonth() !== NOW.getMonth() || txd.getFullYear() !== NOW.getFullYear()) return false;
-          }
-        } else {
-          const txd = txDate(t);
-          if (txd) {
-            const tx   = startOfDay(txd);
-            const from = startOfDay(dateFilter.from);
-            const to   = startOfDay(dateFilter.to);
-            if (tx < from || tx > to) return false;
-          }
-        }
-      }
-      if (query) {
-        const q = query.toLowerCase();
-        return t.merchant.toLowerCase().includes(q) || (cats[t.cat]?.label ?? t.cat).toLowerCase().includes(q);
-      }
-      return true;
-    });
-    if      (sortBy === 'amount-desc') result.sort((a, b) => b.amount - a.amount);
-    else if (sortBy === 'amount-asc')  result.sort((a, b) => a.amount - b.amount);
-    else if (sortBy === 'date-asc')    result.reverse();
-    else if (sortBy === 'cat')         result.sort((a, b) => a.cat.localeCompare(b.cat) || a.merchant.localeCompare(b.merchant));
-    return result;
-  }, [query, catFilter, dateFilter, sortBy, isViewingNonDefaultMonth, calViewMonth, calViewYear, transactions, cats]);
+  const merchantQuery = query.trim() || undefined;
+  const searchCategoryIds = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return categories
+      .filter(cat => cat.label.toLowerCase().includes(q))
+      .map(cat => cat.id);
+  }, [categories, query]);
+
+  const transactionScope = useMemo<TransactionSummaryQuery>(() => ({
+    categoryIds: catFilter.length > 0 ? catFilter : undefined,
+    merchantQuery,
+    searchCategoryIds,
+    ...dateRangeForFilter(dateFilter, isViewingNonDefaultMonth, calViewYear, calViewMonth),
+  }), [catFilter, merchantQuery, searchCategoryIds, dateFilter, isViewingNonDefaultMonth, calViewYear, calViewMonth]);
+
+  const activityQuery = useMemo<TransactionQuery>(() => ({
+    ...transactionScope,
+    limit: ACTIVITY_PAGE_SIZE,
+    sort: sortBy,
+  }), [sortBy, transactionScope]);
+
+  const loadFirstActivityPage = useCallback((showSkeleton = true) => {
+    if (showSkeleton) setLoading(true);
+    setLoadingMore(false);
+    try {
+      const page = transactionsRepo.listPage(activityQuery);
+      setActivityRows(page.rows);
+      setNextCursor(page.nextCursor);
+      setActivitySummary(transactionsRepo.getSummary(transactionScope));
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      if (showSkeleton) setLoading(false);
+    }
+  }, [activityQuery, transactionScope, transactionsRepo]);
+
+  useEffect(() => {
+    loadFirstActivityPage(true);
+  }, [loadFirstActivityPage, repoVersion]);
+
+  const loadMoreActivity = useCallback(() => {
+    if (loading || loadingMore || !nextCursor || selectedDay !== null) return;
+    setLoadingMore(true);
+    try {
+      const page = transactionsRepo.listPage({ ...activityQuery, cursor: nextCursor });
+      setActivityRows(rows => [...rows, ...page.rows]);
+      setNextCursor(page.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activityQuery, loading, loadingMore, nextCursor, selectedDay, transactionsRepo]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadFirstActivityPage(false);
+    setRefreshing(false);
+  }, [loadFirstActivityPage]);
 
   const grouped = useMemo(() => {
     const g: Record<string, { txs: Transaction[]; total: number }> = {};
-    filtered.forEach(t => {
+    activityRows.forEach(t => {
       if (!g[t.fullDate]) g[t.fullDate] = { txs: [], total: 0 };
       g[t.fullDate].txs.push(t);
       g[t.fullDate].total += t.amount;
     });
     return g;
-  }, [filtered]);
+  }, [activityRows]);
 
-  const dayKeys    = Object.keys(grouped);
+  const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
   const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
 
   // Expense-only count and sum for the filtered result set. Both exclude income
   // so count and total are consistent — no silent discrepancy between them.
-  const filteredExpenses = useMemo(() => filtered.filter(t => t.type !== 'income'), [filtered]);
-  const filteredExpenseCount = filteredExpenses.length;
-  const filteredSpendTotal = useMemo(
-    () => filteredExpenses.reduce((s, t) => s + t.amount, 0),
-    [filteredExpenses],
-  );
+  const filteredExpenseCount = activitySummary.expenseCount;
+  const filteredSpendTotal = activitySummary.expenseTotal;
 
   // Average daily expense spend across visible day groups — used to add relative
   // weight signal to day headers without needing a budget target.
-  const avgDaySpend = dayKeys.length > 0 ? filteredSpendTotal / dayKeys.length : 0;
+  const avgDaySpend = activitySummary.expenseDayCount > 0 ? filteredSpendTotal / activitySummary.expenseDayCount : 0;
 
   // ── Calendar marks ───────────────────────────────────────────────────────
-  const calSource = useMemo(
-    () => transactions.filter(t => {
-      if (catFilter.length > 0 && !catFilter.includes(t.cat)) return false;
-      if (query) {
-        const q = query.toLowerCase();
-        return t.merchant.toLowerCase().includes(q) || (cats[t.cat]?.label ?? t.cat).toLowerCase().includes(q);
-      }
-      return true;
+  const calTxMarks = useMemo(
+    () => transactionsRepo.getCalendarMarks({
+      year: calViewYear,
+      month: calViewMonth,
+      categoryIds: catFilter.length > 0 ? catFilter : undefined,
+      merchantQuery,
+      searchCategoryIds,
     }),
-    [catFilter, query, transactions, cats],
+    [calViewYear, calViewMonth, catFilter, merchantQuery, searchCategoryIds, transactionsRepo, repoVersion],
   );
 
   const calBills = useMemo(
@@ -408,31 +479,32 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
       if (!m[d]) m[d] = { txCats: [], billCats: [] };
       return m[d];
     };
-    calSource.forEach(t => {
-      const txd = txDate(t);
-      if (txd && txd.getMonth() === calViewMonth && txd.getFullYear() === calViewYear) {
-        ensure(txd.getDate()).txCats.push(t.cat);
-      }
-    });
+    calTxMarks.forEach(mark => ensure(mark.day).txCats.push(mark.cat));
     calBills.forEach(b => {
       const pd = parseMonthDay(b.dueDate);
       if (pd && pd.month === calViewMonth) ensure(pd.day).billCats.push(b.cat);
     });
     return m;
-  }, [calSource, calBills, calViewMonth, calViewYear]);
+  }, [calTxMarks, calBills]);
 
   const dayDetail = useMemo(() => {
     if (selectedDay == null) return { txs: [], bills: [], total: 0 };
-    const txs = calSource.filter(t => {
-      const txd = txDate(t);
-      return txd != null && txd.getMonth() === calViewMonth && txd.getFullYear() === calViewYear && txd.getDate() === selectedDay;
-    });
+    const selectedDate = new Date(calViewYear, calViewMonth, selectedDay);
+    const txs = transactionsRepo.listPage({
+      categoryIds: catFilter.length > 0 ? catFilter : undefined,
+      merchantQuery,
+      searchCategoryIds,
+      from: startOfDay(selectedDate).toISOString(),
+      to: endOfDay(selectedDate).toISOString(),
+      sort: 'date-desc',
+      limit: 200,
+    }).rows;
     const bills = calBills.filter(b => {
       const pd = parseMonthDay(b.dueDate);
       return pd?.month === calViewMonth && pd.day === selectedDay;
     });
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
-  }, [selectedDay, calViewMonth, calViewYear, calSource, calBills]);
+  }, [selectedDay, calViewMonth, calViewYear, catFilter, merchantQuery, searchCategoryIds, calBills, transactionsRepo, repoVersion]);
 
   const dayDetailSpend = dayDetail.txs
     .filter(t => t.type !== 'income')
@@ -447,10 +519,49 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const scrimLower  = scrim.lower;
   const scrimBottom = scrim.bottom;
 
+  const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
+  const floorOpacity = scrollY.interpolate({
+    inputRange: [0, SCREEN_H * 0.6],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
   const hasFilterPills = selectedDay !== null || dateFilter !== null || catFilter.length > 0;
+  const activityDayKeys = useMemo(
+    () => !loading && !loadError && selectedDay === null && dayKeys.length > 0 ? dayKeys : [],
+    [dayKeys, loadError, loading, selectedDay],
+  );
+
+  const renderActivityDay = useCallback((day: string) => (
+    <SectionCard dark={theme.dark} style={S.dayGroupCard}>
+      <DayGroup
+        day={day}
+        group={grouped[day]}
+        theme={theme}
+        cats={cats}
+        categories={categories}
+        onPress={setSheetTx}
+        onDelete={handleDeleteTx}
+        onSwipeOpen={handleSwipeOpen}
+        onSwipeClose={handleSwipeClose}
+        scrollRef={scrollViewRef}
+        avgDaySpend={avgDaySpend}
+        style={{ marginBottom: 0 }}
+      />
+    </SectionCard>
+  ), [
+    avgDaySpend,
+    categories,
+    cats,
+    grouped,
+    handleDeleteTx,
+    handleSwipeClose,
+    handleSwipeOpen,
+    theme,
+  ]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.dark ? '#0F0B1C' : '#F5F4F8' }}>
+    <View style={{ flex: 1, backgroundColor: floorColor }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
           below the screen so the upward shift never reveals a gap. */}
       <Animated.View
@@ -470,6 +581,12 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
         colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
         locations={[0, 0.30, 0.70, 1]}
         style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* Floor — fades in over the wallpaper as the user scrolls down */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
       {/* ── Header — pinned ─────────────────────────────────────── */}
@@ -515,12 +632,21 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
         </View>
 
         {/* ── Scrollable content ──────────────────────────────────── */}
-        <AnimatedGHScrollView
+        <AnimatedGHFlatList
           ref={scrollViewRef}
+          data={activityDayKeys}
+          keyExtractor={(day) => String(day)}
+          renderItem={({ item }) => renderActivityDay(String(item))}
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingTop: insets.top + 64, paddingBottom: 160 }}
+          contentContainerStyle={[S.listContent, { paddingTop: insets.top + 64 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          removeClippedSubviews
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          onEndReached={loadMoreActivity}
+          onEndReachedThreshold={0.7}
           onScrollBeginDrag={dismissOpenSwipe}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -536,8 +662,19 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
               progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
             />
           }
-        >
-          <View style={S.sectionStack}>
+          ListFooterComponent={loadingMore ? (
+            <SectionCard dark={theme.dark} style={S.swipeHintCard}>
+              <View style={S.loadingMore}>
+                <Skeleton width={92} height={12} radius={4} onMedia={theme.dark} />
+              </View>
+            </SectionCard>
+          ) : showSwipeHint && activityDayKeys.length > 0 ? (
+            <SectionCard dark={theme.dark} style={S.swipeHintCard}>
+              <SwipeHint dark={theme.dark} />
+            </SectionCard>
+          ) : null}
+          ListHeaderComponent={(
+            <View style={S.sectionStack}>
 
             {/* ── Calendar card ─────────────────────────────────── */}
             <SectionCard noPad dark={theme.dark}>
@@ -731,16 +868,19 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
               )}
             </SectionCard>
 
-            {/* ── Transactions card ─────────────────────────────── */}
-            <SectionCard dark={theme.dark}>
-              {loading ? (
+            {loading ? (
+              <SectionCard dark={theme.dark}>
                 <TxListSkeleton dark={theme.dark} />
-              ) : loadError ? (
+              </SectionCard>
+            ) : loadError ? (
+              <SectionCard dark={theme.dark}>
                 <LoadError
                   theme={theme}
                   onRetry={() => { setLoadError(false); setLoading(true); setTimeout(() => setLoading(false), 1100); }}
                 />
-              ) : selectedDay !== null ? (
+              </SectionCard>
+            ) : selectedDay !== null ? (
+              <SectionCard dark={theme.dark}>
                 <>
                   {dayDetail.txs.length === 0 && dayDetail.bills.length === 0 ? (
                     <Text style={[S.detailEmpty, { color: p.textTer }]}>No activity this day</Text>
@@ -773,79 +913,38 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                     </View>
                   )}
                 </>
-              ) : (
-                dayKeys.length === 0 ? (
+              </SectionCard>
+            ) : (
+              dayKeys.length === 0 ? (
+                <SectionCard dark={theme.dark}>
                   <EmptyState
                     theme={theme}
                     isFiltered={isFiltered}
-                    onClearFilters={() => { setCatFilter([]); setDateFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
+                    onClearFilters={() => { setQuery(''); setCatFilter([]); setDateFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
                   />
-                ) : (
-                  <>
-                    {isFiltered && (
+                </SectionCard>
+              ) : (
+                <>
+                  {isFiltered && (
+                    <SectionCard dark={theme.dark}>
                       <View
                         accessibilityLiveRegion="polite"
-                        style={[S.summaryRow, { borderBottomColor: p.hairline, borderBottomWidth: StyleSheet.hairlineWidth }]}
+                        style={[S.summaryRow, S.summaryRowSolo]}
                       >
                         <Text style={[S.summaryLabel, { color: p.textSec }]}>
                           {filteredExpenseCount} {filteredExpenseCount === 1 ? 'expense' : 'expenses'}
                         </Text>
                         <Text style={[S.summaryTotal, { color: p.text }]}>${filteredSpendTotal.toFixed(2)}</Text>
                       </View>
-                    )}
-                    {/*
-                      TODO(perf, real-data): this renders every day group and
-                      every TxRow eagerly inside the outer ScrollView. Fine at
-                      mock-data size; at real volume (hundreds–thousands of
-                      transactions from CloudKit) it builds and holds every row
-                      in memory on mount, causing slow opens, memory bloat, and
-                      scroll jank.
+                    </SectionCard>
+                  )}
+                </>
+              )
+            )}
 
-                      Fix is to VIRTUALIZE: make a SectionList the screen's
-                      scroll container (sections = dayKeys, renderSectionHeader =
-                      the day header + total, renderItem = SwipeRow + TxRow) so
-                      only the rows near the viewport are mounted.
-
-                      Not a mechanical swap — two things have to be reworked and
-                      verified on a device:
-                        1. Layout. The whole list currently lives inside ONE
-                           frosted SectionCard (a BlurView). A virtualized list
-                           must BE the scroller, and a BlurView can't be the
-                           scroller — so the calendar + search cards move into
-                           ListHeaderComponent and the day groups need their own
-                           card treatment (per-group cards, or rows on a
-                           translucent strip). That's a visual decision.
-                        2. Gestures. Swipe-to-delete coordination
-                           (simultaneousHandlers + openSwipeRef) and the
-                           header-scroll Animated.event must be re-pointed at the
-                           SectionList ref instead of scrollViewRef.
-                      Pair this with the CloudKit data wiring; it only pays off
-                      at that scale.
-                    */}
-                    {dayKeys.map(day => (
-                      <DayGroup
-                        key={day}
-                        day={day}
-                        group={grouped[day]}
-                        theme={theme}
-                        cats={cats}
-                        categories={categories}
-                        onPress={setSheetTx}
-                        onDelete={handleDeleteTx}
-                        onSwipeOpen={handleSwipeOpen}
-                        onSwipeClose={handleSwipeClose}
-                        scrollRef={scrollViewRef}
-                        avgDaySpend={avgDaySpend}
-                      />
-                    ))}
-                    {showSwipeHint && <SwipeHint dark={theme.dark} />}
-                  </>
-                )
-              )}
-            </SectionCard>
-
-          </View>
-        </AnimatedGHScrollView>
+            </View>
+          )}
+        />
 
         <TxSheet
           tx={sheetTx}
@@ -1333,7 +1432,7 @@ function MiniCalendar({
 
 function DayGroup({
   day, group, theme, cats, categories, onPress, onDelete,
-  onSwipeOpen, onSwipeClose, scrollRef, avgDaySpend,
+  onSwipeOpen, onSwipeClose, scrollRef, avgDaySpend, style,
 }: {
   day: string;
   group: { txs: Transaction[]; total: number };
@@ -1346,6 +1445,7 @@ function DayGroup({
   onSwipeClose: () => void;
   scrollRef: React.RefObject<any>;
   avgDaySpend: number;
+  style?: any;
 }) {
   const p     = makeP(theme.dark);
   const { txs } = group;
@@ -1362,7 +1462,7 @@ function DayGroup({
     : day;
 
   return (
-    <View style={{ marginBottom: 16 }}>
+    <View style={[{ marginBottom: 16 }, style]}>
       <View style={S.dayHeader}>
         <Text style={[S.dayLabel, { color: p.textTer }]}>{label}</Text>
         <Text style={[S.dayTotal, { color: expenseCount > 1 ? dayTotalColor : p.textTer }]}>
@@ -1673,9 +1773,24 @@ const S = StyleSheet.create({
   },
 
   // Section stack
-  sectionStack: {
+  listContent: {
     paddingHorizontal: 16,
+    paddingBottom: 160,
+  },
+  sectionStack: {
     gap: 14,
+    marginBottom: 14,
+  },
+  dayGroupCard: {
+    marginBottom: 14,
+  },
+  swipeHintCard: {
+    marginBottom: 14,
+  },
+  loadingMore: {
+    minHeight: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionCard: {
     borderRadius: 24,
@@ -1797,6 +1912,10 @@ const S = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'baseline', paddingHorizontal: 2,
     paddingBottom: 12, marginBottom: 14,
+  },
+  summaryRowSolo: {
+    paddingBottom: 0,
+    marginBottom: 0,
   },
   summaryLabel: {
     ...TYPE.bodySm,

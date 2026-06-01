@@ -53,12 +53,13 @@ export function TxSheet({
   onDeleted?: (tx: Transaction) => void;
 }) {
   const { transactionsRepo, categoriesRepo } = useRepositories();
-  const transactions = useRepositoryList(transactionsRepo);
   const categories = useRepositoryList(categoriesRepo);
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const lastTx = useRef<Transaction | null>(null);
-  if (tx) lastTx.current = tx;
+  const [repoVersion, setRepoVersion] = useState(0);
+  const currentOpenTx = tx ? (transactionsRepo.get(tx.id) ?? tx) : null;
+  if (currentOpenTx) lastTx.current = currentOpenTx;
   const t = lastTx.current;
 
   const [detent, setDetent] = useState<PresentationDetent>(DETENT_DEFAULT);
@@ -69,19 +70,27 @@ export function TxSheet({
   const [editOccurredAt, setEditOccurredAt] = useState<Date>(new Date());
   const [datePickerInlineOpen, setDatePickerInlineOpen] = useState(false);
 
+  useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
+
   useEffect(() => {
-    if (tx !== null) {
+    if (currentOpenTx !== null) {
       setDetent(DETENT_DEFAULT);
-      setEditCat(tx.cat);
-      setEditMerchant(tx.merchant);
-      setEditNote(tx.note ?? '');
-      setEditAmt(tx.amount.toFixed(2));
-      setEditOccurredAt(dateFromIso(tx.occurredAt));
+      setEditCat(currentOpenTx.cat);
+      setEditMerchant(currentOpenTx.merchant);
+      setEditNote(currentOpenTx.note ?? '');
+      setEditAmt(currentOpenTx.amount.toFixed(2));
+      setEditOccurredAt(dateFromIso(currentOpenTx.occurredAt));
       setDatePickerInlineOpen(false);
     }
-  }, [tx]);
+  }, [currentOpenTx?.id, currentOpenTx?.cat, currentOpenTx?.merchant, currentOpenTx?.note, currentOpenTx?.amount, currentOpenTx?.occurredAt, repoVersion]);
 
   const isExpanded = detent === DETENT_LARGE;
+  const txMonth = t?.occurredAt ? new Date(t.occurredAt) : new Date();
+  const catTotal = t ? transactionsRepo.getSummary({
+    categoryIds: [t.cat],
+    from: new Date(txMonth.getFullYear(), txMonth.getMonth(), 1).toISOString(),
+    to: new Date(txMonth.getFullYear(), txMonth.getMonth() + 1, 0, 23, 59, 59, 999).toISOString(),
+  }).expenseTotal : 0;
 
   const saveEdit = () => {
     if (!t) return;
@@ -151,10 +160,10 @@ export function TxSheet({
                           paddingBottom: Math.max(insets.bottom, 16) + 12,
                         }}
                       >
-                        <SheetBody tx={t} transactions={transactions} theme={theme} isExpanded={isExpanded} cats={cats} categories={categories} />
+                        <SheetBody tx={t} theme={theme} isExpanded={isExpanded} cats={cats} categories={categories} />
                         {!isExpanded ? (
                           <View>
-                            <CompactSummary tx={t} transactions={transactions} theme={theme} cats={cats} categories={categories} />
+                            <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
                             <Pressable
                               onPress={() => setDetent(DETENT_LARGE)}
                               pointerEvents="box-only"
@@ -201,14 +210,12 @@ export function TxSheet({
 
 function SheetBody({
   tx,
-  transactions,
   theme,
   isExpanded,
   cats,
   categories,
 }: {
   tx: Transaction;
-  transactions: Transaction[];
   theme: Theme;
   isExpanded: boolean;
   cats: Record<string, { label: string; icon: string; budget: number }>;
@@ -245,20 +252,19 @@ function SheetBody({
 
 function CompactSummary({
   tx,
-  transactions,
+  catTotal,
   theme,
   cats,
   categories,
 }: {
   tx: Transaction;
-  transactions: Transaction[];
+  catTotal: number;
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
 }) {
   const cat = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
-  const catTotal = transactions.filter(x => x.cat === tx.cat).reduce((s, x) => s + x.amount, 0);
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
 

@@ -1,7 +1,18 @@
 import { getDb, json, nextId } from './db';
 import { SQLiteRepository } from './base';
 import { normalizeTransactionInput, transactionFromStored } from '../transactionDates';
-import type { CreateTransactionInput, Transaction, UpdateTransactionInput } from '../types';
+import type {
+  CalendarMarkRow,
+  CreateTransactionInput,
+  Transaction,
+  TransactionCursor,
+  TransactionPage,
+  TransactionQuery,
+  TransactionSortOrder,
+  TransactionSummary,
+  TransactionSummaryQuery,
+  UpdateTransactionInput,
+} from '../types';
 
 interface TxRow {
   id: string;
@@ -19,25 +30,222 @@ interface TxRow {
   meta: string | null;
 }
 
+const DEFAULT_SORT: TransactionSortOrder = 'date-desc';
+
+function txFromRow(row: TxRow): Transaction {
+  return transactionFromStored({
+    id: row.id,
+    type: row.type,
+    amount: row.amount,
+    merchant: row.merchant,
+    cat: row.category,
+    occurredAt: row.occurred_at,
+    note: row.note,
+    recurring: row.recurring,
+    recurringRuleId: row.recurring_rule_id ?? undefined,
+    visibility: row.visibility,
+    createdByUserId: row.created_by_user_id ?? undefined,
+    updatedByUserId: row.updated_by_user_id ?? undefined,
+    meta: row.meta,
+  });
+}
+
+function cursorFromTx(tx: Transaction): TransactionCursor {
+  return {
+    occurredAt: tx.occurredAt ?? new Date().toISOString(),
+    id: tx.id,
+    amount: tx.amount,
+    cat: tx.cat,
+    merchant: tx.merchant,
+  };
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, match => `\\${match}`);
+}
+
+function placeholders(values: any[]): string {
+  return values.map(() => '?').join(', ');
+}
+
+function appendInClause(parts: string[], params: any[], column: string, values?: string[]) {
+  if (!values || values.length === 0) return;
+  parts.push(`${column} IN (${placeholders(values)})`);
+  params.push(...values);
+}
+
+function appendSearchClause(
+  parts: string[],
+  params: any[],
+  merchantQuery?: string,
+  searchCategoryIds?: string[],
+) {
+  const q = merchantQuery?.trim();
+  if (!q) return;
+  const searchParts = [`merchant LIKE ? ESCAPE '\\'`];
+  params.push(`%${escapeLike(q)}%`);
+  if (searchCategoryIds && searchCategoryIds.length > 0) {
+    searchParts.push(`category IN (${placeholders(searchCategoryIds)})`);
+    params.push(...searchCategoryIds);
+  }
+  parts.push(`(${searchParts.join(' OR ')})`);
+}
+
+function appendBaseWhere(parts: string[], params: any[], query: TransactionSummaryQuery) {
+  appendInClause(parts, params, 'category', query.categoryIds);
+  appendSearchClause(parts, params, query.merchantQuery, query.searchCategoryIds);
+  if (query.from) {
+    parts.push('occurred_at >= ?');
+    params.push(query.from);
+  }
+  if (query.to) {
+    parts.push('occurred_at <= ?');
+    params.push(query.to);
+  }
+}
+
+function appendCursorWhere(parts: string[], params: any[], sort: TransactionSortOrder, cursor?: TransactionCursor) {
+  if (!cursor) return;
+  if (sort === 'date-asc') {
+    parts.push('(occurred_at > ? OR (occurred_at = ? AND id > ?))');
+    params.push(cursor.occurredAt, cursor.occurredAt, cursor.id);
+    return;
+  }
+  if (sort === 'amount-desc') {
+    parts.push('(amount < ? OR (amount = ? AND occurred_at < ?) OR (amount = ? AND occurred_at = ? AND id < ?))');
+    params.push(cursor.amount ?? 0, cursor.amount ?? 0, cursor.occurredAt, cursor.amount ?? 0, cursor.occurredAt, cursor.id);
+    return;
+  }
+  if (sort === 'amount-asc') {
+    parts.push('(amount > ? OR (amount = ? AND occurred_at < ?) OR (amount = ? AND occurred_at = ? AND id < ?))');
+    params.push(cursor.amount ?? 0, cursor.amount ?? 0, cursor.occurredAt, cursor.amount ?? 0, cursor.occurredAt, cursor.id);
+    return;
+  }
+  if (sort === 'cat') {
+    parts.push(`(
+      category > ?
+      OR (category = ? AND merchant > ?)
+      OR (category = ? AND merchant = ? AND occurred_at < ?)
+      OR (category = ? AND merchant = ? AND occurred_at = ? AND id < ?)
+    )`);
+    params.push(
+      cursor.cat ?? '',
+      cursor.cat ?? '',
+      cursor.merchant ?? '',
+      cursor.cat ?? '',
+      cursor.merchant ?? '',
+      cursor.occurredAt,
+      cursor.cat ?? '',
+      cursor.merchant ?? '',
+      cursor.occurredAt,
+      cursor.id,
+    );
+    return;
+  }
+  parts.push('(occurred_at < ? OR (occurred_at = ? AND id < ?))');
+  params.push(cursor.occurredAt, cursor.occurredAt, cursor.id);
+}
+
+function orderBy(sort: TransactionSortOrder): string {
+  if (sort === 'date-asc') return 'occurred_at ASC, id ASC';
+  if (sort === 'amount-desc') return 'amount DESC, occurred_at DESC, id DESC';
+  if (sort === 'amount-asc') return 'amount ASC, occurred_at DESC, id DESC';
+  if (sort === 'cat') return 'category ASC, merchant ASC, occurred_at DESC, id DESC';
+  return 'occurred_at DESC, id DESC';
+}
+
+function whereSql(parts: string[]): string {
+  return parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
+}
+
 export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, CreateTransactionInput, UpdateTransactionInput> {
+  get(id: string): Transaction | undefined {
+    const row = getDb().getFirstSync<TxRow>('SELECT * FROM transactions WHERE id = ?', id);
+    return row ? txFromRow(row) : undefined;
+  }
+
   protected readAll(): Transaction[] {
     return getDb()
       .getAllSync<TxRow>('SELECT * FROM transactions ORDER BY occurred_at DESC, id DESC')
-      .map(row => transactionFromStored({
-        id: row.id,
-        type: row.type,
-        amount: row.amount,
-        merchant: row.merchant,
-        cat: row.category,
-        occurredAt: row.occurred_at,
-        note: row.note,
-        recurring: row.recurring,
-        recurringRuleId: row.recurring_rule_id ?? undefined,
-        visibility: row.visibility,
-        createdByUserId: row.created_by_user_id ?? undefined,
-        updatedByUserId: row.updated_by_user_id ?? undefined,
-        meta: row.meta,
-      }));
+      .map(txFromRow);
+  }
+
+  listPage(query: TransactionQuery): TransactionPage {
+    const sort = query.sort ?? DEFAULT_SORT;
+    const limit = Math.max(1, Math.min(query.limit, 200));
+    const parts: string[] = [];
+    const params: any[] = [];
+    appendBaseWhere(parts, params, query);
+    appendCursorWhere(parts, params, sort, query.cursor);
+    const rows = getDb()
+      .getAllSync<TxRow>(
+        `SELECT * FROM transactions ${whereSql(parts)} ORDER BY ${orderBy(sort)} LIMIT ?`,
+        ...params,
+        limit + 1,
+      )
+      .map(txFromRow);
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    return {
+      rows: pageRows,
+      nextCursor: hasMore && pageRows.length > 0 ? cursorFromTx(pageRows[pageRows.length - 1]) : undefined,
+    };
+  }
+
+  getSummary(query: TransactionSummaryQuery): TransactionSummary {
+    const parts: string[] = [];
+    const params: any[] = [];
+    appendBaseWhere(parts, params, query);
+    const row = getDb().getFirstSync<{
+      transaction_count: number;
+      expense_count: number;
+      expense_total: number | null;
+      expense_day_count: number;
+    }>(
+      `SELECT
+        COUNT(*) AS transaction_count,
+        SUM(CASE WHEN type != 'income' THEN 1 ELSE 0 END) AS expense_count,
+        COALESCE(SUM(CASE WHEN type != 'income' THEN amount ELSE 0 END), 0) AS expense_total,
+        COUNT(DISTINCT CASE WHEN type != 'income' THEN date(occurred_at) END) AS expense_day_count
+       FROM transactions
+       ${whereSql(parts)}`,
+      ...params,
+    );
+    return {
+      transactionCount: row?.transaction_count ?? 0,
+      expenseCount: row?.expense_count ?? 0,
+      expenseTotal: row?.expense_total ?? 0,
+      expenseDayCount: row?.expense_day_count ?? 0,
+    };
+  }
+
+  getCalendarMarks(query: {
+    year: number;
+    month: number;
+    categoryIds?: string[];
+    merchantQuery?: string;
+    searchCategoryIds?: string[];
+  }): CalendarMarkRow[] {
+    const from = new Date(query.year, query.month, 1).toISOString();
+    const to = new Date(query.year, query.month + 1, 0, 23, 59, 59, 999).toISOString();
+    const parts: string[] = [];
+    const params: any[] = [];
+    appendBaseWhere(parts, params, {
+      categoryIds: query.categoryIds,
+      merchantQuery: query.merchantQuery,
+      searchCategoryIds: query.searchCategoryIds,
+      from,
+      to,
+    });
+    return getDb()
+      .getAllSync<{ occurred_at: string; cat: string }>(
+        `SELECT occurred_at, category AS cat
+         FROM transactions
+         ${whereSql(parts)}
+         ORDER BY occurred_at DESC`,
+        ...params,
+      )
+      .map(row => ({ day: new Date(row.occurred_at).getDate(), cat: row.cat }));
   }
 
   create(input: CreateTransactionInput): Transaction {

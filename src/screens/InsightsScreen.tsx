@@ -37,6 +37,7 @@ import {
   MEDIA,
   DARK_TEXT_SHADOW,
   makeP,
+  deriveFloor,
   WallpaperP as P,
 } from '../wallpaperPalette';
 import {
@@ -44,7 +45,7 @@ import {
   useRepositoryList,
 } from '../repositories/RepositoryProvider';
 import { categoryGroupFor } from '../repositories/categoryUtils';
-import type { Category, GroupKey } from '../repositories/types';
+import type { Category, GroupKey, Transaction, TransactionCursor } from '../repositories/types';
 import {
   currentMonthlyBudget,
   upcomingBillsFromRecurring,
@@ -75,7 +76,7 @@ import {
 import { SnapshotViz, type SnapshotVizSpec } from '../components/charts/SnapshotViz';
 import { TYPE } from '../typography';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 const CARD_OUTER_PAD = 16;
 const CARD_INNER_PAD = 18;
@@ -675,11 +676,12 @@ export function InsightsScreen({
 }: Props) {
   const { transactionsRepo, categoriesRepo, budgetsRepo, recurringRulesRepo } =
     useRepositories();
-  const transactions = useRepositoryList(transactionsRepo);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [repoVersion, setRepoVersion] = useState(0);
   const categories = useRepositoryList(categoriesRepo);
   const budgets = useRepositoryList(budgetsRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
-  const { wallpaper } = useTheme();
+  const { wallpaper, wallpaperFloorBase } = useTheme();
   const insets = useSafeAreaInsets();
   const pWall = makeP(true);
   const p = makeP(theme.dark);
@@ -712,6 +714,25 @@ export function InsightsScreen({
     () => derivePeriodRanges(period, dateIdx, now),
     [period, dateIdx, now],
   );
+  useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
+  useEffect(() => {
+    const from = ranges.prev.from < ranges.current.from ? ranges.prev.from : ranges.current.from;
+    const to = ranges.prev.to > ranges.current.to ? ranges.prev.to : ranges.current.to;
+    const rows: Transaction[] = [];
+    let cursor: TransactionCursor | undefined;
+    do {
+      const page = transactionsRepo.listPage({
+        from: from.toISOString(),
+        to: to.toISOString(),
+        sort: 'date-desc',
+        limit: 200,
+        cursor,
+      });
+      rows.push(...page.rows);
+      cursor = page.nextCursor;
+    } while (cursor);
+    setTransactions(rows);
+  }, [transactionsRepo, ranges, repoVersion]);
   // A range whose end is in the past is settled: its totals are actuals, not
   // projections, so we drop the "pace"/"projected" framing for it.
   const rangeComplete = ranges.current.to <= now;
@@ -1412,8 +1433,15 @@ export function InsightsScreen({
   const scrimLower = theme.dark ? 'rgba(3,5,8,0.68)' : 'rgba(3,5,8,0.20)';
   const scrimBottom = theme.dark ? 'rgba(3,5,8,0.88)' : 'transparent';
 
+  const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
+  const floorOpacity = scrollY.interpolate({
+    inputRange: [0, SCREEN_H * 0.6],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+
   return (
-    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+    <View style={{ flex: 1, backgroundColor: floorColor }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
           below the screen so the upward shift never reveals a gap. */}
       <Animated.View
@@ -1433,6 +1461,12 @@ export function InsightsScreen({
         colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
         locations={[0, 0.28, 0.6, 1]}
         style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* Floor — fades in over the wallpaper as the user scrolls down */}
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
       {/* ─── Header ─────────────────────────────── */}

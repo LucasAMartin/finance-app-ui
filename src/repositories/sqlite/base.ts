@@ -25,7 +25,7 @@ export abstract class SQLiteRepository<T extends { id: string }, CreateInput = O
   }
 
   protected emit() {
-    this.cache = this.readAll();
+    this.cache = null;
     this.listeners.forEach(listener => listener());
   }
 }

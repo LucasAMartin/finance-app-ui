@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { createInMemoryRepositories } from './inMemory';
 import { createSQLiteRepositories } from './sqlite';
 import type { Repositories, Repository } from './types';
@@ -26,5 +26,26 @@ export function useRepositories(): Repositories {
 export function useRepositoryList<T extends { id: string }>(repo: Repository<T, any, any>): T[] {
   const subscribe = useCallback((listener: () => void) => repo.subscribe(listener), [repo]);
   const getSnapshot = useCallback(() => repo.list(), [repo]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+function shallowEqualRecord<T extends object>(a: T, b: T): boolean {
+  const aKeys = Object.keys(a) as Array<keyof T>;
+  const bKeys = Object.keys(b) as Array<keyof T>;
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(key => Object.is(a[key], b[key]));
+}
+
+export function useRepositoryItem<T extends { id: string }>(repo: Repository<T, any, any>, id: string): T | undefined {
+  const snapshotRef = useRef<T | undefined>(undefined);
+  const subscribe = useCallback((listener: () => void) => repo.subscribe(listener), [repo]);
+  const getSnapshot = useCallback(() => {
+    const next = repo.list().find(item => item.id === id);
+    const prev = snapshotRef.current;
+    if (prev === next) return prev;
+    if (prev && next && shallowEqualRecord(prev, next)) return prev;
+    snapshotRef.current = next;
+    return next;
+  }, [repo, id]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

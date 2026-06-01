@@ -12,7 +12,7 @@ import { shiftedSeedDate } from '../transactionDates';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 let db: SQLiteDatabase | null = null;
 
@@ -229,6 +229,24 @@ function migrate(database: SQLiteDatabase) {
         `DELETE FROM transactions WHERE id IN ('t1','t2','t3','t4','t5','t6','t7')`,
       );
       insertSeedTransactions(database);
+    }
+    if (version < 5) {
+      database.execSync(`
+        CREATE INDEX IF NOT EXISTS idx_transactions_occurred_id
+        ON transactions (occurred_at DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_transactions_category_occurred
+        ON transactions (category, occurred_at DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_transactions_type_occurred
+        ON transactions (type, occurred_at DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_transactions_amount_occurred_id
+        ON transactions (amount DESC, occurred_at DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_transactions_category_merchant_occurred_id
+        ON transactions (category, merchant, occurred_at DESC, id DESC);
+      `);
     }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });

@@ -16,23 +16,27 @@ interface Props {
 
 export function DetailScreen({ tx, theme, onBack }: Props) {
   const { transactionsRepo, categoriesRepo } = useRepositories();
-  const transactions = useRepositoryList(transactionsRepo);
+  const [repoVersion, setRepoVersion] = useState(0);
   const categories = useRepositoryList(categoriesRepo);
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const card = getCardStyle(theme);
-  if (!tx) return null;
-  const currentTx = transactions.find(t => t.id === tx.id) ?? tx;
+  const currentTx = tx ? (transactionsRepo.get(tx.id) ?? tx) : null;
   const [editing, setEditing] = useState(false);
-  const [merchantDraft, setMerchantDraft] = useState(currentTx.merchant);
-  const [amountDraft, setAmountDraft] = useState(currentTx.amount.toFixed(2));
-  const [noteDraft, setNoteDraft] = useState(currentTx.note ?? '');
+  const [merchantDraft, setMerchantDraft] = useState('');
+  const [amountDraft, setAmountDraft] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+
+  useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
 
   useEffect(() => {
+    if (!currentTx) return;
     setMerchantDraft(currentTx.merchant);
     setAmountDraft(currentTx.amount.toFixed(2));
     setNoteDraft(currentTx.note ?? '');
-  }, [currentTx.id, currentTx.merchant, currentTx.amount, currentTx.note]);
+  }, [currentTx?.id, currentTx?.merchant, currentTx?.amount, currentTx?.note, repoVersion]);
+
+  if (!currentTx) return null;
 
   const saveEdit = () => {
     const amount = parseFloat(amountDraft.replace(/[$,\s]/g, ''));
@@ -60,7 +64,12 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   };
 
   const cat = cats[currentTx.cat];
-  const catTotal = transactions.filter(t => t.cat === currentTx.cat).reduce((s, t) => s + t.amount, 0);
+  const txDate = currentTx.occurredAt ? new Date(currentTx.occurredAt) : new Date();
+  const catTotal = transactionsRepo.getSummary({
+    categoryIds: [currentTx.cat],
+    from: new Date(txDate.getFullYear(), txDate.getMonth(), 1).toISOString(),
+    to: new Date(txDate.getFullYear(), txDate.getMonth() + 1, 0, 23, 59, 59, 999).toISOString(),
+  }).expenseTotal;
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.round((catTotal / catBudget) * 100) : 0;
 

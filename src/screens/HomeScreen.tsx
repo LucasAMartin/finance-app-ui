@@ -23,7 +23,7 @@ import { MEDIA, DARK_TEXT_SHADOW, makeP, deriveFloor, WallpaperP as P } from '..
 import { Skeleton } from '../components/Skeleton';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
-import type { Bill, Category, Transaction } from '../repositories/types';
+import type { Bill, Category, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
@@ -35,6 +35,8 @@ import type { SourceRect } from '../components/ContainerTransform';
 import { TYPE } from '../typography';
 
 const { height: SCREEN_H } = Dimensions.get('window');
+const HOME_ACTIVITY_LIMIT = 8;
+const HOME_MONTH_PAGE_SIZE = 200;
 
 // ── Budget progress bar ──────────────────────────────────────────
 function BudgetBar({ pct, trackBg }: { pct: number; trackBg: string }) {
@@ -188,7 +190,8 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   const voiceMorph  = useMorphSource(28);
   const manualMorph = useMorphSource(28);
   const incomeMorph = useMorphSource(28);
-  const transactions = useRepositoryList(transactionsRepo);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [repoVersion, setRepoVersion] = useState(0);
   const incomes = useRepositoryList(incomeRepo);
   const budgets = useRepositoryList(budgetsRepo);
   const categories = useRepositoryList(categoriesRepo);
@@ -204,9 +207,32 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   // Text shadow for hero/header text — wallpaper is behind it in both modes.
   const shadow = DARK_TEXT_SHADOW;
 
-  const groups = useMemo(() => {
+  useEffect(() => {
+    return transactionsRepo.subscribe(() => setRepoVersion(version => version + 1));
+  }, [transactionsRepo]);
+
+  useEffect(() => {
+    const from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const to = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+    const rows: Transaction[] = [];
+    let cursor: TransactionCursor | undefined;
+    do {
+      const page = transactionsRepo.listPage({
+        limit: HOME_MONTH_PAGE_SIZE,
+        from,
+        to,
+        sort: 'date-desc',
+        cursor,
+      });
+      rows.push(...page.rows);
+      cursor = page.nextCursor;
+    } while (cursor);
+    setTransactions(rows);
+  }, [transactionsRepo, repoVersion]);
+
+  const homeActivityGroups = useMemo(() => {
     const g: Record<string, Transaction[]> = { today: [], yesterday: [], earlier: [] };
-    transactions.forEach(t => g[t.when].push(t));
+    transactions.slice(0, HOME_ACTIVITY_LIMIT).forEach(t => g[t.when].push(t));
     return g;
   }, [transactions]);
 
@@ -552,12 +578,12 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                 <ActivitySkeleton dark={theme.dark} />
               ) : (
                 (['today', 'yesterday', 'earlier'] as const).map(key =>
-                  groups[key].length > 0 && (
+                  homeActivityGroups[key].length > 0 && (
                     <View key={key} style={{ marginBottom: 14 }}>
                       <Text style={[styles.dayLabel, { color: p.textTer }]}>
                         {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
                       </Text>
-                      {groups[key].map((tx, i, arr) => (
+                      {homeActivityGroups[key].map((tx, i, arr) => (
                         <SwipeTxRow
                           key={tx.id}
                           onDelete={() => onDeleteTx(tx)}
