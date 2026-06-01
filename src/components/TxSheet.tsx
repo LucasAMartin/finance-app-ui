@@ -15,6 +15,7 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
+import { MerchantMark } from './MerchantMark';
 import { Money, SheetPrimaryButton } from './shared';
 import { Theme, catPastel, GROUP_COLORS, OVER_DOT } from '../theme';
 import { TYPE } from '../typography';
@@ -219,9 +220,14 @@ function SheetBody({
 
   return (
     <View style={[S.hero, isExpanded && S.heroCompact]}>
-      <View style={[S.catCircle, isExpanded && S.catCircleCompact, { backgroundColor: color + '42' }]}>
-        <Icon name={cat?.icon ?? 'tag'} size={isExpanded ? 18 : 24} color={groupColor} stroke={1.5} />
-      </View>
+      <MerchantMark
+        merchant={tx.merchant}
+        catIcon={cat?.icon}
+        color={color + '42'}
+        iconColor={groupColor}
+        iconSize={isExpanded ? 18 : 24}
+        size={isExpanded ? 40 : 52}
+      />
       <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
       <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
         {cat?.label}

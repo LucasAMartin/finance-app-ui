@@ -14,11 +14,13 @@ import type {
   Budget,
   Category,
   Income,
+  MerchantLogo,
   RecurringRule,
   Repositories,
   RepoListener,
   Repository,
   Transaction,
+  UpsertMerchantLogoInput,
 } from './types';
 
 class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, UpdateInput = Partial<Omit<T, 'id'>>>
@@ -84,5 +86,6 @@ export function createInMemoryRepositories(): Repositories {
     categoriesRepo: new InMemoryRepository<Category>(SEED_CATEGORIES),
     recurringRulesRepo: new InMemoryRepository<RecurringRule>(SEED_RECURRING_RULES),
     attachmentsRepo: new InMemoryRepository<Attachment>([]),
+    merchantLogosRepo: new InMemoryRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>([]),
   };
 }

@@ -51,6 +51,7 @@ const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
 let cachedCalOpen = false;
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
+import { MerchantMark } from '../components/MerchantMark';
 import { Money } from '../components/shared';
 import { Skeleton } from '../components/Skeleton';
 import { TxSheet } from '../components/TxSheet';
@@ -1466,9 +1467,7 @@ function TxRow({
       accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
       onAccessibilityAction={onDelete ? (e) => { if (e.nativeEvent.actionName === 'delete') onDelete(); } : undefined}
     >
-      <View style={[S.txIcon, { backgroundColor: groupColor }]}>
-        <Icon name={cat?.icon} size={16} color="#FBF8FF" stroke={1.6} />
-      </View>
+      <MerchantMark merchant={tx.merchant} catIcon={cat?.icon} color={groupColor} size={32} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
           <Text style={[S.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>

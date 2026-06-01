@@ -3,6 +3,7 @@ import { SQLiteBillsRepo } from './bills';
 import { SQLiteBudgetsRepo } from './budgets';
 import { SQLiteCategoriesRepo } from './categories';
 import { SQLiteIncomeRepo } from './income';
+import { SQLiteMerchantLogosRepo } from './merchantLogos';
 import { SQLiteRecurringRulesRepo } from './recurringRules';
 import { SQLiteSettingsRepo } from './settings';
 import { SQLiteTransactionsRepo } from './transactions';
@@ -18,5 +19,6 @@ export function createSQLiteRepositories(): Repositories {
     categoriesRepo: new SQLiteCategoriesRepo(),
     recurringRulesRepo: new SQLiteRecurringRulesRepo(),
     attachmentsRepo: new SQLiteAttachmentsRepo(),
+    merchantLogosRepo: new SQLiteMerchantLogosRepo(),
   };
 }

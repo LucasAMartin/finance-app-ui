@@ -17,15 +17,116 @@ export const CATS: Record<string, { label: string; icon: string; budget: number 
   SEED_CATEGORIES.map(cat => [cat.id, { label: cat.label, icon: cat.icon, budget: cat.defaultBudget }]),
 );
 
-export const SEED_TRANSACTIONS: Transaction[] = [
-  { id:'t1', merchant:'Whole Foods',  cat:'groceries',     amount:84.20,  note:'Weekly shop',        date:'Today',     time:'5:42 PM',  when:'today',     fullDate:'May 13', occurredAt: '2026-05-13T17:42:00-07:00' },
-  { id:'t2', merchant:'Blue Bottle',  cat:'dining',        amount:6.50,   note:'Cortado',            date:'Today',     time:'8:14 AM',  when:'today',     fullDate:'May 13', occurredAt: '2026-05-13T08:14:00-07:00' },
-  { id:'t3', merchant:'Lyft',         cat:'transport',     amount:14.80,  note:'Ride home',          date:'Yesterday', time:'11:02 PM', when:'yesterday', fullDate:'May 12', occurredAt: '2026-05-12T23:02:00-07:00' },
-  { id:'t4', merchant:'Nopa',         cat:'dining',        amount:62.40,  note:'Dinner with M',      date:'Yesterday', time:'8:30 PM',  when:'yesterday', fullDate:'May 12', occurredAt: '2026-05-12T20:30:00-07:00' },
-  { id:'t5', merchant:'Apple Store',  cat:'shopping',      amount:129.00, note:'USB-C cable + case', date:'May 9',     time:'2:18 PM',  when:'earlier',   fullDate:'May 9',  occurredAt: '2026-05-09T14:18:00-07:00' },
-  { id:'t6', merchant:'PG&E',         cat:'bills',         amount:92.18,  note:'Electric, April',    date:'May 8',     time:'9:00 AM',  when:'earlier',   fullDate:'May 8',  occurredAt: '2026-05-08T09:00:00-07:00' },
-  { id:'t7', merchant:'Spotify',      cat:'entertainment', amount:10.99,  note:'Monthly',            date:'May 7',     time:'6:30 AM',  when:'earlier',   fullDate:'May 7',  occurredAt: '2026-05-07T06:30:00-07:00' },
-];
+// ─────────────────────────────────────────────────────────────
+// Transactions — ~6 months of realistic day-to-day activity.
+//
+// Authored relative to a fixed anchor (2026-05-13); `shiftedSeedDate`
+// re-anchors the newest row to "today" at seed time, so the set always spans
+// roughly the last six months ending today. Generated deterministically with a
+// seeded PRNG so occurredAt values — and every figure derived from them — stay
+// stable across runs.
+// ─────────────────────────────────────────────────────────────
+const SEED_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function buildSeedTransactions(): Transaction[] {
+  const anchor = new Date(2026, 4, 13, 12, 0, 0); // newest row → today after shifting
+  const start = new Date(2025, 10, 13, 12, 0, 0); // ~6 months earlier
+  const dayMs = 86_400_000;
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  // Tiny deterministic LCG so the seed (and all derived totals) is reproducible.
+  let s = 0x9e3779b9 >>> 0;
+  const rng = () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0x100000000;
+  };
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(rng() * arr.length)];
+  const amt = (min: number, max: number) => Math.round((min + rng() * (max - min)) * 100) / 100;
+  const hit = (p: number) => rng() < p;
+
+  const txs: Transaction[] = [];
+  let id = 0;
+
+  const add = (
+    day: Date,
+    hour: number,
+    cat: string,
+    merchant: string,
+    amount: number,
+    note: string,
+    fixed = false,
+    ruleId?: string,
+  ) => {
+    const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, Math.floor(rng() * 60));
+    const days = Math.round((startOfDay(anchor).getTime() - startOfDay(at).getTime()) / dayMs);
+    const when: Transaction['when'] = days <= 0 ? 'today' : days === 1 ? 'yesterday' : 'earlier';
+    const fullDate = `${SEED_MONTHS[at.getMonth()]} ${at.getDate()}`;
+    txs.push({
+      id: `s${++id}`,
+      merchant,
+      cat,
+      amount,
+      type: 'expense',
+      note,
+      date: when === 'today' ? 'Today' : when === 'yesterday' ? 'Yesterday' : fullDate,
+      time: at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+      when,
+      fullDate,
+      occurredAt: at.toISOString(),
+      ...(fixed ? { recurring: true } : {}),
+      ...(ruleId ? { recurringRuleId: ruleId } : {}),
+    });
+  };
+
+  const COFFEE = ['Blue Bottle', 'Sightglass', 'Philz Coffee', 'Ritual Coffee', 'Verve'];
+  const LUNCH = ['Sweetgreen', 'Chipotle', 'Mixt', 'Souvla', 'Tartine', 'Curry Up Now'];
+  const DINNER = ['Nopa', 'Zuni Café', 'Foreign Cinema', 'Delfina', 'Rintaro', 'State Bird'];
+  const GROCERS = ['Whole Foods', "Trader Joe's", 'Safeway', 'Berkeley Bowl', 'Bi-Rite'];
+  const RIDES = ['Lyft', 'Uber'];
+  const SHOPS = ['Amazon', 'Apple Store', 'Uniqlo', 'REI', 'Target', 'Muji', 'Nike'];
+  const FUN = ['AMC Theatres', 'Steam', 'Kindle Store', 'Ticketmaster', 'PlayStation Store'];
+  const GAS = ['Shell', 'Chevron'];
+
+  // Discretionary day-to-day spend (step by calendar day so DST never drifts).
+  for (const t = new Date(start); t <= anchor; t.setDate(t.getDate() + 1)) {
+    const weekend = t.getDay() === 0 || t.getDay() === 6;
+    // A daily coffee, always — guarantees every day (incl. today after the
+    // shift) has at least one transaction, so no period ever reads empty.
+    add(t, 8, 'dining', pick(COFFEE), amt(3.75, 6.75), 'Coffee');
+    if (hit(0.34)) add(t, 12, 'dining', pick(LUNCH), amt(11, 21), 'Lunch');
+    if (hit(weekend ? 0.42 : 0.16)) add(t, 19, 'dining', pick(DINNER), amt(38, 96), 'Dinner');
+    if (hit(0.24)) add(t, 17, 'groceries', pick(GROCERS), amt(28, 124), 'Groceries');
+    if (hit(weekend ? 0.3 : 0.42)) add(t, 9, 'transport', pick(RIDES), amt(7.5, 27), 'Ride');
+    if (hit(weekend ? 0.26 : 0.12)) add(t, 15, 'shopping', pick(SHOPS), amt(16, 190), 'Purchase');
+    if (hit(0.07)) add(t, 20, 'entertainment', pick(FUN), amt(9, 58), 'Night out');
+    if (t.getDate() === 6 || t.getDate() === 21) add(t, 18, 'transport', pick(GAS), amt(34, 58), 'Gas');
+  }
+
+  // Fixed monthly bills + subscriptions on stable days each month. The big three
+  // carry their recurring rule id so the fixed/variable split stays clean.
+  const monthly: { day: number; cat: string; merchant: string; min: number; max: number; note: string; ruleId?: string }[] = [
+    { day: 1, cat: 'housing', merchant: 'Rent', min: 1200, max: 1200, note: 'Monthly rent', ruleId: 'r1' },
+    { day: 5, cat: 'entertainment', merchant: 'Spotify', min: 10.99, max: 10.99, note: 'Premium', ruleId: 'r2' },
+    { day: 8, cat: 'bills', merchant: 'PG&E', min: 78, max: 116, note: 'Electric + gas', ruleId: 'r3' },
+    { day: 12, cat: 'bills', merchant: 'AT&T', min: 75, max: 75, note: 'Phone' },
+    { day: 15, cat: 'bills', merchant: 'Comcast', min: 80, max: 80, note: 'Internet' },
+    { day: 18, cat: 'entertainment', merchant: 'Netflix', min: 15.49, max: 15.49, note: 'Standard' },
+  ];
+  for (let y = 2025; y <= 2026; y++) {
+    for (let m = 0; m < 12; m++) {
+      for (const b of monthly) {
+        const d = new Date(y, m, b.day, 9, 0, 0);
+        if (d < start || d > anchor) continue;
+        add(d, 9, b.cat, b.merchant, amt(b.min, b.max), b.note, true, b.ruleId);
+      }
+    }
+  }
+
+  // Newest first, matching the rest of the app's ordering.
+  return txs.sort((a, b) => (a.occurredAt! < b.occurredAt! ? 1 : -1));
+}
+
+export const SEED_TRANSACTIONS: Transaction[] = buildSeedTransactions();
 
 export const DEFAULT_MONTHLY_BUDGET = 2400;
 

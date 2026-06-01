@@ -12,7 +12,7 @@ import { shiftedSeedDate } from '../transactionDates';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 let db: SQLiteDatabase | null = null;
 
@@ -136,6 +136,19 @@ function migrate(database: SQLiteDatabase) {
           estimate INTEGER NOT NULL DEFAULT 0,
           meta TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS merchant_logos (
+          merchant_key TEXT PRIMARY KEY NOT NULL,
+          display_name TEXT,
+          domain TEXT,
+          logo_url TEXT,
+          status TEXT NOT NULL,
+          source TEXT,
+          last_checked_at TEXT NOT NULL,
+          retry_after TEXT,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          meta TEXT
+        );
       `);
     }
     if (version >= 1 && version < 2) {
@@ -192,11 +205,57 @@ function migrate(database: SQLiteDatabase) {
         ALTER TABLE transactions ADD COLUMN updated_by_user_id TEXT;
       `);
     }
+    if (version < 3) {
+      database.execSync(`
+        CREATE TABLE IF NOT EXISTS merchant_logos (
+          merchant_key TEXT PRIMARY KEY NOT NULL,
+          display_name TEXT,
+          domain TEXT,
+          logo_url TEXT,
+          status TEXT NOT NULL,
+          source TEXT,
+          last_checked_at TEXT NOT NULL,
+          retry_after TEXT,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          meta TEXT
+        );
+      `);
+    }
+    if (version >= 1 && version < 4) {
+      // Replace the original 7-row sample with the richer ~6-month seed.
+      // Only the known seed ids are removed, so user-added rows are preserved.
+      // Fresh databases (version 0) skip this and get seeded by seedIfEmpty.
+      database.runSync(
+        `DELETE FROM transactions WHERE id IN ('t1','t2','t3','t4','t5','t6','t7')`,
+      );
+      insertSeedTransactions(database);
+    }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });
   if (version > 0) {
     backfillV2(database);
   }
+}
+
+function insertSeedTransactions(database: SQLiteDatabase) {
+  SEED_TRANSACTIONS.forEach(tx => {
+    database.runSync(
+      'INSERT INTO transactions (id, type, amount, merchant, category, occurred_at, note, recurring, recurring_rule_id, visibility, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      tx.id,
+      tx.type ?? 'expense',
+      tx.amount,
+      tx.merchant,
+      tx.cat,
+      shiftedSeedDate(tx),
+      tx.note,
+      tx.recurring ? 1 : 0,
+      tx.recurringRuleId ?? null,
+      tx.visibility ?? 'shared',
+      tx.createdByUserId ?? 'local',
+      tx.updatedByUserId ?? 'local',
+      json(tx.meta),
+    );
+  });
 }
 
 function seedIfEmpty(database: SQLiteDatabase) {
@@ -231,24 +290,7 @@ function seedIfEmpty(database: SQLiteDatabase) {
       );
     });
 
-    SEED_TRANSACTIONS.forEach(tx => {
-      database.runSync(
-        'INSERT INTO transactions (id, type, amount, merchant, category, occurred_at, note, recurring, recurring_rule_id, visibility, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        tx.id,
-        tx.type ?? 'expense',
-        tx.amount,
-        tx.merchant,
-        tx.cat,
-        shiftedSeedDate(tx),
-        tx.note,
-        tx.recurring ? 1 : 0,
-        tx.recurringRuleId ?? null,
-        tx.visibility ?? 'shared',
-        tx.createdByUserId ?? 'local',
-        tx.updatedByUserId ?? 'local',
-        json(tx.meta),
-      );
-    });
+    insertSeedTransactions(database);
 
     SEED_CATEGORIES.forEach(cat => insertCategory(database, cat));
 

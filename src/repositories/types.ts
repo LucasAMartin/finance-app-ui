@@ -121,6 +121,36 @@ export interface Attachment {
   meta?: Record<string, unknown>;
 }
 
+export type MerchantLogoStatus = 'resolved' | 'not_found' | 'error';
+
+export interface MerchantLogo {
+  id: string;
+  merchantKey: string;
+  displayName?: string;
+  domain?: string;
+  logoUrl?: string;
+  status: MerchantLogoStatus;
+  source?: string;
+  lastCheckedAt: string;
+  retryAfter?: string;
+  failureCount: number;
+  meta?: Record<string, unknown>;
+}
+
+export interface UpsertMerchantLogoInput {
+  id: string;
+  merchantKey: string;
+  displayName?: string;
+  domain?: string;
+  logoUrl?: string;
+  status: MerchantLogoStatus;
+  source?: string;
+  lastCheckedAt: string;
+  retryAfter?: string;
+  failureCount?: number;
+  meta?: Record<string, unknown>;
+}
+
 export interface AppSettings {
   id: 'settings';
   themeDark: boolean;
@@ -150,6 +180,7 @@ export type SettingsRepo = Repository<AppSettings, AppSettings, Partial<Omit<App
 export type CategoriesRepo = Repository<Category>;
 export type RecurringRulesRepo = Repository<RecurringRule>;
 export type AttachmentsRepo = Repository<Attachment>;
+export type MerchantLogosRepo = Repository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>;
 
 export interface Repositories {
   transactionsRepo: TransactionsRepo;
@@ -160,6 +191,7 @@ export interface Repositories {
   categoriesRepo: CategoriesRepo;
   recurringRulesRepo: RecurringRulesRepo;
   attachmentsRepo: AttachmentsRepo;
+  merchantLogosRepo: MerchantLogosRepo;
 }
 
 export interface SpendSub {

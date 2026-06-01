@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -61,6 +61,8 @@ import {
 } from '../selectors/spending';
 import { Icon } from '../components/Icon';
 import { BentoTile } from '../components/BentoTile';
+import { LineChart } from '../components/charts/LineChart';
+import { SpendChart } from '../components/charts/SpendChart';
 import type { InsightDetailTarget } from './InsightDetailScreen';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -81,9 +83,28 @@ const CARD_W = SCREEN_W - CARD_OUTER_PAD * 2;
 const CHART_INNER_W = CARD_W - CARD_INNER_PAD * 2;
 const CHART_H = 188;
 
+// Bento tile geometry. BentoTile has 16px inner padding; a half tile is half
+// the content width minus the 12px row gap. Chart widths are the inner content
+// widths so the SVG fills its tile edge to edge.
+const TILE_PAD = 16;
+const HERO_CHART_W = CARD_W - TILE_PAD * 2;
+const HALF_W = (CARD_W - 12) / 2;
+const HALF_CHART_W = HALF_W - TILE_PAD * 2;
+
 const CHART_TYPES = ['Spent', 'Pace'] as const;
 const PERIODS = ['Week', 'Month', 'Year'] as const;
 type Period = (typeof PERIODS)[number];
+
+// UI timeframe chips. The data layer only models Week/Month/Year, so 6M is
+// temporarily mapped onto the yearly range until a real 6-month range exists.
+const TIMEFRAMES = ['1W', '1M', '6M', '1Y'] as const;
+type Timeframe = (typeof TIMEFRAMES)[number];
+const TF_TO_PERIOD: Record<Timeframe, Period> = {
+  '1W': 'Week',
+  '1M': 'Month',
+  '6M': 'Year',
+  '1Y': 'Year',
+};
 
 // Snapshot rows are drawn from a scored candidate pool; only the strongest few
 // surface so the card stays compact and varies with the data/period.
@@ -664,7 +685,8 @@ export function InsightsScreen({
   const p = makeP(theme.dark);
   const shadow = DARK_TEXT_SHADOW;
 
-  const [period, setPeriod] = useState<Period>('Week');
+  const [timeframe, setTimeframe] = useState<Timeframe>('1M');
+  const period = TF_TO_PERIOD[timeframe];
 
   // Per-period date index — remembered independently so switching periods
   // doesn't reset the user's navigation.
@@ -1251,21 +1273,96 @@ export function InsightsScreen({
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
-  const spendDisplay = (() => {
-    const whole = Math.floor(total).toLocaleString();
-    const cents = Math.round((total - Math.floor(total)) * 100)
-      .toString()
-      .padStart(2, '0');
-    return { whole: `$${whole}`, cents: `.${cents}` };
-  })();
-
-  const periodIdx = PERIODS.indexOf(period);
+  const timeframeIdx = TIMEFRAMES.indexOf(timeframe);
   const rangeContextLabel =
     period === 'Week'
       ? 'This week'
       : period === 'Month'
         ? 'This month'
         : 'This year';
+
+  // Daily (Week/Month) or monthly (Year) spend series powering the hero line.
+  const lineSeries = useMemo(() => {
+    const from = ranges.current.from;
+    const to = ranges.current.to;
+    if (period === 'Year') {
+      const months = new Array(12).fill(0);
+      transactions.forEach((t) => {
+        if (!t.occurredAt) return;
+        const d = new Date(t.occurredAt);
+        if (d >= from && d <= to) months[d.getMonth()] += t.amount;
+      });
+      return months;
+    }
+    const dayMs = 86_400_000;
+    const days = Math.max(
+      1,
+      Math.round(
+        (startOfDay(to).getTime() - startOfDay(from).getTime()) / dayMs,
+      ) + 1,
+    );
+    const arr = new Array(days).fill(0);
+    transactions.forEach((t) => {
+      if (!t.occurredAt) return;
+      const d = new Date(t.occurredAt);
+      if (d < from || d > to) return;
+      const idx = Math.min(
+        days - 1,
+        Math.max(
+          0,
+          Math.round(
+            (startOfDay(d).getTime() - startOfDay(from).getTime()) / dayMs,
+          ),
+        ),
+      );
+      arr[idx] += t.amount;
+    });
+    return arr;
+  }, [transactions, ranges, period]);
+
+  // Running total so the hero line climbs to the period's spend — the final
+  // point equals the total shown above it, Coinbase-style.
+  const cumulativeSeries = useMemo(() => {
+    let s = 0;
+    return lineSeries.map((v) => (s += v));
+  }, [lineSeries]);
+
+  // Active scrub point (null = released → show the period total).
+  const [scrubIdx, setScrubIdx] = useState<number | null>(null);
+  // Drop any held scrub when the series changes under it (period/data switch).
+  useEffect(() => setScrubIdx(null), [cumulativeSeries]);
+
+  const splitMoney = (n: number) => {
+    const whole = Math.floor(n).toLocaleString();
+    const cents = Math.round((n - Math.floor(n)) * 100)
+      .toString()
+      .padStart(2, '0');
+    return { whole: `$${whole}`, cents: `.${cents}` };
+  };
+
+  // Date/label the scrubbed point represents.
+  const scrubDateLabel = (idx: number): string => {
+    if (period === 'Year') {
+      const year = ranges.current.from.getFullYear();
+      return new Date(year, idx, 1).toLocaleDateString('en-US', {
+        month: 'long',
+      });
+    }
+    return addDays(ranges.current.from, idx).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const heroScrubbing = scrubIdx != null;
+  const heroAmount = heroScrubbing
+    ? cumulativeSeries[scrubIdx] ?? total
+    : total;
+  const spendDisplay = splitMoney(heroAmount);
+  const heroSubLabel = heroScrubbing
+    ? scrubDateLabel(scrubIdx)
+    : rangeContextLabel;
 
   // ── Bento summary tiles (v3, in progress) ────────────────────────
   // Most values come straight from selectors already computed above; the
@@ -1299,14 +1396,16 @@ export function InsightsScreen({
   const nextBill = upcomingBills[0];
   const budgetFillPct =
     projected.budget > 0 ? Math.min(1, total / projected.budget) : 0;
-  // Static, non-interactive spend preview for the hero tile (the full
-  // interactive chart lives on the detail screen). Neutral colors only — no
-  // accent in data viz.
-  const heroMax = Math.max(...insightBins.map((b) => b.value), 1);
-  const heroPeakIdx = insightBins.reduce(
-    (peak, b, i) => (b.value > insightBins[peak].value ? i : peak),
-    0,
-  );
+  // Neutral line colors for the spend chart (no accent in data viz).
+  const lineColor = theme.dark
+    ? 'rgba(242,244,245,0.72)'
+    : 'rgba(14,12,24,0.50)';
+  const lineColorFaint = theme.dark
+    ? 'rgba(242,244,245,0.32)'
+    : 'rgba(14,12,24,0.22)';
+  // Faint placeholder bars for the Income tile.
+  const sparkBars = (lineSeries.length ? lineSeries : [0]).slice(-6);
+  const sparkBarsMax = Math.max(...sparkBars, 1);
 
   const scrimTop = theme.dark ? 'rgba(3,5,8,0.55)' : 'rgba(3,5,8,0.30)';
   const scrimMid = theme.dark ? 'rgba(3,5,8,0.34)' : 'rgba(3,5,8,0.30)';
@@ -1371,74 +1470,9 @@ export function InsightsScreen({
               />
             </IconBtn>
 
-            <View style={styles.headerDateNav}>
-              <Pressable
-                onPress={() =>
-                  setDateIdxByPeriod((prev) => ({
-                    ...prev,
-                    [period]: Math.min(dateIdx + 1, dateOptions.length - 1),
-                  }))
-                }
-                pointerEvents="box-only"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={[
-                  styles.weekNavBtn,
-                  { opacity: dateIdx >= dateOptions.length - 1 ? 0.3 : 1 },
-                ]}
-                disabled={dateIdx >= dateOptions.length - 1}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: dateIdx >= dateOptions.length - 1 }}
-                accessibilityLabel="Previous period"
-              >
-                <Icon name="chevL" size={18} color={pWall.text} stroke={2.2} />
-              </Pressable>
-
-              <MenuView
-                shouldOpenOnLongPress={false}
-                themeVariant={theme.dark ? 'dark' : 'light'}
-                actions={dateOptions.map((opt, idx) => ({
-                  id: String(idx),
-                  title: opt,
-                  state: idx === dateIdx ? 'on' : 'off',
-                }))}
-                onPressAction={({ nativeEvent }) => {
-                  const next = Number(nativeEvent.event);
-                  setDateIdxByPeriod((prev) => ({ ...prev, [period]: next }));
-                }}
-                style={styles.headerDateMenuHost}
-              >
-                <View style={styles.headerDateLabel}>
-                  <Text
-                    style={[styles.headerDateText, { color: pWall.text }, shadow]}
-                    numberOfLines={1}
-                  >
-                    {dateLabel}
-                  </Text>
-                  <Icon name="chevDown" size={12} color={pWall.text} stroke={2.2} />
-                </View>
-              </MenuView>
-
-              <Pressable
-                onPress={() =>
-                  setDateIdxByPeriod((prev) => ({
-                    ...prev,
-                    [period]: Math.max(dateIdx - 1, 0),
-                  }))
-                }
-                pointerEvents="box-only"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={[
-                  styles.weekNavBtn,
-                  { opacity: dateIdx === 0 ? 0.3 : 1 },
-                ]}
-                disabled={dateIdx === 0}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: dateIdx === 0 }}
-                accessibilityLabel="Next period"
-              >
-                <Icon name="chevR" size={18} color={pWall.text} stroke={2.2} />
-              </Pressable>
-            </View>
+            <Text style={[styles.headerTitle, { color: pWall.text }, shadow]}>
+              Insights
+            </Text>
 
             <ThemeToggle />
           </View>
@@ -1459,32 +1493,70 @@ export function InsightsScreen({
         >
           {/* ─── Bento ─────────────────────────────── */}
           <View style={styles.sectionStack}>
-            {/* Period switcher drives every tile (Week = pace, Month/Year =
-                budget cycle). Sits on the wallpaper above the bento, like a
-                native control row. */}
-            <SegmentedControl
-              values={PERIODS as unknown as string[]}
-              selectedIndex={periodIdx}
-              onChange={(e) => {
-                const next = PERIODS[e.nativeEvent.selectedSegmentIndex];
-                if (next) setPeriod(next);
-              }}
-              tintColor={theme.accent.dot}
-              appearance={theme.dark ? 'dark' : 'light'}
-              fontStyle={{
-                color: theme.dark
-                  ? 'rgba(242,244,245,0.68)'
-                  : 'rgba(11,13,16,0.62)',
-              }}
-              activeFontStyle={{
-                color: theme.dark ? '#080A0D' : '#F2F4F5',
-                fontWeight: '600',
-              }}
-              style={styles.bentoPeriod}
-            />
-
             <View style={styles.bento}>
-              {/* Hero — Spent + pace */}
+              {/* Control row: small timeframe chips (left) + month menu (right),
+                  sitting right above the chart like the reference. */}
+              <View style={styles.bentoControls}>
+                <SegmentedControl
+                  values={TIMEFRAMES as unknown as string[]}
+                  selectedIndex={timeframeIdx}
+                  onChange={(e) => {
+                    const next = TIMEFRAMES[e.nativeEvent.selectedSegmentIndex];
+                    if (next) setTimeframe(next);
+                  }}
+                  tintColor={theme.accent.dot}
+                  appearance={theme.dark ? 'dark' : 'light'}
+                  backgroundColor={
+                    theme.dark
+                      ? 'rgba(242,244,245,0.06)'
+                      : 'rgba(255,255,255,0.16)'
+                  }
+                  fontStyle={{
+                    color: theme.dark
+                      ? 'rgba(242,244,245,0.68)'
+                      : 'rgba(11,13,16,0.62)',
+                  }}
+                  activeFontStyle={{
+                    color: theme.dark ? '#080A0D' : '#F2F4F5',
+                    fontWeight: '600',
+                  }}
+                  style={styles.timeframeSeg}
+                />
+                <MenuView
+                  shouldOpenOnLongPress={false}
+                  themeVariant={theme.dark ? 'dark' : 'light'}
+                  actions={dateOptions.map((opt, idx) => ({
+                    id: String(idx),
+                    title: opt,
+                    state: idx === dateIdx ? 'on' : 'off',
+                  }))}
+                  onPressAction={({ nativeEvent }) => {
+                    const next = Number(nativeEvent.event);
+                    setDateIdxByPeriod((prev) => ({ ...prev, [period]: next }));
+                  }}
+                >
+                  <View style={styles.monthLabel}>
+                    <Text
+                      style={[
+                        styles.monthLabelText,
+                        { color: pWall.text },
+                        shadow,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {dateLabel}
+                    </Text>
+                    <Icon
+                      name="chevDown"
+                      size={13}
+                      color={pWall.text}
+                      stroke={2.2}
+                    />
+                  </View>
+                </MenuView>
+              </View>
+
+              {/* Hero — Spent + line chart (full width) */}
               <BentoTile
                 dark={theme.dark}
                 style={styles.tileHero}
@@ -1495,262 +1567,167 @@ export function InsightsScreen({
                     icon: 'chart',
                   })
                 }
-                accessibilityLabel={`Spent this ${period.toLowerCase()}, ${spendDisplay.whole}`}
+                accessibilityLabel={`Spent, ${spendDisplay.whole}`}
               >
-                <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                  Spent this {period.toLowerCase()}
-                </Text>
+                <Text style={[TYPE.labelSm, { color: p.textTer }]}>Spent</Text>
                 <Text style={[styles.tileHeroAmount, { color: p.text }]}>
                   {spendDisplay.whole}
                   <Text style={{ color: p.textSec }}>{spendDisplay.cents}</Text>
                 </Text>
                 <Text
-                  style={[TYPE.captionEm, { color: primaryComparison.color }]}
+                  style={[TYPE.bodySm, styles.heroSubLabel, { color: p.textTer }]}
                   numberOfLines={1}
                 >
-                  {primaryComparison.label}
+                  {heroSubLabel}
                 </Text>
-                <View style={styles.tileSpark}>
-                  {insightBins.map((b, i) => (
-                    <View
-                      key={i}
-                      style={{
-                        flex: 1,
-                        height: Math.max((b.value / heroMax) * 52, 4),
-                        borderRadius: 3,
-                        backgroundColor:
-                          i === heroPeakIdx
-                            ? p.text
-                            : theme.dark
-                              ? 'rgba(242,244,245,0.40)'
-                              : 'rgba(14,12,24,0.26)',
-                      }}
-                    />
-                  ))}
+                <View style={styles.heroChart}>
+                  <SpendChart
+                    data={cumulativeSeries}
+                    width={HERO_CHART_W}
+                    height={150}
+                    color={lineColor}
+                    ringColor={theme.surface}
+                    strokeWidth={2.5}
+                    onScrub={setScrubIdx}
+                  />
                 </View>
               </BentoTile>
 
-              {/* Row 1: Left to spend (→ native Gauge) | What moved */}
+              {/* Row: Income | Net cashflow */}
               <View style={styles.bentoRow}>
                 <BentoTile
                   dark={theme.dark}
                   style={styles.tileHalf}
                   onPress={() =>
                     onOpenInsight({
-                      title: isCycle ? 'Budget' : 'Pace',
+                      title: 'Income',
                       subtitle: rangeContextLabel,
                       icon: 'chart',
-                      accentColor: onTrack ? savingsTint : OVER_DOT,
                     })
                   }
-                  accessibilityLabel="Budget remaining"
+                  accessibilityLabel="Income"
+                >
+                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>Income</Text>
+                  <Text
+                    style={[styles.tileValue, { color: p.text }]}
+                    numberOfLines={1}
+                  >
+                    {money(0)}
+                  </Text>
+                  <View style={styles.tileSpark}>
+                    {sparkBars.map((v, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          flex: 1,
+                          height: Math.max((v / sparkBarsMax) * 40, 4),
+                          borderRadius: 3,
+                          backgroundColor: lineColorFaint,
+                        }}
+                      />
+                    ))}
+                  </View>
+                </BentoTile>
+
+                <BentoTile
+                  dark={theme.dark}
+                  style={styles.tileHalf}
+                  onPress={() =>
+                    onOpenInsight({
+                      title: 'Net cashflow',
+                      subtitle: rangeContextLabel,
+                      icon: 'chart',
+                    })
+                  }
+                  accessibilityLabel="Net cashflow"
                 >
                   <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                    {isCycle ? 'Left to spend' : 'Projected'}
+                    Net cashflow
                   </Text>
                   <Text
                     style={[styles.tileValue, { color: p.text }]}
                     numberOfLines={1}
                   >
-                    {isCycle
-                      ? money(Math.max(0, leftToSpend))
-                      : money(projected.total)}
+                    {money(0)}
                   </Text>
-                  <Text
-                    style={[
-                      TYPE.caption,
-                      { color: onTrack ? savingsTint : OVER_DOT },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {isCycle
-                      ? onTrack
-                        ? 'On track'
-                        : `${money(Math.abs(leftToSpend))} over`
-                      : primaryComparison.label}
-                  </Text>
-                  <View
-                    style={[styles.tileBar, { backgroundColor: p.hairline }]}
-                  >
-                    <View
-                      style={[
-                        styles.tileBarFill,
-                        {
-                          width: `${budgetFillPct * 100}%` as any,
-                          backgroundColor: onTrack ? savingsTint : OVER_DOT,
-                        },
-                      ]}
+                  <View style={styles.tileMiniChart}>
+                    <LineChart
+                      data={lineSeries}
+                      width={HALF_CHART_W}
+                      height={40}
+                      color={lineColorFaint}
+                      strokeWidth={2}
                     />
                   </View>
                 </BentoTile>
-
-                <BentoTile
-                  dark={theme.dark}
-                  style={styles.tileHalf}
-                  onPress={
-                    topMoved
-                      ? () =>
-                          onOpenInsight({
-                            title: topMoved.label,
-                            subtitle: topMoved.title,
-                            icon: topMoved.icon,
-                            accentColor: topMoved.color,
-                          })
-                      : undefined
-                  }
-                  accessibilityLabel="Biggest change"
-                >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                    What moved
-                  </Text>
-                  {topMoved ? (
-                    <>
-                      <Text
-                        style={[styles.tileValueSm, { color: p.text }]}
-                        numberOfLines={2}
-                      >
-                        {topMoved.title}
-                      </Text>
-                      <Text
-                        style={[TYPE.caption, { color: topMoved.color }]}
-                        numberOfLines={1}
-                      >
-                        {topMoved.label}
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={[TYPE.caption, { color: p.textSec }]}>
-                      Nothing notable
-                    </Text>
-                  )}
-                </BentoTile>
               </View>
 
-              {/* Row 2: Next bill | 50·30·20 mix */}
-              <View style={styles.bentoRow}>
-                <BentoTile
-                  dark={theme.dark}
-                  style={styles.tileHalf}
-                  onPress={() =>
-                    onOpenInsight({
-                      title: nextBill ? nextBill.name : 'Upcoming bills',
-                      subtitle: nextBill
-                        ? `Due in ${nextBill.daysUntil}d · ${money(nextBill.amount)}`
-                        : undefined,
-                      icon: 'cal',
-                      accentColor: CAUTION_AMBER,
-                    })
-                  }
-                  accessibilityLabel="Next bill"
-                >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                    Next bill
-                  </Text>
-                  {nextBill ? (
-                    <>
-                      <Text
-                        style={[styles.tileValueSm, { color: p.text }]}
-                        numberOfLines={1}
-                      >
-                        {nextBill.name}
-                      </Text>
-                      <Text
-                        style={[TYPE.caption, { color: CAUTION_AMBER }]}
-                        numberOfLines={1}
-                      >
-                        in {nextBill.daysUntil}d · {money(nextBill.amount)}
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={[TYPE.caption, { color: p.textSec }]}>
-                      None upcoming
-                    </Text>
-                  )}
-                </BentoTile>
-
-                <BentoTile
-                  dark={theme.dark}
-                  style={styles.tileHalf}
-                  onPress={() =>
-                    onOpenInsight({
-                      title: '50 / 30 / 20',
-                      subtitle: `Needs ${groupMix.pct.needs}% · Wants ${groupMix.pct.wants}% · Savings ${groupMix.pct.savings}%`,
-                      icon: 'tag',
-                    })
-                  }
-                  accessibilityLabel="Fifty thirty twenty mix"
-                >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                    50 · 30 · 20
-                  </Text>
-                  <View style={styles.mixBar}>
-                    {(['needs', 'wants', 'savings'] as GroupKey[]).map((g) => (
-                      <View
-                        key={g}
-                        style={{
-                          flex: Math.max(groupMix.totals[g], 0.0001),
-                          backgroundColor: groupDisplayColor(g, theme.dark),
-                        }}
-                      />
-                    ))}
-                  </View>
-                  <Text
-                    style={[TYPE.caption, { color: p.textSec }]}
-                    numberOfLines={1}
-                  >
-                    {groupMix.pct.needs} / {groupMix.pct.wants} /{' '}
-                    {groupMix.pct.savings}
-                  </Text>
-                </BentoTile>
-              </View>
-
-              {/* See-all tiles (full lists open on tap) */}
+              {/* Budget (full-width / "double" tile) */}
+              <Text style={[styles.bentoSection, { color: pWall.text }, shadow]}>
+                Budget
+              </Text>
               <BentoTile
                 dark={theme.dark}
-                style={styles.tileWide}
+                style={styles.tileBudget}
                 onPress={() =>
                   onOpenInsight({
-                    title: 'Categories',
-                    subtitle: `${catBreakdown.rows.length} groups · ${rangeContextLabel}`,
-                    icon: 'tag',
+                    title: 'Budget',
+                    subtitle: rangeContextLabel,
+                    icon: 'chart',
+                    accentColor: onTrack ? savingsTint : OVER_DOT,
                   })
                 }
-                accessibilityLabel="See all categories"
+                accessibilityLabel="Budget"
               >
-                <View style={styles.tileWideRow}>
-                  <Text style={[TYPE.body, { color: p.text }]}>Categories</Text>
-                  <View style={styles.tileWideRight}>
-                    <Text style={[TYPE.caption, { color: p.textSec }]}>
-                      {catBreakdown.rows.length} groups
-                    </Text>
-                    <Icon name="chevR" size={15} color={p.textTer} stroke={2.2} />
-                  </View>
+                <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                  {isCycle ? 'This month' : 'This week'}
+                </Text>
+                <View style={styles.budgetLineRow}>
+                  <Text style={[styles.tileValue, { color: p.text }]}>
+                    {money(Math.max(0, leftToSpend))}
+                  </Text>
+                  <Text style={[TYPE.body, { color: p.textSec }]}>
+                    left to spend
+                  </Text>
                 </View>
-              </BentoTile>
-
-              <BentoTile
-                dark={theme.dark}
-                style={styles.tileWide}
-                onPress={() =>
-                  onOpenInsight({
-                    title: 'Merchants',
-                    subtitle: `${merchBreakdown.rows.length} merchants · ${rangeContextLabel}`,
-                    icon: 'tag',
-                  })
-                }
-                accessibilityLabel="See all merchants"
-              >
-                <View style={styles.tileWideRow}>
-                  <Text style={[TYPE.body, { color: p.text }]}>Merchants</Text>
-                  <View style={styles.tileWideRight}>
-                    <Text style={[TYPE.caption, { color: p.textSec }]}>
-                      {merchBreakdown.rows.length}
-                    </Text>
-                    <Icon name="chevR" size={15} color={p.textTer} stroke={2.2} />
-                  </View>
+                <View style={styles.budgetStatusRow}>
+                  <View
+                    style={[
+                      styles.budgetDot,
+                      { backgroundColor: onTrack ? savingsTint : OVER_DOT },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      TYPE.captionEm,
+                      { color: onTrack ? savingsTint : OVER_DOT },
+                    ]}
+                  >
+                    {onTrack ? 'On track' : 'Over budget'}
+                  </Text>
+                </View>
+                <View style={[styles.budgetBar, { backgroundColor: p.hairline }]}>
+                  <View
+                    style={[
+                      styles.budgetBarFill,
+                      {
+                        width: `${Math.max(0, 1 - budgetFillPct) * 100}%` as any,
+                        backgroundColor: onTrack ? savingsTint : OVER_DOT,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.budgetFooter}>
+                  <Text style={[TYPE.caption, { color: p.textTer }]}>
+                    {Math.round(Math.max(0, 1 - budgetFillPct) * 100)}% remaining
+                  </Text>
+                  <Text style={[TYPE.caption, { color: p.textTer }]}>
+                    {money(projected.budget)}
+                  </Text>
                 </View>
               </BentoTile>
             </View>
+
           </View>
         </Animated.ScrollView>
     </View>
@@ -1811,15 +1788,54 @@ const styles = StyleSheet.create({
   },
   sectionStack: { paddingHorizontal: CARD_OUTER_PAD, gap: 24 },
   // Bento (v3): varied-size frosted tiles, tighter gap than the section stack.
+  headerTitle: { ...TYPE.pageTitle, flex: 1, textAlign: 'center' },
   bentoPeriod: { height: 36 },
   bento: { gap: 12 },
+  bentoControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timeframeSeg: { width: 200, height: 30, borderRadius: 13, overflow: 'hidden' },
+  monthLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  monthLabelText: { ...TYPE.subsectionTitle },
   bentoRow: { flexDirection: 'row', gap: 12 },
-  tileHero: { minHeight: 188 },
-  tileHalf: { flex: 1, minHeight: 132 },
+  tileHero: { minHeight: 260 },
+  tileHalf: { flex: 1, minHeight: Math.round(HALF_W) },
   tileWide: { minHeight: 56 },
+  tileBudget: { minHeight: 150 },
   tileHeroAmount: { ...TYPE.display, lineHeight: 38, marginTop: 8 },
+  heroSubLabel: { marginTop: 2 },
   tileValue: { ...TYPE.headline, marginTop: 6 },
   tileValueSm: { ...TYPE.subsectionTitle, marginTop: 8 },
+  heroChart: { marginTop: 'auto', height: 150 },
+  tileMiniChart: { marginTop: 'auto', height: 40 },
+  bentoSection: { ...TYPE.sectionTitle, marginTop: 4 },
+  budgetLineRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginTop: 6,
+  },
+  budgetStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  budgetDot: { width: 7, height: 7, borderRadius: 4 },
+  budgetBar: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  budgetBarFill: { height: 6, borderRadius: 3 },
+  budgetFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
   tileSpark: {
     height: 52,
     marginTop: 'auto',

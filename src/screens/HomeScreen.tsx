@@ -28,6 +28,7 @@ import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBills
 import { Icon } from '../components/Icon';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
+import { MerchantMark } from '../components/MerchantMark';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useMorphSource } from '../components/useMorphSource';
 import type { SourceRect } from '../components/ContainerTransform';
@@ -770,10 +771,12 @@ const TxRow = React.memo(function TxRow({
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
     >
-      <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(tx.cat, categories, dark) }]}
-        accessibilityElementsHidden importantForAccessibility="no">
-        <Icon name={cat?.icon} size={16} color="#FBF8FF" stroke={1.6} />
-      </View>
+      <MerchantMark
+        merchant={tx.merchant}
+        catIcon={cat?.icon}
+        color={categoryGroupColor(tx.cat, categories, dark)}
+        size={32}
+      />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.rowTitle, { color: p.text }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
         <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
