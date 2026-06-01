@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, Pressable, TextInput, StyleSheet, ScrollView,
+  View, Text, Pressable, TextInput, StyleSheet,
   Animated, Easing, KeyboardAvoidingView, Platform, Linking,
   type TextStyle,
 } from 'react-native';
@@ -16,9 +16,9 @@ import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
-import { Host, Picker, Text as SwiftText, Button, Image as SwiftImage } from '@expo/ui/swift-ui';
+import { Host, Picker, Text as SwiftText, Button, Image as SwiftImage, DatePicker } from '@expo/ui/swift-ui';
 import {
-  buttonStyle, controlSize, environment, pickerStyle, tag, tint,
+  buttonStyle, controlSize, datePickerStyle, environment, pickerStyle, tag, tint,
 } from '@expo/ui/swift-ui/modifiers';
 import { MenuView } from '@react-native-menu/menu';
 
@@ -44,9 +44,34 @@ const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   savings: { label: 'Savings', icon: 'wallet' },
 };
 const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
+const KEY_ROWS: string[][] = [
+  ['1', '2', '3'],
+  ['4', '5', '6'],
+  ['7', '8', '9'],
+  ['clear', '0', 'del'],
+];
+
+// Recurring cadence offered on the expense screen. 'never' = a one-off expense.
+type RepeatValue = 'never' | 'weekly' | 'monthly' | 'annual';
+const REPEAT_OPTIONS: { value: RepeatValue; label: string }[] = [
+  { value: 'never',   label: 'Never' },
+  { value: 'weekly',  label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'annual',  label: 'Yearly' },
+];
+const repeatLabel = (v: RepeatValue) => REPEAT_OPTIONS.find(o => o.value === v)?.label ?? 'Never';
+
+// nextDueDate for a freshly-created rule: one cadence interval past the start.
+function nextDueAfter(start: Date, cadence: 'weekly' | 'monthly' | 'annual'): string {
+  const d = new Date(start);
+  if (cadence === 'weekly') d.setDate(d.getDate() + 7);
+  else if (cadence === 'annual') d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d.toISOString();
+}
 
 export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: ExpenseFlowProps) {
-  const { transactionsRepo, categoriesRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
@@ -57,6 +82,8 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   const [manualCat, setManualCat] = useState('groceries');
   const [manualMerchant, setManualMerchant] = useState('');
   const [manualNote, setManualNote] = useState('');
+  const [manualDate, setManualDate] = useState<Date>(() => new Date());
+  const [manualRepeat, setManualRepeat] = useState<RepeatValue>('never');
   const [heardTranscript, setHeardTranscript] = useState('');
 
   const voice = useVoiceRecognition();
@@ -96,6 +123,8 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     setManualCat(categories[0]?.id ?? 'groceries');
     setManualMerchant('');
     setManualNote('');
+    setManualDate(new Date());
+    setManualRepeat('never');
     setHeardTranscript('');
     voice.reset();
     return () => { voice.abort(); stopRings(); };
@@ -164,10 +193,21 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     const merchant = manualMerchant.trim() || cats[cat]?.label || 'Expense';
     const tx = transactionsRepo.create({
       amount, cat, merchant, note: manualNote,
-      occurredAt: new Date().toISOString(),
+      occurredAt: manualDate.toISOString(),
       type: 'expense', visibility: 'shared',
       createdByUserId: 'local', updatedByUserId: 'local',
     });
+    // When marked recurring, also seed a rule so future instances are tracked.
+    if (manualRepeat !== 'never') {
+      recurringRulesRepo.create({
+        merchant, cat, amount,
+        cadence: manualRepeat,
+        startDate: manualDate.toISOString().slice(0, 10),
+        nextDueDate: nextDueAfter(manualDate, manualRepeat),
+        active: true, estimate: false,
+        createdByUserId: 'local', updatedByUserId: 'local',
+      });
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     return { id: tx.id, amount, catLabel: cats[cat]?.label ?? cat, merchant };
   };
@@ -227,16 +267,9 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
           </Host>
         </View>
 
-        <ScrollView
-          bounces={false}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="always"
-          scrollEnabled={!isVoiceMode}
-          contentContainerStyle={[
-            { paddingBottom: Math.max(insets.bottom, 16) + 8 },
-            isVoiceMode && { flexGrow: 1 },
-          ]}
-        >
+        {/* Body — fills the space below the header; never scrolls. The manual
+            keypad flexes to absorb slack / shrink so everything always fits. */}
+        <View style={{ flex: 1 }}>
           {/* ── IDLE / LISTENING ── */}
           {isVoiceMode && (
             <View style={S.voiceLayout}>
@@ -323,7 +356,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
           {/* ── MANUAL ── */}
           {mode === 'manual' && (
-            <View style={S.manualRoot}>
+            <View style={[S.manualRoot, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
               <View style={S.manualAmountWrap}>
                 <View style={S.manualAmountRow}>
                   <Text style={[S.manualAmountSign, { color: theme.textSec }]}>$</Text>
@@ -354,7 +387,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                     keyboardAppearance={darkScheme}
                   />
                 </View>
-                <View style={S.fieldRow}>
+                <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
                   <Text style={[TYPE.body, { color: theme.textSec }]}>Note</Text>
                   <TextInput
                     value={manualNote} onChangeText={setManualNote}
@@ -362,6 +395,41 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                     style={[S.fieldInput, { color: theme.text, flex: 1 }]}
                     keyboardAppearance={darkScheme}
                   />
+                </View>
+                <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                  <Text style={[TYPE.body, { color: theme.textSec }]}>Date</Text>
+                  <Host matchContents>
+                    <DatePicker
+                      selection={manualDate}
+                      displayedComponents={['date']}
+                      onDateChange={setManualDate}
+                      modifiers={[
+                        datePickerStyle('compact'),
+                        tint(theme.accent.dot),
+                        environment({ key: 'colorScheme', value: darkScheme }),
+                      ]}
+                    />
+                  </Host>
+                </View>
+                <View style={S.fieldRow}>
+                  <Text style={[TYPE.body, { color: theme.textSec }]}>Repeat</Text>
+                  <MenuView
+                    shouldOpenOnLongPress={false}
+                    themeVariant={theme.dark ? 'dark' : 'light'}
+                    actions={REPEAT_OPTIONS.map(o => ({
+                      id: o.value,
+                      title: o.label,
+                      state: o.value === manualRepeat ? 'on' : 'off',
+                    }))}
+                    onPressAction={({ nativeEvent }) => setManualRepeat(nativeEvent.event as RepeatValue)}
+                  >
+                    <View style={S.subcatMenuTrigger}>
+                      <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
+                        {repeatLabel(manualRepeat)}
+                      </Text>
+                      <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                    </View>
+                  </MenuView>
                 </View>
               </View>
 
@@ -377,16 +445,20 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
               </View>
 
               <View style={S.keypad}>
-                {['1','2','3','4','5','6','7','8','9','clear','0','del'].map(k => (
-                  <KeyButton key={k} theme={theme} onPress={() => press(k)} label={k === 'del' ? 'Delete' : k === 'clear' ? 'Clear' : k}>
-                    {k === 'del' ? (
-                      <Icon name="backspace" size={20} color={theme.text} stroke={1.5} />
-                    ) : k === 'clear' ? (
-                      <Text style={[TYPE.body, { fontWeight: '600', color: theme.textSec }]}>Clear</Text>
-                    ) : (
-                      <Text style={[TYPE.headline, { fontWeight: '500', color: theme.text }]}>{k}</Text>
-                    )}
-                  </KeyButton>
+                {KEY_ROWS.map((row, ri) => (
+                  <View key={ri} style={S.keyRow}>
+                    {row.map(k => (
+                      <KeyButton key={k} theme={theme} onPress={() => press(k)} label={k === 'del' ? 'Delete' : k === 'clear' ? 'Clear' : k}>
+                        {k === 'del' ? (
+                          <Icon name="backspace" size={20} color={theme.text} stroke={1.5} />
+                        ) : k === 'clear' ? (
+                          <Text style={[TYPE.body, { fontWeight: '600', color: theme.textSec }]}>Clear</Text>
+                        ) : (
+                          <Text style={[TYPE.headline, { fontWeight: '500', color: theme.text }]}>{k}</Text>
+                        )}
+                      </KeyButton>
+                    ))}
+                  </View>
                 ))}
               </View>
 
@@ -395,11 +467,11 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 onPress={saveExpense}
                 theme={theme}
                 disabled={!canSave}
-                style={{ marginTop: 18 }}
+                style={{ marginTop: 10 }}
               />
             </View>
           )}
-        </ScrollView>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -542,6 +614,7 @@ function KeyButton({ theme, label, onPress, children }: {
         pointerEvents="box-only"
         accessibilityRole="button"
         accessibilityLabel={label}
+        style={{ flex: 1 }}
       >
         <Animated.View style={[S.keyFace, { backgroundColor }]}>
           {children}
@@ -581,8 +654,8 @@ const S = StyleSheet.create({
   errorActions: { flexDirection: 'row', alignItems: 'center', gap: 20 },
 
   // Manual layout
-  manualRoot: { paddingHorizontal: 20, paddingTop: 8 },
-  manualAmountWrap: { alignItems: 'center', paddingVertical: 16, marginBottom: 6 },
+  manualRoot: { flex: 1, paddingHorizontal: 20, paddingTop: 4 },
+  manualAmountWrap: { alignItems: 'center', paddingVertical: 10, marginBottom: 2 },
   manualAmountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' },
   manualAmountSign: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, marginRight: 3 },
   manualAmountValue: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, fontVariant: ['tabular-nums'] },
@@ -591,21 +664,25 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 5, marginTop: -4, marginBottom: 12, paddingHorizontal: 16,
   },
-  fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 14 },
+  fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 10 },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 13, paddingHorizontal: 16, gap: 12,
+    paddingVertical: 10, paddingHorizontal: 16, gap: 12, minHeight: 46,
   },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
   categoryPanel: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
-  categoryWrap: { marginBottom: 16 },
+  categoryWrap: { marginBottom: 10 },
   subcategoryRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 12, paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth,
   },
   subcatMenuTrigger: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1 },
   subcatMenuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
-  keypad: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
-  keyCell: { width: '30%', flexGrow: 1 },
-  keyFace: { paddingVertical: 14, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  // Keypad fills the slack below the form and shrinks to whatever space is left
+  // so the screen never needs to scroll. maxHeight keeps keys from ballooning on
+  // tall devices; it's free to shrink below that on short ones.
+  keypad: { flex: 1, gap: 8, marginBottom: 8, maxHeight: 268 },
+  keyRow: { flex: 1, flexDirection: 'row', gap: 8 },
+  keyCell: { flex: 1 },
+  keyFace: { flex: 1, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
 });

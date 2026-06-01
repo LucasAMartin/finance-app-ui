@@ -1,4 +1,4 @@
-import type { Transaction, Category, Budget } from '../repositories/types';
+import type { Transaction, Category, Budget, RecurringRule } from '../repositories/types';
 import type { Period } from './finance';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -28,9 +28,16 @@ export interface CatRow {
   icon: string;
   spent: number;
   prevSpent: number;
-  budget: number;   // prorated to the period (0 = unknown)
-  pct: number;      // fraction of period total
+  budget: number;        // prorated to the period (0 = unknown)
+  pct: number;           // fraction of period total
   txCount: number;
+  // Fixed = recurring bills/subscriptions; variable = discretionary. Split so
+  // insights can compare like-for-like instead of letting a lumpy monthly bill
+  // masquerade as a spending spike.
+  fixedSpent: number;
+  variableSpent: number;
+  prevVariableSpent: number;
+  recurring: boolean;    // category contains at least one recurring charge
 }
 
 export interface MerchantRow {
@@ -41,11 +48,20 @@ export interface MerchantRow {
   prevSpent: number;
   pct: number;
   txCount: number;
+  recurring: boolean;    // merchant is a recurring bill/subscription
 }
 
 export interface TrendBin {
   label: string;
   v: number;
+  // Even per-bin reference (monthly plan spread flat) — drives the bar chart's
+  // dashed line and keeps its y-scale stable.
+  budget: number;
+  // Timing-aware plan: an even slice of the *variable* budget plus any fixed
+  // charges actually scheduled inside the bin's date range. The cumulative pace
+  // line uses this so it steps up on a bill day instead of assuming flat spend —
+  // which is what stops a rent payment from faking an "above pace" alarm.
+  plan: number;
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -80,6 +96,81 @@ function weekLabel(from: Date): string {
     return `${from.getDate()}–${to.getDate()} ${MONTHS_ABBR[from.getMonth()]}`;
   }
   return `${from.getDate()} ${MONTHS_ABBR[from.getMonth()]}–${to.getDate()} ${MONTHS_ABBR[to.getMonth()]}`;
+}
+
+// ─── Recurring / fixed-cost helpers ───────────────────────────────────────────
+
+/**
+ * A transaction is "fixed" if it's a recurring bill or subscription. We trust an
+ * explicit flag/link first, then fall back to matching the merchant against an
+ * active recurring rule (seed data predates the flag).
+ */
+export function makeRecurringMatcher(
+  rules: RecurringRule[],
+): (tx: Transaction) => boolean {
+  const activeMerchants = new Set(
+    rules.filter(r => r.active).map(r => r.merchant.trim().toLowerCase()),
+  );
+  return (tx) =>
+    tx.recurring === true ||
+    !!tx.recurringRuleId ||
+    activeMerchants.has(tx.merchant.trim().toLowerCase());
+}
+
+/** Normalise a rule's charge to a per-month figure regardless of cadence. */
+export function ruleMonthlyAmount(rule: RecurringRule): number {
+  switch (rule.cadence) {
+    case 'weekly': return rule.amount * 52 / 12;
+    case 'annual': return rule.amount / 12;
+    default:       return rule.amount; // monthly / customMonthly
+  }
+}
+
+/** Total committed fixed spend per month across all active rules. */
+export function fixedMonthlyTotal(rules: RecurringRule[]): number {
+  return rules
+    .filter(r => r.active)
+    .reduce((sum, r) => sum + ruleMonthlyAmount(r), 0);
+}
+
+function stepRule(rule: RecurringRule, cursor: Date, dir: 1 | -1): void {
+  if (rule.cadence === 'weekly') {
+    cursor.setDate(cursor.getDate() + 7 * dir);
+  } else if (rule.cadence === 'annual') {
+    cursor.setFullYear(cursor.getFullYear() + dir);
+  } else {
+    cursor.setMonth(cursor.getMonth() + dir);
+    if (rule.dayOfMonth) cursor.setDate(Math.min(rule.dayOfMonth, 28));
+  }
+}
+
+/** Every due date for a rule that falls within [from, to]. */
+function ruleOccurrencesInRange(rule: RecurringRule, from: Date, to: Date): Date[] {
+  const cursor = new Date(rule.nextDueDate);
+  let guard = 0;
+  while (cursor > from && guard++ < 600) stepRule(rule, cursor, -1);
+  const out: Date[] = [];
+  guard = 0;
+  while (cursor <= to && guard++ < 600) {
+    if (cursor >= from && cursor <= to) out.push(new Date(cursor));
+    stepRule(rule, cursor, 1);
+  }
+  return out;
+}
+
+/** Sum of fixed charges scheduled to land inside [from, to]. */
+export function scheduledFixedInRange(
+  rules: RecurringRule[],
+  from: Date,
+  to: Date,
+): number {
+  if (to < from) return 0;
+  return rules
+    .filter(r => r.active)
+    .reduce(
+      (sum, r) => sum + ruleOccurrencesInRange(r, from, to).length * r.amount,
+      0,
+    );
 }
 
 // ─── Period range derivation ──────────────────────────────────────────────────
@@ -152,21 +243,37 @@ export function proratedBudget(monthlyBudget: number, period: Period): number {
 
 // ─── Category breakdown ───────────────────────────────────────────────────────
 
+export interface CategoryBreakdown {
+  total: number;
+  prevTotal: number;
+  /** Spend split so pace/comparison logic can isolate the controllable part. */
+  fixedTotal: number;
+  variableTotal: number;
+  prevVariableTotal: number;
+  rows: CatRow[];
+}
+
 export function categorySpending(
   transactions: Transaction[],
   categories: Category[],
   budgets: Budget[],
   ranges: SpendingRanges,
   period: Period,
-): { total: number; prevTotal: number; rows: CatRow[] } {
+  recurringRules: RecurringRule[] = [],
+): CategoryBreakdown {
   const curr = filterByRange(transactions, ranges.current.from, ranges.current.to);
   const prev = filterByRange(transactions, ranges.prev.from,    ranges.prev.to);
+  const isRecurring = makeRecurringMatcher(recurringRules);
 
+  type Tally = { sum: number; count: number; fixed: number; variable: number; recurring: boolean };
   const tally = (txs: Transaction[]) =>
-    txs.reduce<Record<string, { sum: number; count: number }>>((acc, t) => {
-      if (!acc[t.cat]) acc[t.cat] = { sum: 0, count: 0 };
-      acc[t.cat].sum += t.amount;
-      acc[t.cat].count++;
+    txs.reduce<Record<string, Tally>>((acc, t) => {
+      if (!acc[t.cat]) acc[t.cat] = { sum: 0, count: 0, fixed: 0, variable: 0, recurring: false };
+      const bucket = acc[t.cat];
+      bucket.sum += t.amount;
+      bucket.count++;
+      if (isRecurring(t)) { bucket.fixed += t.amount; bucket.recurring = true; }
+      else                  bucket.variable += t.amount;
       return acc;
     }, {});
 
@@ -174,8 +281,14 @@ export function categorySpending(
   const prevMap  = tally(prev);
   const catById  = Object.fromEntries(categories.map(c => [c.id, c]));
 
-  const total     = Object.values(currMap).reduce((s, v) => s + v.sum, 0);
-  const prevTotal = Object.values(prevMap).reduce((s, v) => s + v.sum, 0);
+  const sumField = (map: Record<string, Tally>, field: keyof Tally) =>
+    Object.values(map).reduce((s, v) => s + (v[field] as number), 0);
+
+  const total             = sumField(currMap, 'sum');
+  const prevTotal         = sumField(prevMap, 'sum');
+  const fixedTotal        = sumField(currMap, 'fixed');
+  const variableTotal     = sumField(currMap, 'variable');
+  const prevVariableTotal = sumField(prevMap, 'variable');
 
   const rows: CatRow[] = Object.keys(currMap).map(catId => {
     const cat = catById[catId];
@@ -184,20 +297,24 @@ export function categorySpending(
       budgets.find(b => b.category === catId && b.meta?.kind !== 'monthly-budget')?.amount
       ?? cat?.defaultBudget
       ?? 0;
-    const spent = currMap[catId].sum;
+    const bucket = currMap[catId];
     return {
-      cat:       catId,
-      label:     cat?.label  ?? catId,
-      icon:      cat?.icon   ?? 'tag',
-      spent,
-      prevSpent: prevMap[catId]?.sum ?? 0,
-      budget:    proratedBudget(monthlyBudget, period),
-      pct:       total > 0 ? spent / total : 0,
-      txCount:   currMap[catId].count,
+      cat:               catId,
+      label:             cat?.label  ?? catId,
+      icon:              cat?.icon   ?? 'tag',
+      spent:             bucket.sum,
+      prevSpent:         prevMap[catId]?.sum ?? 0,
+      budget:            proratedBudget(monthlyBudget, period),
+      pct:               total > 0 ? bucket.sum / total : 0,
+      txCount:           bucket.count,
+      fixedSpent:        bucket.fixed,
+      variableSpent:     bucket.variable,
+      prevVariableSpent: prevMap[catId]?.variable ?? 0,
+      recurring:         bucket.recurring,
     };
   }).sort((a, b) => b.spent - a.spent);
 
-  return { total, prevTotal, rows };
+  return { total, prevTotal, fixedTotal, variableTotal, prevVariableTotal, rows };
 }
 
 // ─── Merchant breakdown ───────────────────────────────────────────────────────
@@ -206,15 +323,18 @@ export function merchantSpending(
   transactions: Transaction[],
   categories: Category[],
   ranges: SpendingRanges,
+  recurringRules: RecurringRule[] = [],
 ): { total: number; prevTotal: number; rows: MerchantRow[] } {
   const curr = filterByRange(transactions, ranges.current.from, ranges.current.to);
   const prev = filterByRange(transactions, ranges.prev.from,    ranges.prev.to);
+  const isRecurring = makeRecurringMatcher(recurringRules);
 
   const tally = (txs: Transaction[]) =>
-    txs.reduce<Record<string, { sum: number; count: number; cat: string }>>((acc, t) => {
-      if (!acc[t.merchant]) acc[t.merchant] = { sum: 0, count: 0, cat: t.cat };
+    txs.reduce<Record<string, { sum: number; count: number; cat: string; recurring: boolean }>>((acc, t) => {
+      if (!acc[t.merchant]) acc[t.merchant] = { sum: 0, count: 0, cat: t.cat, recurring: false };
       acc[t.merchant].sum += t.amount;
       acc[t.merchant].count++;
+      if (isRecurring(t)) acc[t.merchant].recurring = true;
       return acc;
     }, {});
 
@@ -236,6 +356,7 @@ export function merchantSpending(
       prevSpent: prevMap[merchant]?.sum ?? 0,
       pct:       total > 0 ? d.sum / total : 0,
       txCount:   d.count,
+      recurring: d.recurring,
     };
   }).sort((a, b) => b.spent - a.spent);
 
@@ -244,27 +365,44 @@ export function merchantSpending(
 
 // ─── Trend data for charts ────────────────────────────────────────────────────
 
+/** Whole days spanned by [from, to] (endOfDay-inclusive). */
+function dayCount(from: Date, to: Date): number {
+  return Math.max(1, Math.round((to.getTime() - startOfDay(from).getTime()) / 86_400_000));
+}
+
 export function spendingTrend(
   transactions: Transaction[],
   ranges: SpendingRanges,
   period: Period,
   monthlyBudget: number,
+  recurringRules: RecurringRule[] = [],
 ): { data: TrendBin[]; budget: number } {
   const curr = filterByRange(transactions, ranges.current.from, ranges.current.to);
 
+  // Split the monthly plan into its committed (fixed) and discretionary
+  // (variable) halves. Variable is spread evenly per day; fixed is dropped into
+  // the exact bin where each bill is scheduled. The result: a plan line that
+  // steps up on a rent/bill day instead of pretending spend is flat.
+  const fixedMonthly = fixedMonthlyTotal(recurringRules);
+  const variableMonthly = Math.max(0, monthlyBudget - fixedMonthly);
+  const dailyVariable = variableMonthly / 30.44;
+  const binPlan = (from: Date, to: Date) =>
+    dailyVariable * dayCount(from, to) + scheduledFixedInRange(recurringRules, from, to);
+
   if (period === 'Week') {
     const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const flat = Math.round(proratedBudget(monthlyBudget, 'Week') / 7);
     const data = DAY_LABELS.map((label, i) => {
       const dayFrom = addDays(ranges.current.from, i);
       const dayTo   = endOfDay(dayFrom);
       const v = filterByRange(curr, dayFrom, dayTo).reduce((s, t) => s + t.amount, 0);
-      return { label, v };
+      return { label, v, budget: flat, plan: binPlan(dayFrom, dayTo) };
     });
-    const dailyBudget = Math.round(proratedBudget(monthlyBudget, 'Week') / 7);
-    return { data, budget: dailyBudget };
+    return { data, budget: flat };
   }
 
   if (period === 'Month') {
+    const flat = Math.round(monthlyBudget / 4);
     const data: TrendBin[] = [];
     let cursor = startOfDay(ranges.current.from);
     let wk = 1;
@@ -272,11 +410,11 @@ export function spendingTrend(
       const weekEnd = endOfDay(addDays(cursor, 6));
       const clampedEnd = weekEnd > ranges.current.to ? ranges.current.to : weekEnd;
       const v = filterByRange(curr, cursor, clampedEnd).reduce((s, t) => s + t.amount, 0);
-      data.push({ label: `Wk${wk}`, v });
+      data.push({ label: `Wk${wk}`, v, budget: flat, plan: binPlan(cursor, clampedEnd) });
       cursor = addDays(cursor, 7);
       wk++;
     }
-    return { data, budget: Math.round(monthlyBudget / 4) };
+    return { data, budget: flat };
   }
 
   // Year — monthly bins
@@ -285,7 +423,7 @@ export function spendingTrend(
     const from = new Date(year, m, 1);
     const to   = endOfDay(new Date(year, m + 1, 0));
     const v    = filterByRange(curr, from, to).reduce((s, t) => s + t.amount, 0);
-    return { label, v };
+    return { label, v, budget: monthlyBudget, plan: binPlan(from, to) };
   });
   return { data, budget: monthlyBudget };
 }

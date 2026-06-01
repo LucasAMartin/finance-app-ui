@@ -216,12 +216,16 @@ All tokens are defined once in `src/typography.ts` and applied via `import { TYP
 
 **The Token Rule.** No screen sets `fontSize` inline as part of a typographic role — every typographic style routes through `TYPE`. Off-scale overrides (e.g. 16px on a group total) are permitted only as a deliberate spread on top of a base token, never as fresh inline declarations.
 
-## 4. Elevation
+## 4. Elevation & Material
 
-**Two surface modes coexist.** Flat-first is the default; the media wallpaper treatment is the current direction for the primary content screens.
+**Frosted glass over a photographic wallpaper is the signature surface of the app.** The primary content screens (Home, Spending, History, Budget, Insights) render over a full-bleed `ImageBackground` with a `LinearGradient` scrim; content lives in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). This is a deliberate material identity, the chosen direction for the app, not a fallback or an exception. Flat (solid) surfaces still exist, but they are the **secondary** mode, reserved for surfaces that do not sit over the wallpaper: sheets, forms, edit fields.
 
-- **Flat surfaces** (default): distinguished by 1px hairline borders and tonal fill differences, not shadows. The default card variant uses `borderWidth: 1` with a hairline-opacity border and no shadow at rest. Used for sheets, forms, and any surface sitting on a solid page background.
-- **Media wallpaper surfaces** (Home, Spending, History, Budget): these screens render over a full-bleed photographic `ImageBackground` with a `LinearGradient` scrim. Content sits in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). Here the blur is **structural, not decorative**: it is what makes content legible against the wallpaper and what separates a card from the photograph behind it. Text colors come from the `MEDIA` / wallpaper palette, not the flat-surface tokens.
+The non-negotiable constraint on the glass is **legibility**. The blur is structural (it separates a card from the photo and keeps content readable), never ornamental, and when glass and legibility conflict, legibility wins:
+- **Scrim must hold card contrast.** Deepen the `LinearGradient` scrim (and/or raise the blur tint opacity) until numbers and labels clear WCAG AA (4.5:1) against the busiest region of the wallpaper behind them. Data-dense screens (Insights) need a stronger scrim than sparse ones; tune per screen, do not assume one scrim fits all.
+- **The wallpaper is a backdrop, not a subject.** Behind text-heavy screens, prefer low-contrast, low-detail imagery. A busy, high-contrast photo behind a data table is the failure mode.
+- **Text on glass uses the `MEDIA` / wallpaper palette**, not the flat-surface tokens.
+
+- **Flat surfaces** (secondary): 1px hairline borders and tonal fill differences, no shadow at rest. The default card variant uses `borderWidth: 1` with a hairline-opacity border. Used for sheets, forms, and any surface on a solid page background.
 
 Elevation (shadow) enters only for chrome that physically layers above content:
 
@@ -231,7 +235,9 @@ Elevation (shadow) enters only for chrome that physically layers above content:
 - **TxSheet** (native SwiftUI bottom sheet elevation): Platform-managed. Not represented in app shadow tokens.
 
 ### Named Rules
-**The Flat Content Rule.** Data *contents* — transaction rows, category group lists, budget progress bars — are always flat at rest and never cast a shadow. On flat screens they sit on the solid surface; on media wallpaper screens they sit inside a frosted `SectionCard`. The frosted card itself is a structural container against the wallpaper, not a shadowed elevation: if a surface can be scrolled past, it still casts no shadow. Shadows remain reserved for floating chrome (tab bar, dropdowns).
+**The Flat Content Rule.** Data *contents* — transaction rows, category group lists, budget progress bars — are always flat at rest and never cast a shadow. On flat screens they sit on the solid surface; on wallpaper screens they sit inside a frosted `SectionCard`. The frosted card itself is a structural container against the wallpaper, not a shadowed elevation: if a surface can be scrolled past, it still casts no shadow. Shadows remain reserved for floating chrome (tab bar, dropdowns).
+
+**The Frosted Glass Rule.** The frosted `SectionCard` is the app's signature resting surface on wallpaper screens, not an exception to be justified. Glass is legitimate in two roles: the resting surface for content on wallpaper screens, and chrome that floats (tab bar, dropdowns). Two hard limits keep it from becoming slop: (1) **never nest glass inside glass** — one blur layer per stack, a frosted card on a frosted card is always wrong; (2) **never let blur cost legibility** — if a frosted card can't clear AA contrast against its wallpaper, deepen the scrim or calm the wallpaper, don't ship the unreadable card.
 
 ## 5. Components
 
@@ -272,7 +278,8 @@ Grouped inside a chipBg-background container with radius 14. Each row: paddingVe
 - **Do** use hero-avail (#5CC4BA) for the "Available" status and healthy budget bar on the hero — teal reads as growth against the deep violet hero.
 - **Do** let SF Pro (the system typeface) carry the full visual hierarchy without introducing a second typeface.
 - **Do** treat the 32px display as singular: exactly one per screen, for the primary budget figure.
-- **Do** apply the flat-first rule: data surfaces never cast shadows at rest.
+- **Do** treat the frosted `SectionCard` as the signature surface on wallpaper screens, and tune the scrim (and wallpaper choice) so content clears AA contrast. Glass is the material direction; legibility is the constraint on it.
+- **Do** keep data surfaces flat (no shadow) at rest, whether on a solid page or inside a frosted card.
 - **Do** tint dark mode surfaces with violet: bg #0F0B1C, surface #1A1530, surface2 #221D3C — not neutral gray.
 
 ### Don't:
@@ -280,7 +287,7 @@ Grouped inside a chipBg-background container with radius 14. Each row: paddingVe
 - **Don't** use navy and gold, golden amber for the wants group, neon on black, or any other finance-domain reflex palette. The wants-clay color exists specifically to break the amber/gold reflex.
 - **Don't** use gradient text (`background-clip: text`). Decorative, never meaningful.
 - **Don't** add side-stripe borders (border-left or border-right over 1px) to rows, cards, or callouts. Use a background tint, a leading icon, or nothing.
-- **Don't** apply glassmorphism decoratively on flat-surface screens. Blur is legitimate in exactly two roles: the tab bar's BlurView (chrome separating from content) and the frosted `SectionCard` on media wallpaper screens (structural legibility against a photographic background). Blur used as ornament anywhere else is banned.
+- **Don't** nest glass inside glass, or let blur cost legibility. One frosted layer per stack (never a frosted card on a frosted card); if a frosted card can't hold AA contrast against the wallpaper, deepen the scrim or calm the wallpaper rather than shipping it. Frosted glass is the signature surface, but blur that separates nothing and only blurs is still wrong.
 - **Don't** use the accent violet in charts or data visualization. Charts read spending groups, not accent preference. (Exception: shopping pastel is violet-adjacent by design.)
 - **Don't** shadow data rows, category cards, or list items. If it can be scrolled past, it stays flat.
 - **Don't** build complex navigation hierarchies or hide features behind nested menus. Busy professionals need clarity at a glance, not exploration. (From PRODUCT.md.)

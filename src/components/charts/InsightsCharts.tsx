@@ -21,6 +21,7 @@ import * as Haptics from 'expo-haptics';
 import { GROUP_COLORS, OVER_DOT, type Theme } from '../../theme';
 import { TYPE } from '../../typography';
 import type { ActivityInitialFilter } from '../../selectors/spending';
+import type { SnapshotVizSpec } from './SnapshotViz';
 
 export interface InsightMetric {
   label: string;
@@ -33,14 +34,18 @@ export interface InsightDetail {
   amount: string;
   color: string;
   description: string;
-  metrics: InsightMetric[];
+  icon?: string;
+  // Snapshot details lead with `viz`; chart-scrub details fall back to `metrics`.
+  metrics?: InsightMetric[];
+  viz?: SnapshotVizSpec;
   filter?: ActivityInitialFilter;
 }
 
 export interface InsightBin {
   label: string;
   value: number;
-  budget: number;
+  budget: number; // even per-bin reference (bar chart dashed line + y-scale)
+  plan: number;   // timing-aware plan slice (pace chart cumulative line)
   from: Date;
   to: Date;
 }
@@ -218,6 +223,9 @@ export function InsightBarChart({
     ? 'rgba(174,184,194,0.46)'
     : 'rgba(28,34,42,0.34)';
   const activeBarColor = theme.dark ? '#F2F4F5' : '#080A0D';
+  const barOkColor = theme.dark
+    ? GROUP_COLORS.savings.dark
+    : GROUP_COLORS.savings.vibrant;
   const maxBinValue = Math.max(0, ...bins.map((b) => b.value));
 
   const detailFor = (idx: number): InsightDetail => {
@@ -231,7 +239,18 @@ export function InsightBarChart({
       eyebrow: rangeLabel(bin.from, bin.to),
       amount: fmtMoney(bin.value, bin.value < 100 ? 2 : 0),
       color: activeBarColor,
+      icon: 'chart',
       description: rangeLabel(bin.from, bin.to),
+      viz: {
+        kind: 'meter',
+        value: bin.value,
+        max: Math.max(bin.budget, bin.value, 1),
+        threshold: bin.budget > 0 ? bin.budget : undefined,
+        color: delta > 0 ? OVER_DOT : barOkColor,
+        leftLabel: `spent ${fmtMoney(bin.value, bin.value < 100 ? 2 : 0)}`,
+        rightLabel:
+          bin.budget > 0 ? `planned ${fmtMoney(bin.budget)}` : 'no plan',
+      },
       metrics: [
         { label: 'Planned', value: fmtMoney(bin.budget) },
         {
@@ -420,7 +439,7 @@ export function InsightPaceChart({
     let plan = 0;
     return bins.map((b) => {
       actual += b.value;
-      plan += b.budget;
+      plan += b.plan;
       return { ...b, actual, plan };
     });
   }, [bins]);
@@ -453,9 +472,19 @@ export function InsightPaceChart({
       eyebrow: rangeLabel(bins[0].from, p.to),
       amount: fmtMoney(p.actual),
       color: over ? OVER_DOT : paceColor,
+      icon: 'chart',
       description: over
         ? 'Spending ahead of planned pace'
         : 'Spending behind planned pace',
+      viz: {
+        kind: 'meter',
+        value: p.actual,
+        max: Math.max(p.plan, p.actual, 1),
+        threshold: p.plan > 0 ? p.plan : undefined,
+        color: over ? OVER_DOT : paceColor,
+        leftLabel: `actual ${fmtMoney(p.actual)}`,
+        rightLabel: `planned ${fmtMoney(p.plan)}`,
+      },
       metrics: [
         { label: 'Planned', value: fmtMoney(p.plan) },
         { label: over ? 'Above' : 'Below', value: fmtMoney(Math.abs(delta)) },

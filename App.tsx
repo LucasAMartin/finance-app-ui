@@ -19,6 +19,10 @@ import type { ActivityInitialFilter } from './src/selectors/spending';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InsightsScreen } from './src/screens/InsightsScreen';
+import {
+  InsightDetailScreen,
+  type InsightDetailTarget,
+} from './src/screens/InsightDetailScreen';
 import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
@@ -79,6 +83,7 @@ function AppInner() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
   const [activityFilterToken, setActivityFilterToken] = useState(0);
+  const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
   const [toast, setToast] = useState<{ message: string; onUndo: () => void } | null>(null);
 
   // Every sheet/morph owns its own open state inside a leaf mount, poked via these
@@ -234,7 +239,7 @@ function AppInner() {
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.insights} active={screen === 'insights'}>
-          <InsightsScreen theme={theme} onOpenDrawer={openDrawer} onViewActivity={navigateToActivity} />
+          <InsightsScreen theme={theme} onOpenDrawer={openDrawer} onViewActivity={navigateToActivity} onOpenInsight={setInsightTarget} />
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.activity} active={screen === 'activity'}>
@@ -294,6 +299,12 @@ function AppInner() {
           theme={theme}
           visible={themeOpen}
           onClose={() => setThemeOpen(false)}
+        />
+
+        <InsightDetailScreen
+          theme={theme}
+          target={insightTarget}
+          onClose={() => setInsightTarget(null)}
         />
 
         <Toast
