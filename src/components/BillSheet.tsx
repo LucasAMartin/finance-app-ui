@@ -15,6 +15,7 @@ import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Bill } from '../repositories/types';
 import { advanceDueDate } from '../selectors/finance';
 import { Icon } from './Icon';
+import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
 import { Money, SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
 
@@ -125,14 +126,13 @@ export function BillSheet({
             }]}>
               {b && (
                 <>
-                  <Pressable
+                  <ScreenExitButton
+                    variant="close"
                     onPress={onClose}
-                    pointerEvents="box-only"
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    style={[S.closeBtn, { backgroundColor: theme.chipBg }]}
-                  >
-                    <Icon name="close" size={15} color={theme.textSec} />
-                  </Pressable>
+                    tint={theme.textSec}
+                    fallbackBg={theme.chipBg}
+                    style={EXIT_FLOAT_STYLE}
+                  />
 
                   <View style={S.hero}>
                     <View style={[S.catCircle, { backgroundColor: `${groupColor}30` }]}>
@@ -190,17 +190,6 @@ const S = StyleSheet.create({
   content: {
     flex: 1,
     paddingTop: 16,
-  },
-  closeBtn: {
-    position: 'absolute',
-    top: 16,
-    right: 20,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1,
   },
   hero: {
     alignItems: 'center',

@@ -57,10 +57,12 @@ import {
   merchantSpending,
   spendingTrend,
   scheduledFixedInRange,
+  spendSeriesToBuckets,
   type ActivityInitialFilter,
   type CatRow,
 } from '../selectors/spending';
 import { Icon } from '../components/Icon';
+import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
 import { LineChart } from '../components/charts/LineChart';
 import { SpendChart } from '../components/charts/SpendChart';
@@ -528,19 +530,14 @@ function InsightBottomSheet({
             >
               {d && (
                 <>
-                  <Pressable
+                  <ScreenExitButton
+                    variant="close"
                     onPress={onClose}
-                    pointerEvents="box-only"
-                    accessibilityRole="button"
+                    tint={theme.textSec}
+                    fallbackBg={theme.chipBg}
+                    style={EXIT_FLOAT_STYLE}
                     accessibilityLabel="Close insight details"
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    style={[
-                      styles.insightSheetClose,
-                      { backgroundColor: theme.chipBg },
-                    ]}
-                  >
-                    <Icon name="close" size={15} color={theme.textSec} />
-                  </Pressable>
+                  />
 
                   <View style={styles.insightSheetHero}>
                     <View
@@ -1303,43 +1300,15 @@ export function InsightsScreen({
         : 'This year';
 
   // Daily (Week/Month) or monthly (Year) spend series powering the hero line.
+  // Aggregated in the data layer (GROUP BY) rather than by iterating every row.
   const lineSeries = useMemo(() => {
-    const from = ranges.current.from;
-    const to = ranges.current.to;
-    if (period === 'Year') {
-      const months = new Array(12).fill(0);
-      transactions.forEach((t) => {
-        if (!t.occurredAt) return;
-        const d = new Date(t.occurredAt);
-        if (d >= from && d <= to) months[d.getMonth()] += t.amount;
-      });
-      return months;
-    }
-    const dayMs = 86_400_000;
-    const days = Math.max(
-      1,
-      Math.round(
-        (startOfDay(to).getTime() - startOfDay(from).getTime()) / dayMs,
-      ) + 1,
-    );
-    const arr = new Array(days).fill(0);
-    transactions.forEach((t) => {
-      if (!t.occurredAt) return;
-      const d = new Date(t.occurredAt);
-      if (d < from || d > to) return;
-      const idx = Math.min(
-        days - 1,
-        Math.max(
-          0,
-          Math.round(
-            (startOfDay(d).getTime() - startOfDay(from).getTime()) / dayMs,
-          ),
-        ),
-      );
-      arr[idx] += t.amount;
+    const points = transactionsRepo.getSpendSeries({
+      from: ranges.current.from.toISOString(),
+      to: ranges.current.to.toISOString(),
+      bucket: period === 'Year' ? 'month' : 'day',
     });
-    return arr;
-  }, [transactions, ranges, period]);
+    return spendSeriesToBuckets(points, period, ranges.current.from, ranges.current.to);
+  }, [transactionsRepo, ranges, period, repoVersion]);
 
   // Running total so the hero line climbs to the period's spend — the final
   // point equals the total shown above it, Coinbase-style.
@@ -2038,17 +2007,6 @@ const styles = StyleSheet.create({
   insightVizWrap: {
     marginTop: 4,
     paddingHorizontal: 4,
-  },
-  insightSheetClose: {
-    position: 'absolute',
-    top: 16,
-    right: 20,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1,
   },
   insightStatRow: {
     flexDirection: 'row',

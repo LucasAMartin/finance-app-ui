@@ -13,11 +13,12 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import type { Income } from '../repositories/types';
 import { monthlyIncome } from '../selectors/finance';
 import {
-  DatePicker, Host, Picker, Text as SwiftText, Button, Image as SwiftImage,
+  DatePicker, Host, Picker, Text as SwiftText, Button,
 } from '@expo/ui/swift-ui';
 import {
-  buttonStyle, controlSize, datePickerStyle, environment, fixedSize, pickerStyle, tag, tint,
+  datePickerStyle, environment, fixedSize, pickerStyle, tag, tint,
 } from '@expo/ui/swift-ui/modifiers';
+import { ScreenExitButton, EXIT_BTN_SIZE } from './GlassButton';
 
 export interface SavedIncomeInfo {
   id: string;
@@ -212,18 +213,13 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     <View style={[S.root, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       {/* Header */}
       <View style={S.header}>
-        <Host colorScheme={darkScheme} matchContents style={S.backBtnHost}>
-          <Button
-            onPress={onClose}
-            modifiers={[
-              buttonStyle('glass'),
-              controlSize('regular'),
-              environment({ key: 'colorScheme', value: darkScheme }),
-            ]}
-          >
-            <SwiftImage systemName="chevron.left" />
-          </Button>
-        </Host>
+        <ScreenExitButton
+          variant="back"
+          onPress={onClose}
+          tint={theme.text}
+          fallbackBg={theme.chipBg}
+          accessibilityLabel="Back"
+        />
         <Text style={[TYPE.pageTitle, { color: theme.text }]}>Income</Text>
         <View style={S.headerSpacer} />
       </View>
@@ -475,8 +471,7 @@ const S = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
-  backBtnHost: { width: 44, height: 44 },
-  headerSpacer: { width: 44 },
+  headerSpacer: { width: EXIT_BTN_SIZE },
   scroll: { paddingHorizontal: 20, paddingTop: 4, gap: 0 },
   hero: { alignItems: 'center', paddingTop: 6, paddingBottom: 20 },
   heroCircle: {

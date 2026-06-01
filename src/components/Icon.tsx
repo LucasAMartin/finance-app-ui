@@ -119,6 +119,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 20, color = '#0E0E10', 
         <Circle cx={19} cy={12} r={1.4} fill={color} />
       </G>
     ),
+    chartLine: <Path d="M2.25 16.5L7.5 7.5L12.75 12L18 6L21.75 9" {...p} />,
   };
 
   return (

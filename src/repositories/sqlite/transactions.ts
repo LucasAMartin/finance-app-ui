@@ -4,6 +4,8 @@ import { normalizeTransactionInput, transactionFromStored } from '../transaction
 import type {
   CalendarMarkRow,
   CreateTransactionInput,
+  SpendSeriesPoint,
+  SpendSeriesQuery,
   Transaction,
   TransactionCursor,
   TransactionPage,
@@ -217,6 +219,34 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
       expenseTotal: row?.expense_total ?? 0,
       expenseDayCount: row?.expense_day_count ?? 0,
     };
+  }
+
+  getSpendSeries(query: SpendSeriesQuery): SpendSeriesPoint[] {
+    const parts: string[] = [];
+    const params: any[] = [];
+    appendBaseWhere(parts, params, {
+      categoryIds: query.categoryIds,
+      merchantQuery: query.merchantQuery,
+      searchCategoryIds: query.searchCategoryIds,
+      from: query.from,
+      to: query.to,
+    });
+    // Income is excluded so the series matches the expense-only hero total.
+    parts.push(`type != 'income'`);
+    // 'localtime' buckets by the device's calendar day/month, matching the
+    // JS chart math (new Date(occurredAt).getDate()/getMonth()).
+    const fmt = query.bucket === 'month' ? '%Y-%m' : '%Y-%m-%d';
+    return getDb()
+      .getAllSync<{ key: string; amount: number | null }>(
+        `SELECT strftime('${fmt}', occurred_at, 'localtime') AS key,
+                COALESCE(SUM(amount), 0) AS amount
+         FROM transactions
+         ${whereSql(parts)}
+         GROUP BY key
+         ORDER BY key ASC`,
+        ...params,
+      )
+      .map(row => ({ key: row.key, amount: row.amount ?? 0 }));
   }
 
   getCalendarMarks(query: {

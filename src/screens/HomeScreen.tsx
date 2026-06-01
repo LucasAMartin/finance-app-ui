@@ -26,17 +26,33 @@ import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Bill, Category, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
+import { GlassCircleButton, GlassCircleIcon, SUPPORTS_GLASS } from '../components/GlassButton';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { MerchantMark } from '../components/MerchantMark';
+import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useMorphSource } from '../components/useMorphSource';
 import type { SourceRect } from '../components/ContainerTransform';
 import { TYPE } from '../typography';
+import type { ActivityInitialFilter } from '../selectors/spending';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const HOME_ACTIVITY_LIMIT = 8;
 const HOME_MONTH_PAGE_SIZE = 200;
+
+function monthRange(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number);
+  return {
+    from: new Date(year, month - 1, 1),
+    to: new Date(year, month, 0, 23, 59, 59, 999),
+  };
+}
+
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
 
 // ── Budget progress bar ──────────────────────────────────────────
 function BudgetBar({ pct, trackBg }: { pct: number; trackBg: string }) {
@@ -105,6 +121,8 @@ function HeroAmount({ value, prefix, color, shadow }: { value: number; prefix: s
 // same soft, slightly-opaque fill (neutral black tint in dark, like the cards).
 const QuickAction = React.forwardRef<View, {
   icon: string;
+  // SF Symbol shown by the native glass button on iOS 26+ (falls back to `icon`).
+  glassSymbol: SFSymbol;
   label: string;
   onPress: () => void;
   // Fire on finger-down instead of finger-up. RN's onPress waits for release and,
@@ -116,7 +134,7 @@ const QuickAction = React.forwardRef<View, {
   p: P;
   shadow?: object;
 }>(function QuickAction(
-  { icon, label, onPress, instant, dark, p, shadow },
+  { icon, glassSymbol, label, onPress, instant, dark, p, shadow },
   ref,
 ) {
   const circleBg     = dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
@@ -126,6 +144,28 @@ const QuickAction = React.forwardRef<View, {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
   };
+
+  if (SUPPORTS_GLASS) {
+    // Native interactive Liquid Glass button (iOS 26+). The morph ref lands on
+    // the glass circle's wrapping View so a transform still grows from it.
+    return (
+      <View style={styles.qa}>
+        <View style={styles.qaInner}>
+          <GlassCircleButton
+            ref={ref}
+            onPress={fire}
+            systemImage={glassSymbol}
+            size={56}
+            iconSize={22}
+            iconColor={iconColor}
+            accessibilityLabel={label}
+          />
+          <Text style={[styles.qaLabel, { color: p.text }, shadow]}>{label}</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.qa}>
       <Pressable
@@ -172,7 +212,7 @@ const fmtAmount = (n: number) =>
 interface Props {
   theme: Theme;
   onViewInsights: () => void;
-  onViewActivity: () => void;
+  onViewActivity: (filter?: ActivityInitialFilter) => void;
   onOpenDrawer: () => void;
   onAddVoice: (source: SourceRect) => void;
   onAddManual: (source: SourceRect) => void;
@@ -191,6 +231,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   const manualMorph = useMorphSource(28);
   const incomeMorph = useMorphSource(28);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [currentMonthTransactions, setCurrentMonthTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
   const incomes = useRepositoryList(incomeRepo);
   const budgets = useRepositoryList(budgetsRepo);
@@ -212,15 +253,37 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   }, [transactionsRepo]);
 
   useEffect(() => {
-    const from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    const to = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+    const { from, to } = monthRange(currentMonthKey());
     const rows: Transaction[] = [];
     let cursor: TransactionCursor | undefined;
     do {
       const page = transactionsRepo.listPage({
         limit: HOME_MONTH_PAGE_SIZE,
-        from,
-        to,
+        from: from.toISOString(),
+        to: to.toISOString(),
+        sort: 'date-desc',
+        cursor,
+      });
+      rows.push(...page.rows);
+      cursor = page.nextCursor;
+    } while (cursor);
+    setCurrentMonthTransactions(rows);
+  }, [transactionsRepo, repoVersion]);
+
+  const [monthIdx, setMonthIdx] = useState(0);
+  const visibleMonthBudgets = useMemo(() => monthBudgets(currentMonthTransactions, budgets), [currentMonthTransactions, budgets]);
+  const selectedMonthKey = visibleMonthBudgets[monthIdx]?.key ?? visibleMonthBudgets[0]?.key ?? currentMonthKey();
+  const selectedMonthRange = useMemo(() => monthRange(selectedMonthKey), [selectedMonthKey]);
+  const selectedIsCurrentMonth = selectedMonthKey === (visibleMonthBudgets[0]?.key ?? currentMonthKey());
+
+  useEffect(() => {
+    const rows: Transaction[] = [];
+    let cursor: TransactionCursor | undefined;
+    do {
+      const page = transactionsRepo.listPage({
+        limit: HOME_MONTH_PAGE_SIZE,
+        from: selectedMonthRange.from.toISOString(),
+        to: selectedMonthRange.to.toISOString(),
         sort: 'date-desc',
         cursor,
       });
@@ -228,18 +291,26 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
       cursor = page.nextCursor;
     } while (cursor);
     setTransactions(rows);
-  }, [transactionsRepo, repoVersion]);
+  }, [transactionsRepo, selectedMonthRange, repoVersion]);
 
   const homeActivityGroups = useMemo(() => {
-    const g: Record<string, Transaction[]> = { today: [], yesterday: [], earlier: [] };
-    transactions.slice(0, HOME_ACTIVITY_LIMIT).forEach(t => g[t.when].push(t));
-    return g;
-  }, [transactions]);
+    const groups: Array<{ key: string; label: string; txs: Transaction[] }> = [];
+    transactions.slice(0, HOME_ACTIVITY_LIMIT).forEach(tx => {
+      const label = selectedIsCurrentMonth && tx.when === 'today'
+        ? 'Today'
+        : selectedIsCurrentMonth && tx.when === 'yesterday'
+          ? 'Yesterday'
+          : tx.fullDate;
+      const existing = groups.find(group => group.label === label);
+      if (existing) existing.txs.push(tx);
+      else groups.push({ key: `${tx.fullDate}-${tx.when}`, label, txs: [tx] });
+    });
+    return groups;
+  }, [selectedIsCurrentMonth, transactions]);
 
-  const [monthIdx, setMonthIdx] = useState(0);
-  const visibleMonthBudgets = useMemo(() => monthBudgets(transactions, budgets), [transactions, budgets]);
-  const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets, categories), [transactions, budgets, categories]);
-  const income = useMemo(() => monthlyIncome(incomes), [incomes]);
+  const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets, categories, selectedMonthKey), [transactions, budgets, categories, selectedMonthKey]);
+  const income = useMemo(() => monthlyIncome(incomes, selectedMonthKey), [incomes, selectedMonthKey]);
+  const visibleUpcomingBills = selectedIsCurrentMonth ? upcomingBills : [];
   const mb = visibleMonthBudgets[monthIdx] ?? visibleMonthBudgets[0];
 
   const [loading, setLoading] = useState(true);
@@ -307,6 +378,12 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   const available = Math.max(mb.budget - mb.spent, 0);
   const overage = mb.spent - mb.budget;
   const over = mb.spent > mb.budget;
+  const openSelectedMonthActivity = useCallback(() => {
+    onViewActivity({
+      dateFrom: selectedMonthRange.from,
+      dateTo: selectedMonthRange.to,
+    });
+  }, [onViewActivity, selectedMonthRange]);
 
   // Solid color the wallpaper fades into as the user scrolls away from it.
   // Hue comes from the wallpaper; deriveFloor bends it dark/light per mode.
@@ -485,9 +562,9 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
           {/* Three capture modes (voice / manual / income) plus a More menu */}
           {/* for less-frequent options — all share the same soft button fill. */}
           <View style={styles.quickRow}>
-            <QuickAction ref={voiceMorph.ref}  icon="mic"    label="Voice"  instant onPress={() => voiceMorph.measure(onAddVoice)}   dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction ref={manualMorph.ref} icon="keypad" label="Manual" instant onPress={() => manualMorph.measure(onAddManual)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction ref={incomeMorph.ref} icon="plus" label="Income" instant onPress={() => incomeMorph.measure(onLogIncome)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={voiceMorph.ref}  icon="mic"    glassSymbol="mic.fill"             label="Voice"  onPress={() => voiceMorph.measure(onAddVoice)}   dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={manualMorph.ref} icon="keypad" glassSymbol="square.grid.3x3.fill" label="Manual" onPress={() => manualMorph.measure(onAddManual)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={incomeMorph.ref} icon="plus"   glassSymbol="plus"                 label="Income" onPress={() => incomeMorph.measure(onLogIncome)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
             <MoreMenuButton
               dark={theme.dark}
               p={pWallpaper}
@@ -523,7 +600,11 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
               {loading ? (
                 <BillsSkeleton dark={theme.dark} />
               ) : (
-                upcomingBills.map((b, i) => {
+                visibleUpcomingBills.length === 0 ? (
+                  <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
+                    No upcoming transactions
+                  </Text>
+                ) : visibleUpcomingBills.map((b, i) => {
                   const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
                   const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
                   return (
@@ -539,7 +620,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                         delayPressIn={0}
                         style={[
                           styles.billRow,
-                          { borderBottomWidth: i < upcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
+                          { borderBottomWidth: i < visibleUpcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
                         ]}
                         accessible
                         accessibilityLabel={a11y}
@@ -570,20 +651,23 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
             <SectionCard dark={theme.dark}>
               <View style={styles.sectionHead}>
                 <Text style={[styles.ledgerLabel, { color: p.text }]}>Activity</Text>
-                <TouchableOpacity onPress={onViewActivity} activeOpacity={0.6} delayPressIn={0}>
+                <TouchableOpacity onPress={openSelectedMonthActivity} activeOpacity={0.6} delayPressIn={0}>
                   <Text style={[styles.ledgerAction, { color: p.text }]}>See all</Text>
                 </TouchableOpacity>
               </View>
               {loading ? (
                 <ActivitySkeleton dark={theme.dark} />
+              ) : homeActivityGroups.length === 0 ? (
+                <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
+                  No transactions this month
+                </Text>
               ) : (
-                (['today', 'yesterday', 'earlier'] as const).map(key =>
-                  homeActivityGroups[key].length > 0 && (
-                    <View key={key} style={{ marginBottom: 14 }}>
+                homeActivityGroups.map(group => (
+                    <View key={group.key} style={{ marginBottom: 14 }}>
                       <Text style={[styles.dayLabel, { color: p.textTer }]}>
-                        {key === 'today' ? 'Today' : key === 'yesterday' ? 'Yesterday' : 'This week'}
+                        {group.label}
                       </Text>
-                      {homeActivityGroups[key].map((tx, i, arr) => (
+                      {group.txs.map((tx, i, arr) => (
                         <SwipeTxRow
                           key={tx.id}
                           onDelete={() => onDeleteTx(tx)}
@@ -596,8 +680,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                         </SwipeTxRow>
                       ))}
                     </View>
-                  )
-                )
+                  ))
               )}
             </SectionCard>
 
@@ -801,6 +884,7 @@ const TxRow = React.memo(function TxRow({
         merchant={tx.merchant}
         catIcon={cat?.icon}
         color={categoryGroupColor(tx.cat, categories, dark)}
+        logoEnabled={transactionUsesMerchantLogo(tx)}
         size={32}
       />
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -844,9 +928,15 @@ function MoreMenuButton({
       style={styles.qa}
     >
       <View style={styles.qaInner}>
-        <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
-          <Icon name="ellipsis" size={20} color={iconColor} stroke={1.7} />
-        </View>
+        {SUPPORTS_GLASS ? (
+          // Glass visual only — MenuView owns the tap, so this must not be a
+          // Button (which would swallow the press that opens the menu).
+          <GlassCircleIcon systemImage="ellipsis" size={56} iconSize={22} iconColor={iconColor} />
+        ) : (
+          <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
+            <Icon name="ellipsis" size={20} color={iconColor} stroke={1.7} />
+          </View>
+        )}
         <Text style={[styles.qaLabel, { color: p.text }, shadow]}>More</Text>
       </View>
     </MenuView>
@@ -1000,6 +1090,11 @@ const styles = StyleSheet.create({
   dayLabel: {
     ...TYPE.txDateLabel,
     marginBottom: 8,
+  },
+  emptyMonthText: {
+    ...TYPE.bodySm,
+    paddingTop: 2,
+    paddingBottom: 8,
   },
   rowIcon: {
     width: 36,

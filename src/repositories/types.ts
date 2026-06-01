@@ -209,6 +209,24 @@ export interface CalendarMarkRow {
   cat: string;
 }
 
+export type SpendBucket = 'day' | 'month';
+
+export interface SpendSeriesQuery {
+  from: string;
+  to: string;
+  /** 'day' → one point per calendar day; 'month' → one point per calendar month. */
+  bucket: SpendBucket;
+  categoryIds?: string[];
+  merchantQuery?: string;
+  searchCategoryIds?: string[];
+}
+
+export interface SpendSeriesPoint {
+  /** Local-time bucket key: 'YYYY-MM-DD' for day, 'YYYY-MM' for month. */
+  key: string;
+  amount: number;
+}
+
 export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'>, UpdateInput = Partial<Omit<T, 'id'>>> {
   list(): T[];
   get(id: string): T | undefined;
@@ -221,6 +239,9 @@ export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'
 export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, UpdateTransactionInput> & {
   listPage(query: TransactionQuery): TransactionPage;
   getSummary(query: TransactionSummaryQuery): TransactionSummary;
+  /** Aggregate expense spend grouped into ordered day/month buckets, computed in
+   *  the data layer (SQL GROUP BY) rather than by loading every row. */
+  getSpendSeries(query: SpendSeriesQuery): SpendSeriesPoint[];
   getCalendarMarks(query: {
     year: number;
     month: number;

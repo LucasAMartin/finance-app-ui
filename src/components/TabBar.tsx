@@ -4,6 +4,7 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
+import { GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
 import { Theme } from '../theme';
 import type { SourceRect } from './ContainerTransform';
 
@@ -30,19 +31,17 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const scales = useRef(TABS.map(() => new Animated.Value(1))).current;
   const [localActive, setLocalActive] = useState(active);
-  const activeRef = useRef(active);
-  const pressCommitted = useRef(false);
   const addBtnRef = useRef<View>(null);
   const addSourceCache = useRef<SourceRect | null>(null);
 
   useEffect(() => {
-    activeRef.current = active;
     setLocalActive(active);
   }, [active]);
 
   const handlePressIn = (id: string, i: number) => {
-    pressCommitted.current = false;
     setLocalActive(id);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onTabPress?.(id);
     Animated.timing(scales[i], {
       toValue: 0.88,
       duration: 80,
@@ -58,15 +57,6 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
       useNativeDriver: true,
       easing: EASE_OUT_EXPO,
     }).start();
-    setTimeout(() => {
-      if (!pressCommitted.current) setLocalActive(activeRef.current);
-    }, 50);
-  };
-
-  const handlePress = (id: string) => {
-    pressCommitted.current = true;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onTabPress?.(id);
   };
 
   const pill = (
@@ -78,7 +68,6 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
             key={t.id}
             onPressIn={() => handlePressIn(t.id, i)}
             onPressOut={() => handlePressOut(i)}
-            onPress={() => handlePress(t.id)}
             pointerEvents="box-only"
             style={styles.tabBtn}
           >
@@ -96,35 +85,54 @@ export function TabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
 
       <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
 
-      <Pressable
-        ref={addBtnRef}
-        onPressIn={() => {
-          addBtnRef.current?.measureInWindow((x, y, w, h) => {
-            addSourceCache.current = { x, y, width: w, height: h, radius: TAB_W / 2 };
-          });
-        }}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          const src = addSourceCache.current ?? null;
-          addSourceCache.current = null;
-          if (src) {
-            onAdd(src);
-          } else {
+      {SUPPORTS_GLASS ? (
+        // Native interactive Liquid Glass add button. Measures its own rect on
+        // press to seed the container-transform morph into the add sheet.
+        <GlassCircleButton
+          ref={addBtnRef}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             addBtnRef.current?.measureInWindow((x, y, w, h) => {
               onAdd({ x, y, width: w, height: h, radius: TAB_W / 2 });
             });
-          }
-        }}
-        pointerEvents="box-only"
-        accessibilityRole="button"
-        accessibilityLabel="Add expense"
-        style={[
-          styles.tabBtn,
-          { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
-        ]}
-      >
-        <Icon name="plus" size={24} color={theme.text} stroke={2} />
-      </Pressable>
+          }}
+          systemImage="plus"
+          size={TAB_W}
+          iconSize={24}
+          iconColor={theme.text}
+          accessibilityLabel="Add expense"
+        />
+      ) : (
+        <Pressable
+          ref={addBtnRef}
+          onPressIn={() => {
+            addBtnRef.current?.measureInWindow((x, y, w, h) => {
+              addSourceCache.current = { x, y, width: w, height: h, radius: TAB_W / 2 };
+            });
+          }}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            const src = addSourceCache.current ?? null;
+            addSourceCache.current = null;
+            if (src) {
+              onAdd(src);
+            } else {
+              addBtnRef.current?.measureInWindow((x, y, w, h) => {
+                onAdd({ x, y, width: w, height: h, radius: TAB_W / 2 });
+              });
+            }
+          }}
+          pointerEvents="box-only"
+          accessibilityRole="button"
+          accessibilityLabel="Add expense"
+          style={[
+            styles.tabBtn,
+            { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
+          ]}
+        >
+          <Icon name="plus" size={24} color={theme.text} stroke={2} />
+        </Pressable>
+      )}
     </View>
   );
 

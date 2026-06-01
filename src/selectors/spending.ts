@@ -1,4 +1,4 @@
-import type { Transaction, Category, Budget, RecurringRule } from '../repositories/types';
+import type { Transaction, Category, Budget, RecurringRule, SpendSeriesPoint } from '../repositories/types';
 import type { Period } from './finance';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -217,6 +217,43 @@ export function generateDateOptions(period: Period, now = new Date()): string[] 
   return Array.from({ length: counts[period] }, (_, i) =>
     derivePeriodRanges(period, i, now).current.label,
   );
+}
+
+// ─── Spend series bucketing ───────────────────────────────────────────────────
+
+/**
+ * Fold the repository's ordered spend buckets into the fixed-length numeric
+ * series the hero line chart expects: one slot per day (Week/Month) or per
+ * month index 0–11 (Year). Mirrors the previous inline bucketing so the chart
+ * renders identically, but without iterating every transaction.
+ */
+export function spendSeriesToBuckets(
+  points: SpendSeriesPoint[],
+  period: Period,
+  from: Date,
+  to: Date,
+): number[] {
+  if (period === 'Year') {
+    const months = new Array(12).fill(0);
+    points.forEach(pt => {
+      const m = Number(pt.key.slice(5, 7)) - 1; // 'YYYY-MM'
+      if (m >= 0 && m < 12) months[m] += pt.amount;
+    });
+    return months;
+  }
+  const dayMs = 86_400_000;
+  const start = startOfDay(from);
+  const days = Math.max(
+    1,
+    Math.round((startOfDay(to).getTime() - start.getTime()) / dayMs) + 1,
+  );
+  const arr = new Array(days).fill(0);
+  points.forEach(pt => {
+    const [y, m, d] = pt.key.split('-').map(Number); // 'YYYY-MM-DD'
+    const idx = Math.round((new Date(y, m - 1, d).getTime() - start.getTime()) / dayMs);
+    if (idx >= 0 && idx < days) arr[idx] += pt.amount;
+  });
+  return arr;
 }
 
 // ─── Transaction filtering ────────────────────────────────────────────────────

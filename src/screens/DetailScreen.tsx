@@ -6,6 +6,7 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
+import { ScreenExitButton } from '../components/GlassButton';
 import { Money } from '../components/shared';
 
 interface Props {
@@ -77,14 +78,13 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       {/* Nav bar — outside ScrollView */}
       <View style={[styles.navBar, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity
+        <ScreenExitButton
+          variant="back"
           onPress={onBack}
-          delayPressIn={0}
-          hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
-          style={[styles.circleBtn, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
-        >
-          <Icon name="chevL" size={18} color={theme.text} />
-        </TouchableOpacity>
+          tint={theme.text}
+          fallbackBg={theme.surface}
+          accessibilityLabel="Back"
+        />
         <Text style={{ fontSize: 12, color: theme.textSec, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' }}>
           {cat?.label}
         </Text>

@@ -190,12 +190,14 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     const amount = parseFloat(manualAmt);
     if (!Number.isFinite(amount) || amount <= 0) return null;
     const cat = manualCat;
-    const merchant = manualMerchant.trim() || cats[cat]?.label || 'Expense';
+    const rawMerchant = manualMerchant.trim();
+    const merchant = rawMerchant || cats[cat]?.label || 'Expense';
     const tx = transactionsRepo.create({
       amount, cat, merchant, note: manualNote,
       occurredAt: manualDate.toISOString(),
       type: 'expense', visibility: 'shared',
       createdByUserId: 'local', updatedByUserId: 'local',
+      meta: { merchantSource: rawMerchant ? 'user' : 'fallback' },
     });
     // When marked recurring, also seed a rule so future instances are tracked.
     if (manualRepeat !== 'never') {

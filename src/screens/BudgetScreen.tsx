@@ -29,6 +29,7 @@ import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { Icon } from '../components/Icon';
+import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
 import { Collapsible } from '../components/Collapsible';
 import { SheetPrimaryButton } from '../components/shared';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -1717,6 +1718,15 @@ function CategoryEditSheet({
             <View style={[styles.categorySheet, {
               backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
             }]}>
+              {/* Floating close — matches every other sheet's top-left placement */}
+              <ScreenExitButton
+                variant="close"
+                onPress={onRequestClose}
+                tint={theme.textSec}
+                fallbackBg={theme.chipBg}
+                accessibilityLabel="Close category editor"
+                style={EXIT_FLOAT_STYLE}
+              />
               <ScrollView
                 style={styles.categorySheetScroll}
                 contentContainerStyle={[
@@ -1730,18 +1740,6 @@ function CategoryEditSheet({
                 scrollEnabled={false}
 	                keyboardShouldPersistTaps="handled"
 	              >
-	              <View style={[styles.sheetHead, { justifyContent: 'flex-end' }]}>
-	                <Pressable
-	                  onPress={onRequestClose}
-	                  pointerEvents="box-only"
-	                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-	                  accessibilityRole="button"
-	                  accessibilityLabel="Close category editor"
-	                  style={[styles.sheetCloseBtn, { backgroundColor: theme.chipBg }]}
-	                >
-	                  <Icon name="close" size={15} color={theme.textSec} stroke={1.8} />
-	                </Pressable>
-	              </View>
 	              {/* Hero — tap circle to open native popup menu */}
 	              <View style={[styles.catHero, compactSheet && styles.catHeroCompact]}>
                 <MenuView
@@ -2127,18 +2125,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 22,
     gap: 14,
-  },
-  sheetHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sheetCloseBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   incomeHero: {
     alignItems: 'center',

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Animated,
@@ -53,7 +53,12 @@ const ALL_SCREENS: Screen[] = ['home', 'insights', 'budget', 'activity'];
 const FADE_DURATION = 180;
 
 // Purely presentational — opacity is owned by the parent, no internal effects.
-function AnimatedScreen({
+const MemoHomeScreen = React.memo(HomeScreen);
+const MemoInsightsScreen = React.memo(InsightsScreen);
+const MemoActivityScreen = React.memo(ActivityScreen);
+const MemoBudgetScreen = React.memo(BudgetScreen);
+
+const AnimatedScreen = React.memo(function AnimatedScreen({
   opacity,
   active,
   children,
@@ -70,7 +75,7 @@ function AnimatedScreen({
       {children}
     </Animated.View>
   );
-}
+});
 
 function AppInner() {
   const { theme, dark } = useTheme();
@@ -126,10 +131,10 @@ function AppInner() {
     });
   }, [transactionsRepo]);
 
-  const runToastUndo = () => {
+  const runToastUndo = useCallback(() => {
     toast?.onUndo();
     setToast(null);
-  };
+  }, [toast]);
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -146,7 +151,7 @@ function AppInner() {
   const drawerAnim = useRef(new Animated.Value(0)).current;
 
   // Start both drawer animations immediately on press — before setState.
-  const openDrawer = () => {
+  const openDrawer = useCallback(() => {
     setDrawerOpen(true);
     Animated.timing(drawerAnim, {
       toValue: 1,
@@ -154,9 +159,9 @@ function AppInner() {
       useNativeDriver: true,
       easing: Easing.out(Easing.exp),
     }).start();
-  };
+  }, [drawerAnim]);
 
-  const closeDrawer = () => {
+  const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
     Animated.timing(drawerAnim, {
       toValue: 0,
@@ -164,10 +169,10 @@ function AppInner() {
       useNativeDriver: true,
       easing: Easing.in(Easing.cubic),
     }).start();
-  };
+  }, [drawerAnim]);
 
   // Cross-fade between screens. Starts before setState — zero perceived delay.
-  const navigate = (s: Screen) => {
+  const navigate = useCallback((s: Screen) => {
     const from = activeRef.current;
     if (s === from) return;
 
@@ -192,24 +197,98 @@ function AppInner() {
 
     activeRef.current = s;
     setScreen(s);
-  };
+  }, [OP]);
 
-  const navigateToActivity = (filter?: ActivityInitialFilter) => {
+  const navigateToActivity = useCallback((filter?: ActivityInitialFilter) => {
     if (filter) {
       setActivityFilter(filter);
       setActivityFilterToken(t => t + 1);
     }
     navigate('activity');
-  };
+  }, [navigate]);
 
-  const handleDrawerNav = (id: string) => {
+  const handleDrawerNav = useCallback((id: string) => {
     closeDrawer();
     if      (id === 'home')     navigate('home');
     else if (id === 'budget')   navigate('budget');
     else if (id === 'insights') navigate('insights');
     else if (id === 'activity') navigate('activity');
     else if (id === 'settings') setThemeOpen(true);
-  };
+  }, [closeDrawer, navigate]);
+
+  const openInsights = useCallback(() => navigate('insights'), [navigate]);
+  const openVoiceExpense = useCallback((source: SourceRect) => expenseMorphRef.current?.open('voice', source, 'mic'), []);
+  const openManualExpense = useCallback((source: SourceRect) => expenseMorphRef.current?.open('manual', source, 'keypad'), []);
+  const openTheme = useCallback(() => setThemeOpen(true), []);
+  const openBudgetIncome = useCallback((node: View) => {
+    node.measureInWindow((x, y, w, h) => incomeMorphRef.current?.open({ x, y, width: w, height: h, radius: 8 }));
+  }, []);
+  const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
+  const closeTheme = useCallback(() => setThemeOpen(false), []);
+  const closeInsight = useCallback(() => setInsightTarget(null), []);
+  const handleTabPress = useCallback((id: string) => {
+    if      (id === 'home')     navigate('home');
+    else if (id === 'spending') navigate('insights');
+    else if (id === 'budget')   navigate('budget');
+    else if (id === 'profile')  navigate('activity');
+  }, [navigate]);
+
+  const homeScreen = useMemo(() => (
+    <MemoHomeScreen
+      theme={theme}
+      onViewInsights={openInsights}
+      onViewActivity={navigateToActivity}
+      onOpenDrawer={openDrawer}
+      onAddVoice={openVoiceExpense}
+      onAddManual={openManualExpense}
+      onAddRecurring={openRecurring}
+      onLogIncome={openIncomeMorph}
+      onOpenTheme={openTheme}
+      onOpenTx={openTx}
+      onDeleteTx={handleDeleteTx}
+      onOpenBill={openBill}
+    />
+  ), [
+    handleDeleteTx,
+    navigateToActivity,
+    openBill,
+    openDrawer,
+    openIncomeMorph,
+    openInsights,
+    openManualExpense,
+    openRecurring,
+    openTheme,
+    openTx,
+    openVoiceExpense,
+    theme,
+  ]);
+
+  const insightsScreen = useMemo(() => (
+    <MemoInsightsScreen
+      theme={theme}
+      onOpenDrawer={openDrawer}
+      onViewActivity={navigateToActivity}
+      onOpenInsight={handleInsightTarget}
+    />
+  ), [handleInsightTarget, navigateToActivity, openDrawer, theme]);
+
+  const activityScreen = useMemo(() => (
+    <MemoActivityScreen
+      theme={theme}
+      onOpenDrawer={openDrawer}
+      onOpenTx={openTx}
+      initialFilter={activityFilter}
+      filterToken={activityFilterToken}
+    />
+  ), [activityFilter, activityFilterToken, openDrawer, openTx, theme]);
+
+  const budgetScreen = useMemo(() => (
+    <MemoBudgetScreen
+      theme={theme}
+      onOpenDrawer={openDrawer}
+      onOpenIncome={openBudgetIncome}
+    />
+  ), [openBudgetIncome, openDrawer, theme]);
 
   const backdropOpacity = drawerAnim.interpolate({
     inputRange:  [0, 1],
@@ -222,46 +301,26 @@ function AppInner() {
       <View style={[styles.root, { backgroundColor: theme.bg }]}>
 
         <AnimatedScreen opacity={OP.home} active={screen === 'home'}>
-          <HomeScreen
-            theme={theme}
-            onViewInsights={() => navigate('insights')}
-            onViewActivity={() => navigate('activity')}
-            onOpenDrawer={openDrawer}
-            onAddVoice={(source) => expenseMorphRef.current?.open('voice', source, 'mic')}
-            onAddManual={(source) => expenseMorphRef.current?.open('manual', source, 'keypad')}
-            onAddRecurring={openRecurring}
-            onLogIncome={openIncomeMorph}
-            onOpenTheme={() => setThemeOpen(true)}
-            onOpenTx={openTx}
-            onDeleteTx={handleDeleteTx}
-            onOpenBill={openBill}
-          />
+          {homeScreen}
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.insights} active={screen === 'insights'}>
-          <InsightsScreen theme={theme} onOpenDrawer={openDrawer} onViewActivity={navigateToActivity} onOpenInsight={setInsightTarget} />
+          {insightsScreen}
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.activity} active={screen === 'activity'}>
-          <ActivityScreen theme={theme} onOpenDrawer={openDrawer} initialFilter={activityFilter} filterToken={activityFilterToken} />
+          {activityScreen}
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.budget} active={screen === 'budget'}>
-          <BudgetScreen theme={theme} onOpenDrawer={openDrawer} onOpenIncome={(node) => {
-            node.measureInWindow((x, y, w, h) => incomeMorphRef.current?.open({ x, y, width: w, height: h, radius: 8 }));
-          }} />
+          {budgetScreen}
         </AnimatedScreen>
 
         <TabBar
           theme={theme}
           active={screen === 'activity' ? 'profile' : screen === 'insights' ? 'spending' : screen}
-          onAdd={(source) => expenseMorphRef.current?.open('voice', source, 'mic')}
-          onTabPress={(id) => {
-            if      (id === 'home')     navigate('home');
-            else if (id === 'spending') navigate('insights');
-            else if (id === 'budget')   navigate('budget');
-            else if (id === 'profile')  navigate('activity');
-          }}
+          onAdd={openVoiceExpense}
+          onTabPress={handleTabPress}
         />
 
         {/* ─── Drawer backdrop ──────────────────────────────── */}
@@ -298,13 +357,14 @@ function AppInner() {
         <ThemeScreen
           theme={theme}
           visible={themeOpen}
-          onClose={() => setThemeOpen(false)}
+          onClose={closeTheme}
         />
 
         <InsightDetailScreen
           theme={theme}
           target={insightTarget}
-          onClose={() => setInsightTarget(null)}
+          onOpenTx={openTx}
+          onClose={closeInsight}
         />
 
         <Toast

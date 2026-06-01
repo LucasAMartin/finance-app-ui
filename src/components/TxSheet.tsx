@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { InteractionManager, View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet, DatePicker, Group, Host, RNHostView } from '@expo/ui/swift-ui';
 import { background, datePickerStyle, presentationDetents, presentationDragIndicator, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
@@ -16,7 +16,9 @@ import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositori
 import type { Category, GroupKey, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { MerchantMark } from './MerchantMark';
+import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { Money, SheetPrimaryButton } from './shared';
+import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
 import { Theme, catPastel, GROUP_COLORS, OVER_DOT } from '../theme';
 import { TYPE } from '../typography';
 
@@ -54,12 +56,10 @@ export function TxSheet({
 }) {
   const { transactionsRepo, categoriesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
-  const cats = categoryMap(categories);
+  const cats = useMemo(() => categoryMap(categories), [categories]);
   const insets = useSafeAreaInsets();
   const lastTx = useRef<Transaction | null>(null);
-  const [repoVersion, setRepoVersion] = useState(0);
-  const currentOpenTx = tx ? (transactionsRepo.get(tx.id) ?? tx) : null;
-  if (currentOpenTx) lastTx.current = currentOpenTx;
+  if (tx) lastTx.current = tx;
   const t = lastTx.current;
 
   const [detent, setDetent] = useState<PresentationDetent>(DETENT_DEFAULT);
@@ -69,37 +69,71 @@ export function TxSheet({
   const [editAmt, setEditAmt] = useState('');
   const [editOccurredAt, setEditOccurredAt] = useState<Date>(new Date());
   const [datePickerInlineOpen, setDatePickerInlineOpen] = useState(false);
-
-  useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
+  const [catTotal, setCatTotal] = useState<number | null>(null);
+  const [deferredTxId, setDeferredTxId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (currentOpenTx !== null) {
+    if (tx !== null) {
       setDetent(DETENT_DEFAULT);
-      setEditCat(currentOpenTx.cat);
-      setEditMerchant(currentOpenTx.merchant);
-      setEditNote(currentOpenTx.note ?? '');
-      setEditAmt(currentOpenTx.amount.toFixed(2));
-      setEditOccurredAt(dateFromIso(currentOpenTx.occurredAt));
+      setEditCat(tx.cat);
+      setEditMerchant(tx.merchant);
+      setEditNote(tx.note ?? '');
+      setEditAmt(tx.amount.toFixed(2));
+      setEditOccurredAt(dateFromIso(tx.occurredAt));
       setDatePickerInlineOpen(false);
     }
-  }, [currentOpenTx?.id, currentOpenTx?.cat, currentOpenTx?.merchant, currentOpenTx?.note, currentOpenTx?.amount, currentOpenTx?.occurredAt, repoVersion]);
+  }, [tx]);
 
   const isExpanded = detent === DETENT_LARGE;
-  const txMonth = t?.occurredAt ? new Date(t.occurredAt) : new Date();
-  const catTotal = t ? transactionsRepo.getSummary({
-    categoryIds: [t.cat],
-    from: new Date(txMonth.getFullYear(), txMonth.getMonth(), 1).toISOString(),
-    to: new Date(txMonth.getFullYear(), txMonth.getMonth() + 1, 0, 23, 59, 59, 999).toISOString(),
-  }).expenseTotal : 0;
+  const deferredContentReady = tx !== null && deferredTxId === tx.id;
+
+  useEffect(() => {
+    if (!tx) {
+      setDeferredTxId(null);
+      return;
+    }
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) setDeferredTxId(tx.id);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+  }, [tx]);
+
+  useEffect(() => {
+    if (!tx) {
+      setCatTotal(null);
+      return;
+    }
+    let cancelled = false;
+    setCatTotal(null);
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      const txMonth = tx.occurredAt ? new Date(tx.occurredAt) : new Date();
+      const total = transactionsRepo.getSummary({
+        categoryIds: [tx.cat],
+        from: new Date(txMonth.getFullYear(), txMonth.getMonth(), 1).toISOString(),
+        to: new Date(txMonth.getFullYear(), txMonth.getMonth() + 1, 0, 23, 59, 59, 999).toISOString(),
+      }).expenseTotal;
+      if (!cancelled) setCatTotal(total);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+  }, [tx, transactionsRepo]);
 
   const saveEdit = () => {
     if (!t) return;
     const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
+    const nextMerchant = editMerchant.trim() || t.merchant;
     transactionsRepo.update(t.id, {
       amount,
       cat: editCat,
-      merchant: editMerchant.trim() || t.merchant,
+      merchant: nextMerchant,
       note: editNote,
       occurredAt: Number.isNaN(editOccurredAt.getTime()) ? t.occurredAt : editOccurredAt.toISOString(),
       recurring: t.recurring,
@@ -108,15 +142,18 @@ export function TxSheet({
       visibility: t.visibility ?? 'shared',
       createdByUserId: t.createdByUserId,
       updatedByUserId: 'local',
-      meta: t.meta,
+      meta: {
+        ...t.meta,
+        merchantSource: nextMerchant !== t.merchant || t.meta?.merchantSource === 'user' ? 'user' : t.meta?.merchantSource,
+      },
     });
     onClose();
   };
 
   const deleteTx = () => {
     if (!t) return;
-    transactionsRepo.delete(t.id);
-    onDeleted?.(t);
+    if (onDeleted) onDeleted(t);
+    else transactionsRepo.delete(t.id);
     onClose();
   };
 
@@ -139,16 +176,14 @@ export function TxSheet({
                 }]}>
                   {t && (
                     <>
-                      {!isExpanded && (
-                        <Pressable
-                          onPress={onClose}
-                          pointerEvents="box-only"
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          style={[S.closeBtn, { backgroundColor: theme.chipBg }]}
-                        >
-                          <Icon name="close" size={15} color={theme.textSec} />
-                        </Pressable>
-                      )}
+                      <ScreenExitButton
+                        variant="close"
+                        onPress={onClose}
+                        tint={theme.textSec}
+                        fallbackBg={theme.chipBg}
+                        style={EXIT_FLOAT_STYLE}
+                        accessibilityLabel="Close"
+                      />
                       <ScrollView
                         bounces={false}
                         showsVerticalScrollIndicator={false}
@@ -160,7 +195,14 @@ export function TxSheet({
                           paddingBottom: Math.max(insets.bottom, 16) + 12,
                         }}
                       >
-                        <SheetBody tx={t} theme={theme} isExpanded={isExpanded} cats={cats} categories={categories} />
+                        <SheetBody
+                          tx={t}
+                          theme={theme}
+                          isExpanded={isExpanded}
+                          logoEnabled={deferredContentReady}
+                          cats={cats}
+                          categories={categories}
+                        />
                         {!isExpanded ? (
                           <View>
                             <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
@@ -212,18 +254,21 @@ function SheetBody({
   tx,
   theme,
   isExpanded,
+  logoEnabled,
   cats,
   categories,
 }: {
   tx: Transaction;
   theme: Theme;
   isExpanded: boolean;
+  logoEnabled: boolean;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
 }) {
   const cat = cats[tx.cat];
   const color = catPastel(tx.cat, theme.dark);
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
+  const useLogo = logoEnabled && transactionUsesMerchantLogo(tx);
 
   return (
     <View style={[S.hero, isExpanded && S.heroCompact]}>
@@ -233,6 +278,7 @@ function SheetBody({
         color={color + '42'}
         iconColor={groupColor}
         iconSize={isExpanded ? 18 : 24}
+        logoEnabled={useLogo}
         size={isExpanded ? 40 : 52}
       />
       <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
@@ -258,7 +304,7 @@ function CompactSummary({
   categories,
 }: {
   tx: Transaction;
-  catTotal: number;
+  catTotal: number | null;
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
@@ -266,7 +312,8 @@ function CompactSummary({
   const cat = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const catBudget = cat?.budget ?? 0;
-  const catPct = catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
+  const ready = catTotal !== null;
+  const catPct = ready && catBudget > 0 ? Math.min(100, Math.round((catTotal / catBudget) * 100)) : 0;
 
   return (
     <>
@@ -280,7 +327,9 @@ function CompactSummary({
         <View style={S.usageRow}>
           <Text style={[S.usageLabel, { color: theme.textSec }]}>{cat?.label} this month</Text>
           <Text style={[S.usageAmount, { color: theme.textSec }]}>
-            <Text style={[TYPE.bodySmEm, { color: theme.text }]}>${catTotal.toFixed(0)}</Text>
+            <Text style={[TYPE.bodySmEm, { color: theme.text }]}>
+              {ready ? `$${catTotal.toFixed(0)}` : '...'}
+            </Text>
             {' of $'}{catBudget}
           </Text>
         </View>
@@ -477,17 +526,6 @@ const S = StyleSheet.create({
     flex: 1,
     paddingTop: 16,
   },
-  closeBtn: {
-    position: 'absolute',
-    top: 16,
-    right: 20,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1,
-  },
   hero: {
     alignItems: 'center',
     paddingTop: 10,
@@ -602,7 +640,7 @@ const S = StyleSheet.create({
     paddingVertical: 6,
   },
   categoryPanel: {
-    borderRadius: 12,
+    borderRadius: 18,
     borderWidth: 1,
     overflow: 'hidden',
   },
@@ -610,6 +648,7 @@ const S = StyleSheet.create({
     marginHorizontal: 12,
     marginTop: 12,
     marginBottom: 4,
+    borderRadius: 14,
   },
   subcategoryRow: {
     flexDirection: 'row',

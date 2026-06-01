@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useRepositories, useRepositoryItem } from './repositories/RepositoryProvider';
-import type { MerchantLogo, MerchantLogosRepo, MerchantLogoStatus } from './repositories/types';
+import type { MerchantLogo, MerchantLogosRepo, MerchantLogoStatus, Transaction } from './repositories/types';
 
 const ENDPOINT = process.env.EXPO_PUBLIC_MERCHANT_LOGO_ENDPOINT
   ?? 'https://logo-api-ten.vercel.app/api/merchant-logo/resolve';
@@ -11,6 +11,29 @@ const ENDPOINT_ORIGIN = new URL(ENDPOINT).origin;
 const RESOLVED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ERROR_RETRY_MS = 24 * 60 * 60 * 1000;
 const inflight = new Map<string, Promise<void>>();
+const NON_MERCHANT_NAMES = new Set([
+  'bill',
+  'bills',
+  'dining',
+  'entertainment',
+  'expense',
+  'food',
+  'gas',
+  'groceries',
+  'grocery',
+  'housing',
+  'income',
+  'manual expense',
+  'note',
+  'rent',
+  'shopping',
+  'subscription',
+  'transport',
+  'transportation',
+  'unknown',
+  'utilities',
+  'utility',
+]);
 
 type ResolveResponse = {
   status: MerchantLogoStatus;
@@ -24,6 +47,23 @@ type ResolveResponse = {
 
 export function merchantLogoKey(merchant: string): string {
   return merchant.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+export function isLookupableMerchantName(merchant: string): boolean {
+  const key = merchantLogoKey(merchant);
+  if (key.length < 2) return false;
+  if (NON_MERCHANT_NAMES.has(key)) return false;
+  if (!/[a-z0-9]/i.test(key)) return false;
+  return true;
+}
+
+export function transactionUsesMerchantLogo(tx: Transaction): boolean {
+  const source = tx.meta?.merchantSource;
+  if (source === 'fallback' || source === 'note') return false;
+  if (source === 'user' || source === 'voice' || source === 'recurring') {
+    return isLookupableMerchantName(tx.merchant);
+  }
+  return isLookupableMerchantName(tx.merchant);
 }
 
 function isSafeLogoUrl(value?: string): value is string {
@@ -137,12 +177,14 @@ async function resolveAndCacheMerchantLogo(
   inflight.set(key, task);
 }
 
-export function useMerchantLogo(merchant: string): MerchantLogo | undefined {
+export function useMerchantLogo(merchant: string, enabled = true): MerchantLogo | undefined {
   const { merchantLogosRepo } = useRepositories();
-  const key = merchantLogoKey(merchant);
+  const canLookup = enabled && isLookupableMerchantName(merchant);
+  const key = canLookup ? merchantLogoKey(merchant) : '';
   const entry = useRepositoryItem(merchantLogosRepo, key);
 
   useEffect(() => {
+    if (!canLookup || !key) return;
     if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
       merchantLogosRepo.create({
         id: key,
@@ -158,9 +200,9 @@ export function useMerchantLogo(merchant: string): MerchantLogo | undefined {
       return;
     }
     resolveAndCacheMerchantLogo(merchant, merchantLogosRepo, entry).catch(() => {});
-  }, [entry, key, merchant, merchantLogosRepo]);
+  }, [canLookup, entry, key, merchant, merchantLogosRepo]);
 
-  if (entry?.status === 'resolved' && isSafeLogoUrl(entry.logoUrl) && !isExpired(entry)) return entry;
+  if (canLookup && entry?.status === 'resolved' && isSafeLogoUrl(entry.logoUrl) && !isExpired(entry)) return entry;
   return undefined;
 }
 

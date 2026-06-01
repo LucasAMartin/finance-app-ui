@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, Animated, Easing, Linking, type TextStyle } from 'react-native';
+import { View, Text, Pressable, TextInput, StyleSheet, Animated, Easing, Linking, type TextStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Theme } from '../theme';
 import { Icon } from './Icon';
+import { ScreenExitButton, GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
@@ -210,7 +211,8 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
     const amount = parseFloat(manualAmt);
     if (!Number.isFinite(amount) || amount <= 0) return null;
     const cat = manualCat;
-    const merchant = manualMerchant.trim() || cats[cat]?.label || 'Expense';
+    const rawMerchant = manualMerchant.trim();
+    const merchant = rawMerchant || cats[cat]?.label || 'Expense';
     const tx = transactionsRepo.create({
       amount,
       cat,
@@ -221,6 +223,7 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
       visibility: 'shared',
       createdByUserId: 'local',
       updatedByUserId: 'local',
+      meta: { merchantSource: rawMerchant ? 'user' : 'fallback' },
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     return { id: tx.id, amount, catLabel: cats[cat]?.label ?? cat, merchant };
@@ -259,24 +262,23 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
             }]}>
               {/* Header */}
               <View style={S.sheetHeader}>
-                <Pressable
+                <ScreenExitButton
+                  variant="close"
                   onPress={() => { voice.abort(); onClose(); }}
-                  pointerEvents="box-only"
-                  style={S.headerBtn}
-                >
-                  <Text style={[TYPE.body, { color: theme.textSec }]}>Cancel</Text>
-                </Pressable>
+                  tint={theme.textSec}
+                  fallbackBg={theme.chipBg}
+                  accessibilityLabel="Cancel"
+                />
                 <Text style={[TYPE.pageTitle, { color: theme.text }]}>New expense</Text>
                 <View style={S.headerBtn} />
               </View>
 
-              <ScrollView
-                bounces={false}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="always"
-                scrollEnabled={mode !== 'manual'}
-                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
-              >
+              {/* Plain View, not a ScrollView: the mic's interactive Liquid
+                  Glass needs a clean, uninterrupted press, but a scroll view's
+                  pan recognizer steals that gesture. Only the voice view ever
+                  scrolled (manual mode already didn't), and it's fixed/centered
+                  within the sheet detent, so nothing here needs to scroll. */}
+              <View style={[S.body, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
                 <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}>
                   <Host matchContents>
                     <Picker
@@ -374,27 +376,42 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
                           />
                         );
                       })}
-                      <Pressable
-                        onPress={() => {
+                      {(() => {
+                        const onMicPress = () => {
                           Haptics.impactAsync(
                             mode === 'listening'
                               ? Haptics.ImpactFeedbackStyle.Medium
                               : Haptics.ImpactFeedbackStyle.Light
                           );
                           if (mode === 'listening') voice.stop(); else voice.start();
-                        }}
-                        pointerEvents="box-only"
-                        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={mode === 'listening' ? 'Stop recording' : 'Start recording'}
-                        style={[S.micBtn, { backgroundColor: theme.accent.fill }]}
-                      >
-                        {mode === 'listening' ? (
-                          <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
+                        };
+                        const micLabel = mode === 'listening' ? 'Stop recording' : 'Start recording';
+                        return SUPPORTS_GLASS ? (
+                          <GlassCircleButton
+                            onPress={onMicPress}
+                            systemImage={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
+                            size={88}
+                            iconSize={32}
+                            iconColor={theme.accent.dot}
+                            accessibilityLabel={micLabel}
+                          />
                         ) : (
-                          <Icon name="mic" size={26} color={theme.accent.dot} stroke={1.8} />
-                        )}
-                      </Pressable>
+                          <Pressable
+                            onPress={onMicPress}
+                            pointerEvents="box-only"
+                            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                            accessibilityRole="button"
+                            accessibilityLabel={micLabel}
+                            style={[S.micBtn, { backgroundColor: theme.accent.fill }]}
+                          >
+                            {mode === 'listening' ? (
+                              <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
+                            ) : (
+                              <Icon name="mic" size={26} color={theme.accent.dot} stroke={1.8} />
+                            )}
+                          </Pressable>
+                        );
+                      })()}
                     </View>
 
                     <Text style={[TYPE.captionEm, S.stateLabel, { color: theme.textTer }]}>
@@ -509,7 +526,7 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
                     />
                   </View>
                 )}
-              </ScrollView>
+              </View>
             </View>
           </RNHostView>
         </Group>
@@ -682,6 +699,9 @@ function KeyButton({
 
 const S = StyleSheet.create({
   sheet: {
+    flex: 1,
+  },
+  body: {
     flex: 1,
   },
   sheetHeader: {

@@ -254,7 +254,14 @@ export function monthBudgets(transactions: Transaction[], budgets: Budget[] = []
   const daysRemaining = Math.max(0, daysInMonth - now.getDate());
   const currentMonthLabel = now.toLocaleString('en-US', { month: 'long' });
   return SEED_MONTH_BUDGETS.map((month, idx) => {
-    if (idx !== 0) return { ...month };
+    if (idx !== 0) {
+      const d = new Date(now.getFullYear(), now.getMonth() - idx, 1);
+      return {
+        ...month,
+        key: d.toISOString().slice(0, 7),
+        month: d.toLocaleString('en-US', { month: 'long' }),
+      };
+    }
     const spent = roundMoney(transactionTotal);
     return {
       ...month,

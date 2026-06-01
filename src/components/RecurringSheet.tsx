@@ -8,6 +8,7 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey, RecurringRule } from '../repositories/types';
 import { Icon } from './Icon';
+import { ScreenExitButton, EXIT_BTN_SIZE } from './GlassButton';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
 
@@ -113,15 +114,14 @@ export function RecurringSheet({ theme, visible, onClose }: Props) {
           <RNHostView>
             <View style={[S.sheet, { backgroundColor: theme.surface, paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
               <View style={S.head}>
-                <Text style={[TYPE.sectionTitle, { color: theme.text }]}>Recurring expense</Text>
-                <Pressable
+                <ScreenExitButton
+                  variant="close"
                   onPress={onClose}
-                  pointerEvents="box-only"
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={[S.closeBtn, { backgroundColor: theme.chipBg }]}
-                >
-                  <Icon name="close" size={15} color={theme.textSec} stroke={1.8} />
-                </Pressable>
+                  tint={theme.textSec}
+                  fallbackBg={theme.chipBg}
+                />
+                <Text style={[TYPE.sectionTitle, { color: theme.text, flex: 1, textAlign: 'center' }]}>Recurring expense</Text>
+                <View style={{ width: EXIT_BTN_SIZE }} />
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -282,13 +282,6 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 16,
-  },
-  closeBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   fieldCard: {
     borderRadius: 16,

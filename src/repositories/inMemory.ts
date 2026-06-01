@@ -20,6 +20,8 @@ import type {
   Repositories,
   RepoListener,
   Repository,
+  SpendSeriesPoint,
+  SpendSeriesQuery,
   Transaction,
   TransactionCursor,
   TransactionPage,
@@ -153,6 +155,25 @@ class InMemoryTransactionsRepo
       expenseTotal: expenses.reduce((sum, tx) => sum + tx.amount, 0),
       expenseDayCount: days.size,
     };
+  }
+
+  getSpendSeries(query: SpendSeriesQuery): SpendSeriesPoint[] {
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const groups = new Map<string, number>();
+    this.rows.forEach(tx => {
+      if (tx.type === 'income') return;
+      if (!matchesTxQuery(tx, query)) return;
+      if (!tx.occurredAt) return;
+      const d = new Date(tx.occurredAt);
+      const key =
+        query.bucket === 'month'
+          ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
+          : `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      groups.set(key, (groups.get(key) ?? 0) + tx.amount);
+    });
+    return [...groups.entries()]
+      .map(([key, amount]) => ({ key, amount }))
+      .sort((a, b) => a.key.localeCompare(b.key));
   }
 
   getCalendarMarks(query: {

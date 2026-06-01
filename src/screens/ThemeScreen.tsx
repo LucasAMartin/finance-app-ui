@@ -27,6 +27,7 @@ import {
 } from '../wallpapers';
 import { MEDIA, DARK_TEXT_SHADOW } from '../wallpaperPalette';
 import { Icon } from '../components/Icon';
+import { ScreenExitButton } from '../components/GlassButton';
 import { TYPE } from '../typography';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -200,15 +201,13 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
               ]}
             />
             <View style={styles.headerRow}>
-              <Pressable
+              <ScreenExitButton
+                variant="back"
                 onPress={onClose}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                style={styles.headerIconBtn}
-                accessibilityLabel="Close"
-                accessibilityRole="button"
-              >
-                <Icon name="close" size={22} color="#FFFFFF" stroke={1.9} />
-              </Pressable>
+                tint="#F2F4F5"
+                fallbackBg="rgba(8,6,20,0.45)"
+                accessibilityLabel="Back"
+              />
               <Text style={[styles.headerTitle, { color: '#FFFFFF' }, DARK_TEXT_SHADOW]}>
                 Background
               </Text>

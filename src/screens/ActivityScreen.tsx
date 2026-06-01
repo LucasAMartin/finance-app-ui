@@ -55,10 +55,11 @@ const EASE_OUT_QUINT = Easing.bezier(0.22, 1, 0.36, 1);
 let cachedCalOpen = false;
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
+import { ScreenExitButton } from '../components/GlassButton';
 import { MerchantMark } from '../components/MerchantMark';
+import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { Money } from '../components/shared';
 import { Skeleton } from '../components/Skeleton';
-import { TxSheet } from '../components/TxSheet';
 import { Toast } from '../components/Toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TransactionCalendar, CalDayMark } from '../components/TransactionCalendar';
@@ -253,11 +254,12 @@ const EMPTY_SUMMARY: TransactionSummary = {
 interface Props {
   theme: Theme;
   onOpenDrawer?: () => void;
+  onOpenTx?: (tx: Transaction) => void;
   initialFilter?: ActivityInitialFilter | null;
   filterToken?: number;
 }
 
-export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken }: Props) {
+export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, initialFilter, filterToken }: Props) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
@@ -270,7 +272,6 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
   const [catFilter, setCatFilter]           = useState<string[]>([]);
   const [dateFilter, setDateFilter]         = useState<DateFilter>(null);
   const [sortBy, setSortBy]                 = useState<SortOrder>('date-desc');
-  const [sheetTx, setSheetTx]               = useState<Transaction | null>(null);
   const [pendingUndo, setPendingUndo]       = useState<{ tx: Transaction } | null>(null);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [selectedDay, setSelectedDay]       = useState<number | null>(null);
@@ -327,6 +328,11 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
     transactionsRepo.delete(t.id);
     setPendingUndo({ tx: t });
   }, [transactionsRepo]);
+
+  const handleOpenTx = useCallback((selected: Transaction) => {
+    onOpenTx?.(selected);
+  }, [onOpenTx]);
+
   const handleUndoDelete = () => {
     if (pendingUndo) transactionsRepo.create(txToCreateInput(pendingUndo.tx));
     setPendingUndo(null);
@@ -540,7 +546,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
         theme={theme}
         cats={cats}
         categories={categories}
-        onPress={setSheetTx}
+        onPress={handleOpenTx}
         onDelete={handleDeleteTx}
         onSwipeOpen={handleSwipeOpen}
         onSwipeClose={handleSwipeClose}
@@ -555,6 +561,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
     cats,
     grouped,
     handleDeleteTx,
+    handleOpenTx,
     handleSwipeClose,
     handleSwipeOpen,
     theme,
@@ -903,7 +910,7 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
                           theme={theme}
                           cats={cats}
                           categories={categories}
-                          onPress={() => setSheetTx(tx)}
+                          onPress={() => handleOpenTx(tx)}
                           last={i === dayDetail.txs.length - 1 && dayDetail.bills.length === 0}
                         />
                       ))}
@@ -944,13 +951,6 @@ export function ActivityScreen({ theme, onOpenDrawer, initialFilter, filterToken
 
             </View>
           )}
-        />
-
-        <TxSheet
-          tx={sheetTx}
-          theme={theme}
-          onClose={() => setSheetTx(null)}
-          onDeleted={(deleted) => setPendingUndo({ tx: deleted })}
         />
 
         <FilterSheet
@@ -1099,27 +1099,26 @@ function FilterSheet({
 
               {/* ── Header ──────────────────────────────────────── */}
               <View style={[FS.header, { borderBottomColor: theme.sep }]}>
-                <Text style={[FS.title, { color: theme.text }]}>Filters</Text>
-                <View style={FS.headerActions}>
-                  {activeCount > 0 && (
-                    <TouchableOpacity
-                      onPress={clearAll}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear all filters"
-                    >
-                      <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity
+                <View style={FS.headerLeft}>
+                  <ScreenExitButton
+                    variant="close"
                     onPress={onClose}
+                    tint={theme.textSec}
+                    fallbackBg={theme.chipBg}
+                    accessibilityLabel="Done"
+                  />
+                  <Text style={[FS.title, { color: theme.text }]}>Filters</Text>
+                </View>
+                {activeCount > 0 && (
+                  <TouchableOpacity
+                    onPress={clearAll}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     accessibilityRole="button"
-                    accessibilityLabel="Done"
+                    accessibilityLabel="Clear all filters"
                   >
-                    <Text style={[FS.doneLink, { color: theme.text }]}>Done</Text>
+                    <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
                   </TouchableOpacity>
-                </View>
+                )}
               </View>
 
               <ScrollView
@@ -1567,7 +1566,13 @@ function TxRow({
       accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
       onAccessibilityAction={onDelete ? (e) => { if (e.nativeEvent.actionName === 'delete') onDelete(); } : undefined}
     >
-      <MerchantMark merchant={tx.merchant} catIcon={cat?.icon} color={groupColor} size={32} />
+      <MerchantMark
+        merchant={tx.merchant}
+        catIcon={cat?.icon}
+        color={groupColor}
+        logoEnabled={transactionUsesMerchantLogo(tx)}
+        size={32}
+      />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
           <Text style={[S.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>
@@ -1963,6 +1968,11 @@ const FS = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   title: {
     ...TYPE.pageTitle,

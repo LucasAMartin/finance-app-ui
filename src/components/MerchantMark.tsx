@@ -10,6 +10,7 @@ interface MerchantMarkProps {
   size?: number;
   iconColor?: string;
   iconSize?: number;
+  logoEnabled?: boolean;
 }
 
 export function MerchantMark({
@@ -19,8 +20,9 @@ export function MerchantMark({
   size = 32,
   iconColor = '#FBF8FF',
   iconSize,
+  logoEnabled = true,
 }: MerchantMarkProps) {
-  const logo = useMerchantLogo(merchant);
+  const logo = useMerchantLogo(merchant, logoEnabled);
   const invalidateMerchantLogo = useInvalidateMerchantLogo();
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -47,12 +49,12 @@ export function MerchantMark({
       {showLogo ? (
         <Image
           source={{ uri: logo!.logoUrl! }}
-          resizeMode="contain"
+          resizeMode="cover"
           onError={() => {
             setImageFailed(true);
             invalidateMerchantLogo(merchant);
           }}
-          style={{ width: size * 0.72, height: size * 0.72 }}
+          style={{ width: size * 1.16, height: size * 1.16 }}
         />
       ) : (
         <Icon name={catIcon} size={iconSize ?? size * 0.47} color={iconColor} stroke={1.6} />
