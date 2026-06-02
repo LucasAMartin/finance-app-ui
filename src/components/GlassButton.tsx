@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
-import { Button, Host, Image } from '@expo/ui/swift-ui';
+import { Button, GlassEffectContainer, Host, Image } from '@expo/ui/swift-ui';
 import { frame, glassEffect } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { Icon } from './Icon';
@@ -24,8 +24,11 @@ export interface GlassCircleButtonProps {
 /**
  * A circular native SwiftUI button with an interactive Liquid Glass background.
  * Renders its own `Host` island, so it can be dropped into plain React Native
- * trees or nested inside an existing `RNHostView`. Only mount this when
- * `SUPPORTS_GLASS` is true; provide a JS fallback otherwise.
+ * trees or nested inside an existing `RNHostView`. The GlassEffectContainer is
+ * important for large circles such as the voice mic; without it iOS may render
+ * the glass material but skip the interactive press/refraction effect.
+ * Only mount this when `SUPPORTS_GLASS` is true; provide a JS fallback
+ * otherwise.
  *
  * The forwarded ref lands on the wrapping RN `View` so callers that measure the
  * button (e.g. morph transitions) keep working.
@@ -45,18 +48,20 @@ export const GlassCircleButton = React.forwardRef<View, GlassCircleButtonProps>(
         accessibilityLabel={accessibilityLabel}
       >
         <Host matchContents ignoreSafeArea="all">
-          <Button
-            onPress={onPress}
-            modifiers={[
-              frame({ width: size, height: size }),
-              glassEffect({
-                glass: { variant: 'regular', interactive: true },
-                shape: 'circle',
-              }),
-            ]}
-          >
-            <Image systemName={systemImage} size={iconSize} color={iconColor} />
-          </Button>
+          <GlassEffectContainer>
+            <Button
+              onPress={onPress}
+              modifiers={[
+                frame({ width: size, height: size }),
+                glassEffect({
+                  glass: { variant: 'regular', interactive: true },
+                  shape: 'circle',
+                }),
+              ]}
+            >
+              <Image systemName={systemImage} size={iconSize} color={iconColor} />
+            </Button>
+          </GlassEffectContainer>
         </Host>
       </View>
     );
@@ -86,18 +91,20 @@ export function GlassCircleIcon({
   return (
     <View style={{ width: size, height: size }} pointerEvents="none">
       <Host matchContents ignoreSafeArea="all">
-        <Image
-          systemName={systemImage}
-          size={iconSize}
-          color={iconColor}
-          modifiers={[
-            frame({ width: size, height: size }),
-            glassEffect({
-              glass: { variant: 'regular', interactive: true },
-              shape: 'circle',
-            }),
-          ]}
-        />
+        <GlassEffectContainer>
+          <Image
+            systemName={systemImage}
+            size={iconSize}
+            color={iconColor}
+            modifiers={[
+              frame({ width: size, height: size }),
+              glassEffect({
+                glass: { variant: 'regular', interactive: true },
+                shape: 'circle',
+              }),
+            ]}
+          />
+        </GlassEffectContainer>
       </Host>
     </View>
   );

@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { InteractionManager, View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, DatePicker, Group, Host, RNHostView } from '@expo/ui/swift-ui';
+import { BottomSheet, Button as SwiftButton, DatePicker, Group, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
 import { background, datePickerStyle, presentationDetents, presentationDragIndicator, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
-import { MenuView } from '@react-native-menu/menu';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 
 const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
@@ -477,26 +476,27 @@ function EditSection({
         <View style={[S.subcategoryRow, { borderTopColor: theme.hairline }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Subcategory</Text>
           {subcats.length > 0 ? (
-            <MenuView
-              shouldOpenOnLongPress={false}
-              themeVariant={theme.dark ? 'dark' : 'light'}
-              actions={subcats.map((cat, idx) => ({
-                id: String(idx),
-                title: cats[cat.id]?.label ?? cat.label,
-                state: idx === selectedSubIdx ? 'on' : 'off',
-              }))}
-              onPressAction={({ nativeEvent }) => {
-                const next = subcats[Number(nativeEvent.event)];
-                if (next) setEditCat(next.id);
-              }}
-            >
-              <View style={S.subcatMenuTrigger}>
-                <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
-                  {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
-                </Text>
-                <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
-              </View>
-            </MenuView>
+            <Host ignoreSafeArea="all" style={{ width: 180, height: 28 }}>
+              <Menu
+                label={
+                  <View style={[S.subcatMenuTrigger, { width: 180, height: 28, justifyContent: 'flex-end' }]}>
+                    <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
+                      {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
+                    </Text>
+                    <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                  </View>
+                }
+              >
+                {subcats.map((cat, idx) => (
+                  <SwiftButton
+                    key={String(idx)}
+                    systemImage={idx === selectedSubIdx ? 'checkmark' : undefined}
+                    onPress={() => setEditCat(cat.id)}
+                    label={cats[cat.id]?.label ?? cat.label}
+                  />
+                ))}
+              </Menu>
+            </Host>
           ) : (
             <Text style={[TYPE.bodySm, { color: theme.textTer }]}>No subcategories</Text>
           )}

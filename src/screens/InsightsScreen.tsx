@@ -13,7 +13,7 @@ import {
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
+import { BottomSheet, Button as SwiftButton, Group, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
 import {
   background,
   environment,
@@ -22,7 +22,6 @@ import {
   type PresentationDetent,
 } from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { MenuView } from '@react-native-menu/menu';
 
 import { useTheme } from '../ThemeProvider';
 import {
@@ -58,6 +57,8 @@ import {
   spendingTrend,
   scheduledFixedInRange,
   spendSeriesToBuckets,
+  trendTimeframeConfig,
+  foldTrendSeries,
   type ActivityInitialFilter,
   type CatRow,
 } from '../selectors/spending';
@@ -66,6 +67,7 @@ import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
 import { LineChart } from '../components/charts/LineChart';
 import { SpendChart } from '../components/charts/SpendChart';
+import { TrendBars } from '../components/charts/TrendBars';
 import type { InsightDetailTarget } from './InsightDetailScreen';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -108,6 +110,30 @@ const TF_TO_PERIOD: Record<Timeframe, Period> = {
   '6M': 'Year',
   '1Y': 'Year',
 };
+
+// The Spending-trends tile buckets each timeframe at its own granularity, so its
+// resting headline reads "average daily/weekly/…" beside the figure.
+const TREND_CADENCE: Record<Timeframe, string> = {
+  '1W': 'Daily',
+  '1M': 'Weekly',
+  '6M': 'Monthly',
+  '1Y': 'Quarterly',
+};
+
+// Label for a scrubbed bucket, shown beside its total while the user drags.
+function trendScrubLabel(
+  tf: Timeframe,
+  slot: { from: Date } | undefined,
+  idx: number,
+): string {
+  if (!slot) return '';
+  if (tf === '1W')
+    return slot.from.toLocaleDateString('en-US', { weekday: 'long' });
+  if (tf === '1M') return `Week ${idx + 1}`;
+  if (tf === '6M')
+    return slot.from.toLocaleDateString('en-US', { month: 'long' });
+  return `Q${idx + 1}`;
+}
 
 // Snapshot rows are drawn from a scored candidate pool; only the strongest few
 // surface so the card stays compact and varies with the data/period.
@@ -1317,6 +1343,53 @@ export function InsightsScreen({
     return lineSeries.map((v) => (s += v));
   }, [lineSeries]);
 
+  // Anchor the trends tile to the same range the hero is showing: when the
+  // selected period is the live one, anchor to `now` (so future buckets stay
+  // empty); for a past period, anchor to its end so every bucket is "elapsed".
+  const trendAnchor = useMemo(() => {
+    const { from, to } = ranges.current;
+    return from <= now && now <= to ? now : to;
+  }, [ranges, now]);
+
+  // Spending-trends tile: timeframe-aware buckets (7 days / 4 weeks / 6 months /
+  // 4 quarters) with the average taken over *elapsed* buckets only, so empty
+  // future buckets don't drag the typical-spend line down.
+  const trend = useMemo(() => {
+    const config = trendTimeframeConfig(timeframe, trendAnchor);
+    const points = transactionsRepo.getSpendSeries({
+      from: config.from.toISOString(),
+      to: config.to.toISOString(),
+      bucket: config.bucket,
+    });
+    const values = foldTrendSeries(points, config.slots);
+    const elapsed = config.slots
+      .map((slot, i) => ({ slot, value: values[i] }))
+      .filter(({ slot }) => slot.from <= trendAnchor);
+    const avg = elapsed.length
+      ? elapsed.reduce((sum, e) => sum + e.value, 0) / elapsed.length
+      : 0;
+    return {
+      values,
+      labels: config.slots.map((s) => s.label),
+      slots: config.slots,
+      avg,
+      from: config.from,
+      to: config.to,
+    };
+  }, [transactionsRepo, timeframe, trendAnchor, repoVersion]);
+
+  // Scrub state for the trends tile — mirrors the hero's scrubIdx: while held,
+  // the headline shows the selected bucket's total instead of the average.
+  const [trendScrubIdx, setTrendScrubIdx] = useState<number | null>(null);
+  useEffect(() => setTrendScrubIdx(null), [trend]);
+  const trendScrubbing = trendScrubIdx != null;
+  const trendAmount = trendScrubbing
+    ? trend.values[trendScrubIdx] ?? trend.avg
+    : trend.avg;
+  const trendRightLabel = trendScrubbing
+    ? trendScrubLabel(timeframe, trend.slots[trendScrubIdx], trendScrubIdx)
+    : `${TREND_CADENCE[timeframe]} average`;
+
   // Active scrub point (null = released → show the period total).
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
   // Drop any held scrub when the series changes under it (period/data switch).
@@ -1393,9 +1466,6 @@ export function InsightsScreen({
   const lineColorFaint = theme.dark
     ? 'rgba(242,244,245,0.32)'
     : 'rgba(14,12,24,0.22)';
-  // Faint placeholder bars for the Income tile.
-  const sparkBars = (lineSeries.length ? lineSeries : [0]).slice(-6);
-  const sparkBarsMax = Math.max(...sparkBars, 1);
 
   const scrimTop = theme.dark ? 'rgba(3,5,8,0.55)' : 'rgba(3,5,8,0.30)';
   const scrimMid = theme.dark ? 'rgba(3,5,8,0.34)' : 'rgba(3,5,8,0.30)';
@@ -1525,38 +1595,30 @@ export function InsightsScreen({
                   }}
                   style={styles.timeframeSeg}
                 />
-                <MenuView
-                  shouldOpenOnLongPress={false}
-                  themeVariant={theme.dark ? 'dark' : 'light'}
-                  actions={dateOptions.map((opt, idx) => ({
-                    id: String(idx),
-                    title: opt,
-                    state: idx === dateIdx ? 'on' : 'off',
-                  }))}
-                  onPressAction={({ nativeEvent }) => {
-                    const next = Number(nativeEvent.event);
-                    setDateIdxByPeriod((prev) => ({ ...prev, [period]: next }));
-                  }}
-                >
-                  <View style={styles.monthLabel}>
-                    <Text
-                      style={[
-                        styles.monthLabelText,
-                        { color: pWall.text },
-                        shadow,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {dateLabel}
-                    </Text>
-                    <Icon
-                      name="chevDown"
-                      size={13}
-                      color={pWall.text}
-                      stroke={2.2}
-                    />
-                  </View>
-                </MenuView>
+                <Host ignoreSafeArea="all" style={{ width: 150, height: 28 }}>
+                  <Menu
+                    label={
+                      <View style={[styles.monthLabel, { width: 150, height: 28, justifyContent: 'flex-end' }]}>
+                        <Text
+                          style={[styles.monthLabelText, { color: pWall.text }, shadow]}
+                          numberOfLines={1}
+                        >
+                          {dateLabel}
+                        </Text>
+                        <Icon name="chevDown" size={13} color={pWall.text} stroke={2.2} />
+                      </View>
+                    }
+                  >
+                    {dateOptions.map((opt, idx) => (
+                      <SwiftButton
+                        key={String(idx)}
+                        systemImage={idx === dateIdx ? 'checkmark' : undefined}
+                        onPress={() => setDateIdxByPeriod((prev) => ({ ...prev, [period]: idx }))}
+                        label={opt}
+                      />
+                    ))}
+                  </Menu>
+                </Host>
               </View>
 
               {/* Hero — Spent + line chart (full width) */}
@@ -1596,39 +1658,48 @@ export function InsightsScreen({
                 </View>
               </BentoTile>
 
-              {/* Row: Income | Net cashflow */}
+              {/* Row: Spending trends | Net cashflow */}
               <View style={styles.bentoRow}>
                 <BentoTile
                   dark={theme.dark}
                   style={styles.tileHalf}
                   onPress={() =>
                     onOpenInsight({
-                      title: 'Income',
-                      subtitle: rangeContextLabel,
+                      title: 'Spending trends',
+                      subtitle: `Average ${TREND_CADENCE[timeframe]} spend`,
                       icon: 'chart',
                     })
                   }
-                  accessibilityLabel="Income"
+                  accessibilityLabel={`Spending trends, ${trendRightLabel} ${money(trendAmount)}`}
                 >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>Income</Text>
+                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                    Spending trends
+                  </Text>
                   <Text
                     style={[styles.tileValue, { color: p.text }]}
                     numberOfLines={1}
                   >
-                    {money(0)}
+                    {money(trendAmount)}
                   </Text>
-                  <View style={styles.tileSpark}>
-                    {sparkBars.map((v, i) => (
-                      <View
-                        key={i}
-                        style={{
-                          flex: 1,
-                          height: Math.max((v / sparkBarsMax) * 40, 4),
-                          borderRadius: 3,
-                          backgroundColor: lineColorFaint,
-                        }}
-                      />
-                    ))}
+                  <Text
+                    style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
+                    numberOfLines={1}
+                  >
+                    {trendRightLabel}
+                  </Text>
+                  <View style={styles.tileTrendChart}>
+                    <TrendBars
+                      values={trend.values}
+                      labels={trend.labels}
+                      selectedIdx={trendScrubIdx}
+                      onScrub={setTrendScrubIdx}
+                      width={HALF_CHART_W}
+                      height={64}
+                      barColor={lineColorFaint}
+                      selectedColor={lineColor}
+                      labelColor={p.textTer}
+                      selectedLabelColor={p.text}
+                    />
                   </View>
                 </BentoTile>
 
@@ -1813,6 +1884,7 @@ const styles = StyleSheet.create({
   tileValueSm: { ...TYPE.subsectionTitle, marginTop: 8 },
   heroChart: { marginTop: 'auto', height: 150 },
   tileMiniChart: { marginTop: 'auto', height: 40 },
+  tileTrendChart: { marginTop: 'auto', height: 64 },
   bentoSection: { ...TYPE.sectionTitle, marginTop: 4 },
   budgetLineRow: {
     flexDirection: 'row',
@@ -1838,13 +1910,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 8,
-  },
-  tileSpark: {
-    height: 52,
-    marginTop: 'auto',
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 4,
   },
   tileBar: {
     height: 6,

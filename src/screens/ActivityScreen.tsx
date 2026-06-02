@@ -23,9 +23,8 @@ import {
 const AnimatedGHFlatList = Animated.createAnimatedComponent(GHFlatList);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
+import { BottomSheet, Button as SwiftButton, Group, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
 import { background, presentationDetents, presentationDragIndicator } from '@expo/ui/swift-ui/modifiers';
-import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
@@ -1130,50 +1129,66 @@ function FilterSheet({
                 {/* ── Sort by — UIKit menu (styled trigger) ──────── */}
                 <View style={FS.sortRow}>
                   <Text style={[FS.sortRowLabel, { color: theme.text }]}>Sort by</Text>
-                  <MenuView
-                    shouldOpenOnLongPress={false}
-                    themeVariant={theme.dark ? 'dark' : 'light'}
-                    actions={SORT_OPTIONS.map((o, idx) => ({
-                      id: String(idx),
-                      title: o.label,
-                      state: idx === (sortIdx >= 0 ? sortIdx : 0) ? 'on' : 'off',
-                    }))}
-                    onPressAction={({ nativeEvent }) => setSortBy(SORT_OPTIONS[Number(nativeEvent.event)].id)}
-                  >
-                    <View style={FS.menuTrigger}>
-                      <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]}>
-                        {SORT_OPTIONS[sortIdx >= 0 ? sortIdx : 0]?.label}
-                      </Text>
-                      <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
-                    </View>
-                  </MenuView>
+                  <Host ignoreSafeArea="all" style={{ width: 160, height: 28 }}>
+                    <Menu
+                      label={
+                        <View style={[FS.menuTrigger, { width: 160, height: 28, justifyContent: 'flex-end' }]}>
+                          <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]} numberOfLines={1}>
+                            {SORT_OPTIONS[sortIdx >= 0 ? sortIdx : 0]?.label}
+                          </Text>
+                          <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
+                        </View>
+                      }
+                    >
+                      {SORT_OPTIONS.map((o, idx) => (
+                        <SwiftButton
+                          key={String(idx)}
+                          systemImage={idx === (sortIdx >= 0 ? sortIdx : 0) ? 'checkmark' : undefined}
+                          onPress={() => setSortBy(o.id)}
+                          label={o.label}
+                        />
+                      ))}
+                    </Menu>
+                  </Host>
                 </View>
 
                 {/* ── Date — UIKit menu (styled trigger) ─────────── */}
                 {/* Menu indices: 0 = Any time, 1-4 = presets, 5 = Custom range */}
                 <View style={FS.sortRow}>
                   <Text style={[FS.sortRowLabel, { color: theme.text }]}>Date</Text>
-                  <MenuView
-                    shouldOpenOnLongPress={false}
-                    themeVariant={theme.dark ? 'dark' : 'light'}
-                    actions={[
-                      { id: '0', title: 'Any time', state: datePickerIdx === 0 ? 'on' : 'off' },
-                      ...DATE_PRESETS.map((o, i) => ({
-                        id: String(i + 1),
-                        title: o.label,
-                        state: (datePickerIdx === i + 1 ? 'on' : 'off') as 'on' | 'off',
-                      })),
-                      { id: '5', title: customLabel, state: datePickerIdx === 5 ? 'on' : 'off' },
-                    ]}
-                    onPressAction={({ nativeEvent }) => handleDatePickerChange(Number(nativeEvent.event))}
-                  >
-                    <View style={FS.menuTrigger}>
-                      <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]}>
-                        {dateMenuLabel}
-                      </Text>
-                      <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
-                    </View>
-                  </MenuView>
+                  <Host ignoreSafeArea="all" style={{ width: 200, height: 28 }}>
+                    <Menu
+                      label={
+                        <View style={[FS.menuTrigger, { width: 200, height: 28, justifyContent: 'flex-end' }]}>
+                          <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]} numberOfLines={1}>
+                            {dateMenuLabel}
+                          </Text>
+                          <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
+                        </View>
+                      }
+                    >
+                      <SwiftButton
+                        key="0"
+                        systemImage={datePickerIdx === 0 ? 'checkmark' : undefined}
+                        onPress={() => handleDatePickerChange(0)}
+                        label="Any time"
+                      />
+                      {DATE_PRESETS.map((o, i) => (
+                        <SwiftButton
+                          key={String(i + 1)}
+                          systemImage={datePickerIdx === i + 1 ? 'checkmark' : undefined}
+                          onPress={() => handleDatePickerChange(i + 1)}
+                          label={o.label}
+                        />
+                      ))}
+                      <SwiftButton
+                        key="5"
+                        systemImage={datePickerIdx === 5 ? 'checkmark' : undefined}
+                        onPress={() => handleDatePickerChange(5)}
+                        label={customLabel}
+                      />
+                    </Menu>
+                  </Host>
                 </View>
 
                 <AnimatedCollapse

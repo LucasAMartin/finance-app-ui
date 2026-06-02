@@ -25,7 +25,6 @@ import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { Icon } from '../components/Icon';
@@ -43,8 +42,10 @@ import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selec
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
 import {
   BottomSheet,
+  Button as SwiftButton,
   DatePicker,
   Group,
+  Menu,
   Picker,
   Text as SwiftText,
   Host,
@@ -1180,26 +1181,29 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
                       {isOver ? '-' : ''}${fmtMoney(Math.abs(remaining))}
                     </Text>
                   </View>
-                  <MenuView
-                    shouldOpenOnLongPress={false}
-                    themeVariant={theme.dark ? 'dark' : 'light'}
-                    actions={monthOptions.map(key => ({
-                      id: key,
-                      title: monthLabel(key),
-                      state: key === selectedMonth ? 'on' : 'off',
-                    }))}
-                    onPressAction={({ nativeEvent }) => setSelectedMonth(nativeEvent.event)}
-                    style={styles.monthPickerHost}
-                  >
-                    <View
-                      style={styles.heroMonthBtn}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Change month, currently ${monthLabel(selectedMonth)}`}
+                  <Host ignoreSafeArea="all" style={styles.monthPickerHost}>
+                    <Menu
+                      label={
+                        <View
+                          style={styles.heroMonthBtn}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Change month, currently ${monthLabel(selectedMonth)}`}
+                        >
+                          <Text style={[styles.heroMonthText, { color: pWallpaper.text }, shadow]}>{monthLabel(selectedMonth)}</Text>
+                          <Icon name="chevDown" size={11} color={pWallpaper.text} stroke={2} />
+                        </View>
+                      }
                     >
-                      <Text style={[styles.heroMonthText, { color: pWallpaper.text }, shadow]}>{monthLabel(selectedMonth)}</Text>
-                      <Icon name="chevDown" size={11} color={pWallpaper.text} stroke={2} />
-                    </View>
-                  </MenuView>
+                      {monthOptions.map(key => (
+                        <SwiftButton
+                          key={key}
+                          systemImage={key === selectedMonth ? 'checkmark' : undefined}
+                          onPress={() => setSelectedMonth(key)}
+                          label={monthLabel(key)}
+                        />
+                      ))}
+                    </Menu>
+                  </Host>
                 </View>
 
               </View>
@@ -1742,32 +1746,36 @@ function CategoryEditSheet({
 	              >
 	              {/* Hero — tap circle to open native popup menu */}
 	              <View style={[styles.catHero, compactSheet && styles.catHeroCompact]}>
-                <MenuView
-                  shouldOpenOnLongPress={false}
-                  themeVariant={theme.dark ? 'dark' : 'light'}
-                  actions={CATEGORY_ICON_OPTIONS.map(opt => ({
-                    id: opt,
-                    title: ICON_DISPLAY_NAMES[opt] ?? opt,
-                    state: (opt === icon ? 'on' : 'off') as 'on' | 'off',
-                  }))}
-                  onPressAction={({ nativeEvent }) => {
-                    iconManuallySet.current = true;
-                    onIconChange(nativeEvent.event);
-                  }}
-                >
-                  <View
-                    style={{ width: 52, height: 52 }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Choose category icon"
+                <Host ignoreSafeArea="all" style={{ width: 52, height: 52 }}>
+                  <Menu
+                    label={
+                      <View
+                        style={{ width: 52, height: 52 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Choose category icon"
+                      >
+                        <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
+                          <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
+                        </View>
+                        <View style={styles.iconPickerBadge}>
+                          <Icon name="chevDown" size={7} color="rgba(0,0,0,0.55)" stroke={2.4} />
+                        </View>
+                      </View>
+                    }
                   >
-                    <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
-                      <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
-                    </View>
-                    <View style={styles.iconPickerBadge}>
-                      <Icon name="chevDown" size={7} color="rgba(0,0,0,0.55)" stroke={2.4} />
-                    </View>
-                  </View>
-                </MenuView>
+                    {CATEGORY_ICON_OPTIONS.map(opt => (
+                      <SwiftButton
+                        key={opt}
+                        systemImage={opt === icon ? 'checkmark' : undefined}
+                        onPress={() => {
+                          iconManuallySet.current = true;
+                          onIconChange(opt);
+                        }}
+                        label={ICON_DISPLAY_NAMES[opt] ?? opt}
+                      />
+                    ))}
+                  </Menu>
+                </Host>
                 <Text style={[TYPE.headline, { color: theme.text, textAlign: 'center', marginTop: compactSheet ? 4 : 8 }]} numberOfLines={1}>
                   {label.trim() || (isAddMode ? 'New category' : category?.label ?? 'Category')}
                 </Text>
@@ -2054,7 +2062,8 @@ const styles = StyleSheet.create({
     width: 130,
   },
   heroMonthBtn: {
-    flex: 1,
+    width: 130,
+    height: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',

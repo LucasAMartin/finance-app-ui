@@ -12,6 +12,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
+import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
 import { Swipeable, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
 import { useTheme } from '../ThemeProvider';
 import { BlurView } from 'expo-blur';
@@ -517,24 +518,27 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
               {loading ? (
                 <Skeleton width={88} height={13} radius={4} onMedia={theme.dark} />
               ) : (
-                <MenuView
-                  shouldOpenOnLongPress={false}
-                  themeVariant={theme.dark ? 'dark' : 'light'}
-                  actions={visibleMonthBudgets.map((m, idx) => ({
-                    id: String(idx),
-                    title: `${m.month} ${m.key.split('-')[0]}`,
-                    state: idx === monthIdx ? 'on' : 'off',
-                  }))}
-                  onPressAction={({ nativeEvent }) => setMonthIdx(Number(nativeEvent.event))}
-                  style={styles.monthPickerHost}
-                >
-                  <View style={styles.monthPickerBtn}>
-                    <Text style={[styles.monthPickerText, { color: pWallpaper.text }, shadow]}>
-                      {visibleMonthBudgets[monthIdx]?.month} {visibleMonthBudgets[monthIdx]?.key.split('-')[0]}
-                    </Text>
-                    <Icon name="chevDown" size={11} color={pWallpaper.text} stroke={2} />
-                  </View>
-                </MenuView>
+                <Host ignoreSafeArea="all" style={styles.monthPickerHost}>
+                  <Menu
+                    label={
+                      <View style={styles.monthPickerBtn}>
+                        <Text style={[styles.monthPickerText, { color: pWallpaper.text }, shadow]}>
+                          {visibleMonthBudgets[monthIdx]?.month} {visibleMonthBudgets[monthIdx]?.key.split('-')[0]}
+                        </Text>
+                        <Icon name="chevDown" size={11} color={pWallpaper.text} stroke={2} />
+                      </View>
+                    }
+                  >
+                    {visibleMonthBudgets.map((m, idx) => (
+                      <SwiftButton
+                        key={m.key}
+                        systemImage={idx === monthIdx ? 'checkmark' : undefined}
+                        onPress={() => setMonthIdx(idx)}
+                        label={`${m.month} ${m.key.split('-')[0]}`}
+                      />
+                    ))}
+                  </Menu>
+                </Host>
               )}
             </View>
 
@@ -1030,7 +1034,8 @@ const styles = StyleSheet.create({
     width: 130,
   },
   monthPickerBtn: {
-    flex: 1,
+    width: 130,
+    height: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',

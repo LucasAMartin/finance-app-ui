@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../theme';
 import { Icon } from './Icon';
+import { GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
@@ -16,11 +17,10 @@ import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
-import { Host, Picker, Text as SwiftText, Button, Image as SwiftImage, DatePicker } from '@expo/ui/swift-ui';
+import { Host, Menu, Picker, Text as SwiftText, Button, Image as SwiftImage, DatePicker } from '@expo/ui/swift-ui';
 import {
-  buttonStyle, controlSize, datePickerStyle, environment, pickerStyle, tag, tint,
+  buttonStyle, controlSize, datePickerStyle, environment, frame, pickerStyle, tag, tint,
 } from '@expo/ui/swift-ui/modifiers';
-import { MenuView } from '@react-native-menu/menu';
 
 export interface SavedExpenseInfo {
   id: string;
@@ -44,6 +44,10 @@ const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   savings: { label: 'Savings', icon: 'wallet' },
 };
 const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
+
+// SwiftUI's .infinity can't cross the bridge (serializes to null), so a width
+// larger than any phone lets the segmented control greedily fill its host.
+const PICKER_FILL_WIDTH = 10000;
 const KEY_ROWS: string[][] = [
   ['1', '2', '3'],
   ['4', '5', '6'],
@@ -223,6 +227,13 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   };
 
   const isVoiceMode = mode === 'idle' || mode === 'listening';
+  const micLabel = mode === 'listening' ? 'Stop recording' : 'Start recording';
+  const onMicPress = () => {
+    Haptics.impactAsync(mode === 'listening'
+      ? Haptics.ImpactFeedbackStyle.Medium
+      : Haptics.ImpactFeedbackStyle.Light);
+    if (mode === 'listening') voice.stop(); else voice.start();
+  };
 
   return (
     <KeyboardAvoidingView
@@ -248,9 +259,9 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
           <View style={S.headerSpacer} />
         </View>
 
-        {/* Voice / Manual toggle */}
+        {/* Voice / Manual toggle — spans nearly the full width of the screen */}
         <View style={S.pickerWrapper}>
-          <Host matchContents ignoreSafeArea="all">
+          <Host ignoreSafeArea="all" style={S.pickerHost}>
             <Picker
               selection={mode === 'manual' ? 1 : 0}
               onSelectionChange={(val) => {
@@ -259,6 +270,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
               }}
               modifiers={[
                 pickerStyle('segmented'),
+                frame({ maxWidth: PICKER_FILL_WIDTH, height: 48 }),
                 tint(theme.accent.dot),
                 environment({ key: 'colorScheme', value: darkScheme }),
               ]}
@@ -320,36 +332,48 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
               {/* Mic button anchored near bottom */}
               <View style={S.micBottomZone}>
                 <View style={S.micRingWrapper}>
-                  {ringAnims.map((anim, i) => {
-                    const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
-                    const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
-                    return (
-                      <Animated.View
-                        key={i}
-                        style={[S.ring, { backgroundColor: theme.accent.fill, opacity, transform: [{ scale }] }]}
-                      />
-                    );
-                  })}
-                  <Pressable
-                    onPress={() => {
-                      Haptics.impactAsync(mode === 'listening'
-                        ? Haptics.ImpactFeedbackStyle.Medium
-                        : Haptics.ImpactFeedbackStyle.Light);
-                      if (mode === 'listening') voice.stop(); else voice.start();
-                    }}
-                    pointerEvents="box-only"
-                    hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-                    style={[S.micBtn, {
-                      backgroundColor: theme.dark ? 'rgba(255,255,255,0.1)' : 'rgba(14,12,24,0.07)',
-                      borderWidth: 1,
-                      borderColor: theme.hairline,
-                    }]}
-                  >
-                    {mode === 'listening'
-                      ? <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
-                      : <Icon name="mic" size={30} color={theme.accent.dot} stroke={1.7} />
-                    }
-                  </Pressable>
+                  {mode === 'listening' && (
+                    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                      {ringAnims.map((anim, i) => {
+                        const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
+                        const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
+                        return (
+                          <Animated.View
+                            key={i}
+                            style={[S.ring, { backgroundColor: theme.accent.fill, opacity, transform: [{ scale }] }]}
+                          />
+                        );
+                      })}
+                    </View>
+                  )}
+                  {SUPPORTS_GLASS ? (
+                    <GlassCircleButton
+                      onPress={onMicPress}
+                      systemImage={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
+                      size={88}
+                      iconSize={mode === 'listening' ? 30 : 32}
+                      iconColor={theme.accent.dot}
+                      accessibilityLabel={micLabel}
+                    />
+                  ) : (
+                    <Pressable
+                      onPress={onMicPress}
+                      pointerEvents="box-only"
+                      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={micLabel}
+                      style={[S.micBtn, {
+                        backgroundColor: theme.dark ? 'rgba(255,255,255,0.1)' : 'rgba(14,12,24,0.07)',
+                        borderWidth: 1,
+                        borderColor: theme.hairline,
+                      }]}
+                    >
+                      {mode === 'listening'
+                        ? <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
+                        : <Icon name="mic" size={30} color={theme.accent.dot} stroke={1.7} />
+                      }
+                    </Pressable>
+                  )}
                 </View>
                 
               </View>
@@ -415,23 +439,27 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 </View>
                 <View style={S.fieldRow}>
                   <Text style={[TYPE.body, { color: theme.textSec }]}>Repeat</Text>
-                  <MenuView
-                    shouldOpenOnLongPress={false}
-                    themeVariant={theme.dark ? 'dark' : 'light'}
-                    actions={REPEAT_OPTIONS.map(o => ({
-                      id: o.value,
-                      title: o.label,
-                      state: o.value === manualRepeat ? 'on' : 'off',
-                    }))}
-                    onPressAction={({ nativeEvent }) => setManualRepeat(nativeEvent.event as RepeatValue)}
-                  >
-                    <View style={S.subcatMenuTrigger}>
-                      <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
-                        {repeatLabel(manualRepeat)}
-                      </Text>
-                      <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
-                    </View>
-                  </MenuView>
+                  <Host ignoreSafeArea="all" style={{ width: 180, height: 28 }}>
+                    <Menu
+                      label={
+                        <View style={[S.subcatMenuTrigger, { width: 180, height: 28, justifyContent: 'flex-end' }]}>
+                          <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
+                            {repeatLabel(manualRepeat)}
+                          </Text>
+                          <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                        </View>
+                      }
+                    >
+                      {REPEAT_OPTIONS.map(o => (
+                        <Button
+                          key={o.value}
+                          systemImage={o.value === manualRepeat ? 'checkmark' : undefined}
+                          onPress={() => setManualRepeat(o.value as RepeatValue)}
+                          label={o.label}
+                        />
+                      ))}
+                    </Menu>
+                  </Host>
                 </View>
               </View>
 
@@ -524,26 +552,27 @@ function CategoryPicker({
       <View style={[S.subcategoryRow, { borderTopColor: theme.hairline }]}>
         <Text style={[TYPE.body, { color: theme.textSec }]}>Subcategory</Text>
         {subcats.length > 0 ? (
-          <MenuView
-            shouldOpenOnLongPress={false}
-            themeVariant={theme.dark ? 'dark' : 'light'}
-            actions={subcats.map((cat, idx) => ({
-              id: String(idx),
-              title: cats[cat.id]?.label ?? cat.label,
-              state: idx === selectedSubIdx ? 'on' : 'off',
-            }))}
-            onPressAction={({ nativeEvent }) => {
-              const next = subcats[Number(nativeEvent.event)];
-              if (next) onChange(next.id);
-            }}
-          >
-            <View style={S.subcatMenuTrigger}>
-              <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
-                {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
-              </Text>
-              <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
-            </View>
-          </MenuView>
+          <Host ignoreSafeArea="all" style={{ width: 180, height: 28 }}>
+            <Menu
+              label={
+                <View style={[S.subcatMenuTrigger, { width: 180, height: 28, justifyContent: 'flex-end' }]}>
+                  <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
+                    {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
+                  </Text>
+                  <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                </View>
+              }
+            >
+              {subcats.map((cat, idx) => (
+                <Button
+                  key={String(idx)}
+                  systemImage={idx === selectedSubIdx ? 'checkmark' : undefined}
+                  onPress={() => onChange(cat.id)}
+                  label={cats[cat.id]?.label ?? cat.label}
+                />
+              ))}
+            </Menu>
+          </Host>
         ) : (
           <Text style={[TYPE.bodySm, { color: theme.textTer }]}>No subcategories</Text>
         )}
@@ -636,7 +665,8 @@ const S = StyleSheet.create({
   },
   backBtnHost: { width: 44, height: 44 },
   headerSpacer: { width: 44 },
-  pickerWrapper: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 10 },
+  pickerWrapper: { paddingHorizontal: 12, paddingTop: 12 },
+  pickerHost: { width: '100%', height: 48 },
 
   // Voice layout
   voiceLayout: { flex: 1, alignItems: 'center' },

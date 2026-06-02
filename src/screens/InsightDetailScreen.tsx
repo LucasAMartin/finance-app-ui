@@ -16,7 +16,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { MenuView } from '@react-native-menu/menu';
+import { Host, Menu, Button as SwiftButton, Section } from '@expo/ui/swift-ui';
 
 import { Theme, GROUP_COLORS } from '../theme';
 import { useTheme } from '../ThemeProvider';
@@ -405,35 +405,36 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                     activeFontStyle={{ color: '#111111', fontWeight: '600' }}
                     style={styles.pickerSeg}
                   />
-                  <MenuView
-                    shouldOpenOnLongPress={false}
-                    themeVariant="dark"
-                    actions={[
-                      ...SORT_OPTIONS.map((o, i) => ({
-                        id: `sort-${o.id}`,
-                        title: o.label,
-                        state: (i === sortIdx ? 'on' : 'off') as 'on' | 'off',
-                      })),
-                      ...dateOptions.map((opt, idx) => ({
-                        id: `date-${idx}`,
-                        title: opt,
-                        state: (idx === dateIdx ? 'on' : 'off') as 'on' | 'off',
-                      })),
-                    ]}
-                    onPressAction={({ nativeEvent }) => {
-                      const id = nativeEvent.event;
-                      if (id.startsWith('sort-')) {
-                        setSortBy(id.replace('sort-', '') as SortOrder);
-                      } else if (id.startsWith('date-')) {
-                        const idx = Number(id.replace('date-', ''));
-                        setDateIdxByPeriod(prev => ({ ...prev, [period]: idx }));
+                  <Host ignoreSafeArea="all" style={{ width: 36, height: 36 }}>
+                    <Menu
+                      label={
+                        <View style={styles.moreBtn}>
+                          <Icon name="ellipsis" size={16} color="rgba(242,244,245,0.85)" />
+                        </View>
                       }
-                    }}
-                  >
-                    <View style={styles.moreBtn}>
-                      <Icon name="ellipsis" size={16} color="rgba(242,244,245,0.85)" />
-                    </View>
-                  </MenuView>
+                    >
+                      <Section>
+                        {SORT_OPTIONS.map((o, i) => (
+                          <SwiftButton
+                            key={`sort-${o.id}`}
+                            systemImage={i === sortIdx ? 'checkmark' : undefined}
+                            onPress={() => setSortBy(o.id as SortOrder)}
+                            label={o.label}
+                          />
+                        ))}
+                      </Section>
+                      <Section>
+                        {dateOptions.map((opt, idx) => (
+                          <SwiftButton
+                            key={`date-${idx}`}
+                            systemImage={idx === dateIdx ? 'checkmark' : undefined}
+                            onPress={() => setDateIdxByPeriod(prev => ({ ...prev, [period]: idx }))}
+                            label={opt}
+                          />
+                        ))}
+                      </Section>
+                    </Menu>
+                  </Host>
                 </View>
 
                 {/* Search bar */}

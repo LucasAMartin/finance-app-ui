@@ -13,9 +13,8 @@ import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
-import { BottomSheet, Button, GlassEffectContainer, Group, Host, Image as SwiftImage, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
+import { BottomSheet, Button, GlassEffectContainer, Group, Host, Image as SwiftImage, Menu, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
 import { background, frame, glassEffect, ignoreSafeArea, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
-import { MenuView } from '@react-native-menu/menu';
 
 type Mode = 'idle' | 'listening' | 'manual';
 
@@ -614,26 +613,27 @@ function ManualCategoryPicker({
       <View style={[S.subcategoryRow, { borderTopColor: theme.hairline }]}>
         <Text style={[TYPE.body, { color: theme.textSec }]}>Subcategory</Text>
         {subcats.length > 0 ? (
-          <MenuView
-            shouldOpenOnLongPress={false}
-            themeVariant={theme.dark ? 'dark' : 'light'}
-            actions={subcats.map((cat, idx) => ({
-              id: String(idx),
-              title: cats[cat.id]?.label ?? cat.label,
-              state: idx === selectedSubIdx ? 'on' : 'off',
-            }))}
-            onPressAction={({ nativeEvent }) => {
-              const next = subcats[Number(nativeEvent.event)];
-              if (next) onChange(next.id);
-            }}
-          >
-            <View style={S.subcatMenuTrigger}>
-              <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
-                {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
-              </Text>
-              <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
-            </View>
-          </MenuView>
+          <Host ignoreSafeArea="all" style={{ width: 180, height: 28 }}>
+            <Menu
+              label={
+                <View style={[S.subcatMenuTrigger, { width: 180, height: 28, justifyContent: 'flex-end' }]}>
+                  <Text style={[S.subcatMenuText, { color: theme.text }]} numberOfLines={1}>
+                    {cats[subcats[selectedSubIdx]?.id ?? '']?.label ?? subcats[selectedSubIdx]?.label}
+                  </Text>
+                  <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                </View>
+              }
+            >
+              {subcats.map((cat, idx) => (
+                <Button
+                  key={String(idx)}
+                  systemImage={idx === selectedSubIdx ? 'checkmark' : undefined}
+                  onPress={() => onChange(cat.id)}
+                  label={cats[cat.id]?.label ?? cat.label}
+                />
+              ))}
+            </Menu>
+          </Host>
         ) : (
           <Text style={[TYPE.bodySm, { color: theme.textTer }]}>No subcategories</Text>
         )}

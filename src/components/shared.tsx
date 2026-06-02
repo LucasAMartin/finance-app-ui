@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Host, Button as SwiftButton, Text as SwiftText, GlassEffectContainer } from '@expo/ui/swift-ui';
+import { frame, glassEffect, foregroundStyle, font, disabled as disabledModifier } from '@expo/ui/swift-ui/modifiers';
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
+import { SUPPORTS_GLASS } from './GlassButton';
 
 // ── Money display ──────────────────────────────────────────────
 interface MoneyProps {
@@ -152,11 +155,53 @@ export function SheetPrimaryButton({
   disabled = false,
   style,
 }: SheetPrimaryButtonProps) {
+  const [glassW, setGlassW] = useState(0);
+
   const handlePress = () => {
     if (disabled) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     onPress();
   };
+
+  // iOS 26+: native Liquid Glass button matching the RN fallback's shape (16pt
+  // rounded rect) and size (full-width × 52). `glassProminent` can't do either —
+  // it's a content-sized capsule — so we use the glassEffect modifier with an
+  // explicit rounded-rect shape, neutral `theme.text` tint, and a measured width
+  // (the Host needs an explicit width; matchContents over-measures). The label is
+  // forced to `theme.bg` for contrast. Call-site margins pass through to the
+  // measuring wrapper; its paddingVertical/borderRadius (which shaped the RN
+  // fallback) are neutralized. Falls back to the RN button below iOS 26.
+  if (SUPPORTS_GLASS) {
+    return (
+      <View
+        style={[style, styles.sheetGlassHost, disabled && styles.glassDisabled]}
+        onLayout={e => setGlassW(e.nativeEvent.layout.width)}
+      >
+        {glassW > 0 && (
+          <Host ignoreSafeArea="all" style={{ width: glassW, height: 52 }}>
+            <GlassEffectContainer>
+              <SwiftButton
+                onPress={handlePress}
+                modifiers={[
+                  frame({ width: glassW, height: 52 }),
+                  glassEffect({
+                    glass: { variant: 'regular', interactive: true, tint: theme.text },
+                    shape: 'roundedRectangle',
+                    cornerRadius: 16,
+                  }),
+                  disabledModifier(disabled),
+                ]}
+              >
+                <SwiftText modifiers={[foregroundStyle(theme.bg), font({ size: 17, weight: 'semibold' })]}>
+                  {label}
+                </SwiftText>
+              </SwiftButton>
+            </GlassEffectContainer>
+          </Host>
+        )}
+      </View>
+    );
+  }
 
   return (
     <Pressable
@@ -209,5 +254,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
+  },
+  // Glass-button branch: full-width, fixed height; cancel any paddingVertical/
+  // paddingHorizontal a call-site style may carry (those shaped the RN fallback).
+  sheetGlassHost: {
+    alignSelf: 'stretch',
+    height: 52,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+  },
+  // Dim the whole hosted glass button when disabled — RN-layer alpha composites
+  // the native content (glass included), which the SwiftUI .opacity modifier
+  // can't reliably do to the Liquid Glass material.
+  glassDisabled: {
+    opacity: 0.4,
   },
 });

@@ -1,4 +1,4 @@
-import type { Transaction, Category, Budget, RecurringRule, SpendSeriesPoint } from '../repositories/types';
+import type { Transaction, Category, Budget, RecurringRule, SpendSeriesPoint, SpendBucket } from '../repositories/types';
 import type { Period } from './finance';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -254,6 +254,116 @@ export function spendSeriesToBuckets(
     if (idx >= 0 && idx < days) arr[idx] += pt.amount;
   });
   return arr;
+}
+
+// ─── Spending-trend tile bucketing (timeframe-aware) ──────────────────────────
+
+/**
+ * The Insights "Spending trends" tile uses its own granularity — independent of
+ * the screen's Week/Month/Year period — so each timeframe lands at a handful of
+ * fat, legible bars in a half-width tile:
+ *   1W → 7 daily bars · 1M → 4 weekly bars · 6M → 6 monthly bars · 1Y → 4 quarters
+ * 6M and 1Y both map to the "Year" period elsewhere, so they're distinguished
+ * here rather than reusing the shared period ranges.
+ */
+export type TrendTimeframe = '1W' | '1M' | '6M' | '1Y';
+
+export interface TrendSlot {
+  label: string;
+  from: Date;
+  to: Date;
+}
+
+export interface TrendConfig {
+  /** Overall span to query (one getSpendSeries call covers every slot). */
+  from: Date;
+  to: Date;
+  /** Granularity to request from the repo before folding into slots. */
+  bucket: SpendBucket;
+  slots: TrendSlot[];
+}
+
+const WEEKDAY_INITIALS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday-anchored
+
+export function trendTimeframeConfig(
+  timeframe: TrendTimeframe,
+  now = new Date(),
+): TrendConfig {
+  if (timeframe === '1W') {
+    const weekStart = startOfWeekMon(now);
+    const slots = Array.from({ length: 7 }, (_, i) => {
+      const from = addDays(weekStart, i);
+      return { label: WEEKDAY_INITIALS[i], from, to: endOfDay(from) };
+    });
+    return { from: weekStart, to: endOfDay(addDays(weekStart, 6)), bucket: 'day', slots };
+  }
+
+  if (timeframe === '1M') {
+    // Current calendar month split into 4 contiguous ~7–8 day slots.
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const slots = Array.from({ length: 4 }, (_, i) => {
+      const startDay = Math.round((daysInMonth * i) / 4);
+      const endDay = Math.round((daysInMonth * (i + 1)) / 4) - 1;
+      return {
+        label: `W${i + 1}`,
+        from: addDays(monthStart, startDay),
+        to: endOfDay(addDays(monthStart, endDay)),
+      };
+    });
+    return {
+      from: monthStart,
+      to: endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+      bucket: 'day',
+      slots,
+    };
+  }
+
+  if (timeframe === '6M') {
+    // Trailing 6 calendar months, oldest → current.
+    const slots = Array.from({ length: 6 }, (_, i) => {
+      const m = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      return {
+        label: MONTHS_ABBR[m.getMonth()][0],
+        from: new Date(m.getFullYear(), m.getMonth(), 1),
+        to: endOfDay(new Date(m.getFullYear(), m.getMonth() + 1, 0)),
+      };
+    });
+    return { from: slots[0].from, to: slots[5].to, bucket: 'month', slots };
+  }
+
+  // 1Y → current calendar year, split into four quarters.
+  const year = now.getFullYear();
+  const slots = Array.from({ length: 4 }, (_, i) => ({
+    label: `Q${i + 1}`,
+    from: new Date(year, i * 3, 1),
+    to: endOfDay(new Date(year, i * 3 + 3, 0)),
+  }));
+  return {
+    from: new Date(year, 0, 1),
+    to: endOfDay(new Date(year, 11, 31)),
+    bucket: 'month',
+    slots,
+  };
+}
+
+/** Fold the repo's ordered spend points into per-slot totals. */
+export function foldTrendSeries(
+  points: SpendSeriesPoint[],
+  slots: TrendSlot[],
+): number[] {
+  const vals = new Array(slots.length).fill(0);
+  points.forEach(pt => {
+    const [y, m, d] = pt.key.split('-').map(Number); // 'YYYY-MM' or 'YYYY-MM-DD'
+    const date = new Date(y, m - 1, d ?? 1);
+    for (let i = 0; i < slots.length; i++) {
+      if (date >= slots[i].from && date <= slots[i].to) {
+        vals[i] += pt.amount;
+        break;
+      }
+    }
+  });
+  return vals;
 }
 
 // ─── Transaction filtering ────────────────────────────────────────────────────
