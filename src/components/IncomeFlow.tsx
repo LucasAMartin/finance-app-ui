@@ -346,7 +346,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               <View style={S.fieldRow}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Ends</Text>
                 {endDate ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Host matchContents ignoreSafeArea="all">
                       <DatePicker
                         selection={endDate} onDateChange={setEndDate}
@@ -366,7 +366,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               </View>
             </View>
             {!dateRangeValid && (
-              <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 6 }]}>
+              <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 8 }]}>
                 End date must be after the start date
               </Text>
             )}
@@ -473,12 +473,12 @@ const S = StyleSheet.create({
   },
   headerSpacer: { width: EXIT_BTN_SIZE },
   scroll: { paddingHorizontal: 20, paddingTop: 4, gap: 0 },
-  hero: { alignItems: 'center', paddingTop: 6, paddingBottom: 20 },
+  hero: { alignItems: 'center', paddingTop: 8, paddingBottom: 20 },
   heroCircle: {
     width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
   },
   feedback: {
-    minHeight: 34, borderRadius: 17, marginTop: 10, paddingHorizontal: 12,
+    minHeight: 34, borderRadius: 17, marginTop: 12, paddingHorizontal: 12,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
   },
   fieldCard: { borderRadius: 14, overflow: 'hidden' },

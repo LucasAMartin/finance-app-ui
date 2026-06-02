@@ -1,293 +1,304 @@
 ---
 name: Finance App
 description: Personal spending tracker built on the 50/30/20 budget framework.
+sourceOfTruth:
+  color: "src/theme.ts (+ src/wallpaperPalette.ts for on-wallpaper surfaces)"
+  typography: "src/typography.ts → TYPE"
+  spacing: "src/spacing.ts → SPACE / LAYOUT"
+  radius: "src/radius.ts → RADIUS"
 colors:
-  violet-dot: "#7B5CE0"
-  violet-fill: "#EBE7FF"
-  violet-ink: "#3D28A0"
-  butter-dot: "#C5A946"
-  sky-dot: "#7393B3"
-  rose-dot: "#B47A6E"
-  page-wash: "#F5F4F8"
-  canvas-deep: "#0F0B1C"
-  pure-surface: "#FFFFFF"
-  surface-midnight: "#1A1530"
-  near-ink: "#0E0C18"
-  hero-bg: "#1E1050"
-  hero-text: "#EDE9FF"
-  hero-sec: "rgba(237,233,255,0.55)"
-  hero-avail: "#5CC4BA"
+  # Accent — single monochrome ink (high-contrast, flips per mode).
+  accent-fill: "#0E1116 light / #E7EAED dark"
+  accent-ink: "#F2F4F5 light / #080A0D dark"
+  accent-dot: "#0E1116 light / #E7EAED dark"
+  # Neutral field (cool gray — no longer violet-tinted)
+  bg: "#F4F5F6 light / #080A0D dark"
+  surface: "#FAFBFC light / #101215 dark"
+  surface2: "#EEF0F2 light / #1C1F24 dark"
+  text: "#0B0D10 light / #F2F4F5 dark"
+  # State
   over-ember: "#D4522A"
-  over-bg: "#F4E9E5"
+  over-bg: "#F4E9E5 light / #2A1612 dark"
   caution-amber: "#C5A946"
-  needs-blue: "#5B7FBB"
-  wants-clay: "#B86C60"
-  savings-teal: "#4AA8A0"
+  hero-avail: "#5CC4BA"
+  # 50/30/20 groups
+  needs-blue: "#4E8FDB"
+  wants-clay: "#D76F5F"
+  savings-teal: "#48B8A4"
+  # On-wallpaper (frosted-glass screens)
+  media-text: "#F2F4F5"
+  media-text-sec: "rgba(242,244,245,0.72)"
+  media-hairline: "rgba(235,239,242,0.18)"
 typography:
   fontFamily: "SF Pro (System on iOS), sans-serif (Android)"
-  displayXl:
-    fontSize: "48px"
-    fontWeight: 700
-    letterSpacing: "-2.0px"
-    lineHeight: "52px"
-  display:
-    fontSize: "32px"
-    fontWeight: 700
-    letterSpacing: "-1.2px"
-    lineHeight: "36px"
-  headline:
-    fontSize: "20px"
-    fontWeight: 700
-    letterSpacing: "-0.5px"
-    lineHeight: "26px"
-  pageTitle:
-    fontSize: "17px"
-    fontWeight: 700
-    letterSpacing: "-0.4px"
-    lineHeight: "22px"
-  sectionTitle:
-    fontSize: "18px"
-    fontWeight: 700
-    letterSpacing: "-0.4px"
-    lineHeight: "22px"
-  subsectionTitle:
-    fontSize: "15px"
-    fontWeight: 700
-    letterSpacing: "-0.3px"
-    lineHeight: "20px"
-  body:
-    fontSize: "14px"
-    fontWeight: 600
-    letterSpacing: "-0.2px"
-    lineHeight: "19px"
-  bodySm:
-    fontSize: "13px"
-    fontWeight: 500
-    letterSpacing: "-0.2px"
-    lineHeight: "18px"
-  caption:
-    fontSize: "12px"
-    fontWeight: 500
-    letterSpacing: "-0.1px"
-    lineHeight: "16px"
-  labelLg:
-    fontSize: "11px"
-    fontWeight: 600
-    letterSpacing: "0.5px"
-    lineHeight: "14px"
-    textTransform: "uppercase"
-  label:
-    fontSize: "10px"
-    fontWeight: 600
-    letterSpacing: "0.6px"
-    lineHeight: "13px"
-    textTransform: "uppercase"
-  labelSm:
-    fontSize: "9px"
-    fontWeight: 700
-    letterSpacing: "0.9px"
-    lineHeight: "12px"
-    textTransform: "uppercase"
-rounded:
-  pill: "100px"
-  card: "24px"
-  modal: "18px"
-  field: "14px"
-  chip: "10px"
-  bar: "4px"
-spacing:
-  xs: "4px"
-  sm: "8px"
-  md: "16px"
-  lg: "24px"
-  xl: "28px"
+  # Weights tuned to a native SwiftUI feel: most text sits at Regular/Medium,
+  # Semibold (600) reserved for true emphasis. Color is never baked into a token.
+  displayXl:       { fontSize: 48, fontWeight: 600, letterSpacing: -2.0, lineHeight: 52 }
+  display:         { fontSize: 32, fontWeight: 600, letterSpacing: -1.2, lineHeight: 36 }
+  headline:        { fontSize: 20, fontWeight: 600, letterSpacing: -0.5, lineHeight: 26 }
+  pageTitle:       { fontSize: 17, fontWeight: 600, letterSpacing: -0.4, lineHeight: 22 }
+  sectionTitle:    { fontSize: 18, fontWeight: 600, letterSpacing: -0.4, lineHeight: 22 }
+  subsectionTitle: { fontSize: 15, fontWeight: 600, letterSpacing: -0.3, lineHeight: 20 }
+  body:            { fontSize: 14, fontWeight: 500, letterSpacing: -0.2, lineHeight: 19 }
+  bodyRegular:     { fontSize: 14, fontWeight: 400, letterSpacing: -0.2, lineHeight: 19 }
+  bodySm:          { fontSize: 13, fontWeight: 400, letterSpacing: -0.2, lineHeight: 18 }
+  bodySmEm:        { fontSize: 13, fontWeight: 500, letterSpacing: -0.2, lineHeight: 18 }
+  caption:         { fontSize: 12, fontWeight: 400, letterSpacing: -0.1, lineHeight: 16 }
+  captionEm:       { fontSize: 12, fontWeight: 500, letterSpacing: -0.1, lineHeight: 16 }
+  labelLg:         { fontSize: 11, fontWeight: 500, letterSpacing: 0.5, lineHeight: 14, textTransform: uppercase }
+  label:           { fontSize: 10, fontWeight: 500, letterSpacing: 0.6, lineHeight: 13, textTransform: uppercase }
+  labelSm:         { fontSize: 9,  fontWeight: 600, letterSpacing: 0.9, lineHeight: 12, textTransform: uppercase }
+  labelPlain:      { fontSize: 10, fontWeight: 500, letterSpacing: 0, lineHeight: 13 }
+  labelSmPlain:    { fontSize: 9,  fontWeight: 600, letterSpacing: 0, lineHeight: 12 }
+  txDateLabel:     { fontSize: 13, fontWeight: 500, letterSpacing: 0, lineHeight: 18 }
+  # On-media — text on the wallpaper / BlurView surfaces, scaled to match the
+  # adjacent native SwiftUI controls.
+  onMediaStatus:    { fontSize: 15, fontWeight: 600, letterSpacing: -0.2, lineHeight: 20 }
+  onMediaStatusSub: { fontSize: 15, fontWeight: 400, letterSpacing: -0.2, lineHeight: 20 }
+  onMediaAmount:    { fontSize: 44, fontWeight: 700, letterSpacing: -1.4, lineHeight: 48 }
+  onMediaQa:        { fontSize: 12, fontWeight: 600, letterSpacing: -0.1, lineHeight: 16 }
+rounded:   # src/radius.ts → RADIUS
+  bar: 4
+  chip: 10
+  field: 14
+  button: 16
+  modal: 18
+  card: 24
+  full: 100   # pills / capsules; circles use width/2
+spacing:   # src/spacing.ts → SPACE (strict 4pt grid; px2=2 for optical nudges only)
+  xs: 4
+  sm: 8
+  md: 12
+  lg: 16
+  xl: 20
+  xxl: 24
+  xxxl: 32
+layout:    # src/spacing.ts → LAYOUT (semantic roles)
+  screenGutter: 16
+  cardPadX: 20
+  cardPadTop: 20
+  cardPadBottom: 12
+  sectionGap: 24
+  rowPadY: 12
 components:
-  tab-mic-btn:
-    backgroundColor: "{colors.violet-fill}"
-    textColor: "{colors.violet-ink}"
-    rounded: "{rounded.pill}"
-    size: "52px"
-  icon-circle:
-    backgroundColor: "{colors.needs-blue}"
-    textColor: "#ffffff"
-    rounded: "{rounded.pill}"
+  screen-exit-btn:
+    material: "Liquid Glass circle (iOS 26+), JS fallback below"
+    placement: "top-left (float: top 16 / left 20)"
     size: "36px"
+    icon: "chevron.left (back / pushed screens) | xmark (close / sheets)"
+  section-card:
+    material: "BlurView intensity 70 dark / 100 light, systemMaterial tint"
+    border: "1px hairline"
+    rounded: "{rounded.card}"
   save-btn:
-    backgroundColor: "{colors.near-ink}"
-    textColor: "{colors.page-wash}"
-    rounded: "{rounded.field}"
+    backgroundColor: "{colors.accent-fill}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.button}"
     padding: "16px 20px"
   segmented-active:
-    backgroundColor: "{colors.near-ink}"
-    textColor: "{colors.page-wash}"
-    rounded: "{rounded.pill}"
+    backgroundColor: "{colors.accent-fill}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.full}"
+  icon-circle:
+    backgroundColor: "group color (needs-blue | wants-clay | savings-teal)"
+    textColor: "#ffffff"
+    rounded: "full (width/2)"
+    size: "36px"
 ---
 
 # Design System: Finance App
 
+> **Token sources of truth.** Color lives in `src/theme.ts` (and
+> `src/wallpaperPalette.ts` for on-wallpaper surfaces); typography in
+> `src/typography.ts` (`TYPE`); spacing in `src/spacing.ts` (`SPACE` / `LAYOUT`);
+> radius in `src/radius.ts` (`RADIUS`). This document describes intent; the code
+> is authoritative. When they disagree, fix the doc.
+
 ## 1. Overview
 
-**Creative North Star: "Still Violet"**
+**Creative North Star: "Quiet Glass"**
 
-A finance tool stripped to its essential transaction: you, your spending, and clear numbers. The interface makes no attempt to impress. Typography is the primary aesthetic vehicle; color enters only to encode state (over or under budget, category groups, or a chosen accent). The surface recedes so the data can speak.
+A finance tool stripped to its essential transaction: you, your spending, and clear numbers. The interface makes no attempt to impress. Typography is the primary aesthetic vehicle; color enters only to encode state (over or under budget, the three budget groups, or a selected accent). The surface recedes so the data can speak.
 
-The palette is unified around a single hue family: deep violet. The hero zone is rich indigo-plum (#1E1050). The default accent is Still Violet — a vivid but measured purple that appears on buttons, action links, and the mic tab button, and nowhere else. The 50/30/20 budget framework uses its own three-color vocabulary (blue for needs, clay for wants, teal for savings) that never overlaps with the accent. The shopping category pastel echoes the violet brand hue, tying data visualization back to the brand identity.
+The identity rests on two materials. **Type is monochrome ink** — a single near-black/near-white voice that carries the entire hierarchy, with no brand hue competing for attention. **Surfaces are frosted glass over a soft photographic wallpaper** — content rides in `BlurView` cards above a full-bleed image, the system's "Liquid Glass" material made structural. Color is rationed: the 50/30/20 framework owns a fixed three-color vocabulary (blue for needs, clay for wants, teal for savings), a small set of state colors signals over-budget and caution, and everything else is neutral.
 
-This system explicitly rejects gamification (badges, points, streaks), dark mode as an aesthetic default (dark mode here serves low-ambient-light reading, not style), and every finance-domain reflex: no navy and gold, no golden amber, no gradient metrics, no glowing dashboards. The "wants = amber/gold" reflex is specifically rejected — wants group uses warm clay instead. If something shouts or celebrates, it is wrong.
+This system explicitly rejects gamification (badges, points, streaks), dark mode as an aesthetic default (dark mode here serves low-ambient-light reading, not style), and every finance-domain reflex: no navy and gold, no golden amber, no gradient metrics, no glowing dashboards. The "wants = amber/gold" reflex is specifically rejected — the wants group uses warm clay instead. If something shouts or celebrates, it is wrong.
 
 **Key Characteristics:**
-- Single typeface (SF Pro on iOS, system sans elsewhere) carrying all roles: 9px uppercase metadata through 48px display amount
-- Hairline borders define surfaces at rest; shadows appear only on chrome that physically layers above content
-- Seven switchable accent keys (sage, butter, sky, rose, plum, ink, wine) — plum is the brand default
-- 50/30/20 groups encoded in a fixed three-color palette: blue (needs), clay (wants), teal (savings)
-- Dark mode shifts the canvas to deep violet-black (#0F0B1C); the hero deepens to #1E1050; all surfaces carry a slight violet cast
-- Surfaces, separators, and text in dark mode are violet-tinted rather than neutral gray, creating a unified depth
+- Single typeface (SF Pro on iOS, system sans elsewhere) carrying all roles: 9px uppercase metadata through 48px display amount. Weights tuned low — most text is Regular/Medium, Semibold reserved for real emphasis.
+- Frosted-glass cards over a photographic wallpaper are the signature resting surface; flat solid surfaces are the secondary mode (sheets, forms).
+- A **single monochrome accent**: high-contrast ink (near-black on light, near-white on dark), used for primary actions, selected states, and action links. There is one accent (`ink`) by design — the legacy multi-hue keys were removed.
+- Neutral, cool-gray field — surfaces and text are neutral, **not** tinted toward any hue.
+- 50/30/20 groups encoded in a fixed three-color palette: blue (needs), clay (wants), teal (savings).
+- Dismiss controls are standardized: a top-left Liquid Glass circle, chevron on pushed screens / X on sheets (`ScreenExitButton`).
 
-## 2. Colors: The Still Violet Palette
+## 2. Color
 
-A two-tier palette: a fixed neutral-violet field that carries most of the screen, and a single vivid accent that enters in bounded roles.
+Color is organized in three layers: a **neutral field** that carries most of every screen, a **monochrome accent** that marks action and selection, and a small set of **semantic colors** for budget state and the three spending groups. On wallpaper screens a separate **on-media palette** replaces the flat tokens.
 
-**The Violet Economy Rule.** The accent appears in three roles only: the mic/add button background (violet-fill), interactive action labels and dots (violet-dot), and text on accent surfaces (violet-ink). It never appears as a row border, a chart color, or a decorative fill. Switching accents replaces all three roles simultaneously.
+All flat-surface color comes from the `Theme` object (`makeTheme` in `src/theme.ts`) via the `theme` prop. No component hardcodes a hex for a themed role.
 
-### Primary
-- **Still Violet** (#7B5CE0 light / #A08AEA dark): The brand accent dot. Used on "See all" action links, the mic button icon, and active interactive states. A vivid medium-chroma violet — present without dominating.
-- **Violet Fill** (#EBE7FF light / #1C1444 dark): The accent background tint. Used as the mic/add button background on the tab bar and as accent chip backgrounds.
-- **Violet Ink** (#3D28A0 light / #B09AE8 dark): Accent text. Used for labels and text sitting on violet-fill surfaces.
+### Accent (monochrome ink)
+The accent is a high-contrast ink, resolved per mode by `makeTheme`:
+- **accent.fill** — `#0E1116` light / `#E7EAED` dark. Primary button fills, segmented-control active indicator, selected chips.
+- **accent.ink** — `#F2F4F5` light / `#080A0D` dark. Text/icon sitting on an accent.fill surface.
+- **accent.dot** — `#0E1116` light / `#E7EAED` dark. Action links ("See all"), active dots, interactive indicators.
 
-### Secondary
-- **Over Ember** (#D4522A): Over-budget alert. Applied to the amount, the label, and the budget bar fill when spending exceeds the limit. Never used for decoration.
-- **Caution Amber** (#C5A946): Bills due within 7–14 days. A semantic urgency signal; not a brand accent.
-- **Hero Available** (#5CC4BA): The "Available" status label and budget bar fill on the hero when spending is healthy. Teal reads as growth and calm against the deep violet hero background, intentional contrast.
+> The accent is a single key (`ink`). Earlier multi-hue keys (sage/butter/sky/rose/plum/wine) were legacy and had silently collapsed to identical values; they've been removed. `makeTheme` falls back to ink for any stale `accent_key` still in a user's settings.
 
-### Tertiary
-- **Needs Blue** (#5B7FBB light / #7A9ED8 dark): Icon circles and progress bars for the Needs spending group (groceries, transport, bills). Cool blue signals essential, structural.
-- **Wants Clay** (#B86C60 light / #D08878 dark): Icon circles and progress bars for the Wants group (dining, shopping, entertainment). Warm terracotta signals discretionary, tactile. Explicitly not gold or amber — breaks the finance reflex.
-- **Savings Teal** (#4AA8A0 light / #5CC4BA dark): Icon circles and progress bars for the Savings group. Teal signals forward-looking, growing.
+### Neutral field
+- **bg** — `#F4F5F6` / `#080A0D`. Page background (the "floor" beneath the wallpaper).
+- **surface** — `#FAFBFC` / `#101215`. Flat card and sheet surfaces.
+- **surface2** — `#EEF0F2` / `#1C1F24`. Recessed fills, secondary surfaces.
+- **text / textSec / textTer** — `#0B0D10` / `#F2F4F5`, then 62%/36% (light) and 66%/42% (dark) opacity. Primary, secondary, tertiary text.
+- **sep / hairline / chipBg** — low-opacity neutral ink/white for separators, 1px borders, and chip backgrounds.
 
-### Neutral
-- **Page Wash** (#F5F4F8): Page background in light mode. Barely violet-tinted — a whisper of the brand hue in the surface itself.
-- **Pure Surface** (#FFFFFF): Card and sheet surfaces in light mode.
-- **Canvas Deep** (#0F0B1C): Page background in dark mode. Deep violet-black, not navy, not gray.
-- **Surface Midnight** (#1A1530): Card surfaces in dark mode. Violet-tinted dark.
-- **Near Ink** (#0E0C18): Primary text in light mode. Slightly violet-tinted.
+### Semantic — state
+- **Over Ember** (`#D4522A`, dark text `#F09272`): over-budget. Applied to the amount, the label, and the budget-bar fill when spending exceeds the limit. Never decorative. (`OVER_DOT` / `overBg` / `overText`.)
+- **Caution Amber** (`#C5A946`, dark `#CCA838`): bills due soon / off-target spending. A semantic urgency signal, not a brand accent. (`CAUTION_AMBER` / `cautionBg` / `cautionText`.)
+- **Hero Available** (`#5CC4BA`): the "Available" status and healthy budget-bar fill on the home hero. Teal reads as calm growth. (`HERO_AVAIL`.)
 
-### Hero
-- **Hero Bg** (#1E1050): The home screen budget hero surface. Deep indigo-violet, richer and more saturated than the page background, invariant across theme modes. All text tokens calibrated against this surface.
-- **Hero Text** (#EDE9FF): Primary text and display amount on the hero — violet-tinted near-white.
-- **Hero Sec** (rgba(237,233,255,0.55)): Secondary labels and metadata on the hero (status sub-label, income strip labels).
+### Semantic — 50/30/20 groups (`GROUP_COLORS`)
+- **Needs Blue** (`#4E8FDB`): groceries, transport, bills, housing. Cool blue — essential, structural.
+- **Wants Clay** (`#D76F5F`): dining, shopping, entertainment. Warm terracotta — discretionary, tactile. Explicitly not gold/amber.
+- **Savings Teal** (`#48B8A4`): emergency-fund, retirement. Forward-looking, growing.
 
-### Category Pastels
-Muted fills used in chart segments and icon backgrounds. Note that **shopping** carries a violet pastel — the only category that intentionally echoes the brand hue, reinforcing identity inside data.
-- Groceries: #8EC49A / #76B888
-- Dining: #D4A48A / #C89070
-- Transport: #8AAACE / #7AAAD4
-- Shopping: #B09AE0 / #A08CD4 (violet — brand echo)
-- Bills: #88BEB8 / #78B0AA
-- Entertainment: #C498B4 / #BC88A8
+Group for a category resolves via `CAT_TO_GROUP`; color via `catGroupColor(cat, dark)` / `categoryGroupColor(...)`. Add new categories to `CAT_TO_GROUP` so their color follows automatically.
+
+### Category pastels (`CAT_PASTEL`, light / dark)
+Muted fills for chart segments and icon backgrounds, via `catPastel(cat, dark)`:
+- Groceries `#79B7A8` / `#48B8A4`
+- Dining `#D68A7F` / `#D76F5F`
+- Transport `#79A8D8` / `#4E8FDB`
+- Shopping `#C3877C` / `#D76F5F`
+- Bills `#6F9CCF` / `#4E8FDB`
+- Entertainment `#C58A82` / `#D76F5F`
+
+### On-media palette (wallpaper screens, `src/wallpaperPalette.ts`)
+Text and lines on the wallpaper/scrim use `MEDIA` and the `makeP(dark)` palette, **not** the flat theme tokens:
+- `makeP(true)` (on-wallpaper): always white — `text #F2F4F5`, `textSec` 72%, `textTer` 52%. For the header, hero, and labels sitting directly on the image/scrim.
+- `makeP(theme.dark)` (card interior): flips to near-ink in light mode so dark text reads on the light frosted glass.
+- `makeScrim(dark)` returns the four-stop `LinearGradient` that holds card contrast over the photo; `deriveFloor(...)` bends a wallpaper's representative color into the solid scroll "floor."
 
 ### Named Rules
-**The No-Chart-Accent Rule.** Charts, donut segments, and progress bars always use the group palette (blue, clay, teal) or category pastels. The accent violet is forbidden in data visualization. The eye should read "needs/wants/savings" from a chart, not "the user picked plum." Exception: shopping pastel carries a violet cast as an intentional brand echo, not as accent reuse.
+**The No-Chart-Accent Rule.** Charts, donut segments, and progress bars use the group palette (blue/clay/teal) or category pastels — never the ink accent. The eye should read "needs/wants/savings" from a chart, not "an action color."
+
+**The Rationed Color Rule.** Outside charts, color must encode meaning: accent = action/selection, ember = over budget, amber = caution, teal = available, group colors = the 50/30/20 framework. Everything else is neutral. A color with no meaning is wrong.
 
 ## 3. Typography
 
-**Font:** SF Pro — Apple's system typeface — applied via React Native's `'System'` family on iOS. The OS automatically swaps SF Pro Text (<20pt) and SF Pro Display (≥20pt) for the right optical variant at every size. No font is bundled.
-**Fallback:** `sans-serif` (Roboto) on Android, system-ui on web.
+**Font:** SF Pro — Apple's system typeface — via React Native's `'System'` family on iOS. The OS auto-swaps SF Pro Text (<20pt) and SF Pro Display (≥20pt) for the right optical variant at every size. No font is bundled. **Fallback:** `sans-serif` (Roboto) on Android, system-ui on web.
 
-**Character:** A single sans-serif family used throughout with no decorative pairing. Hierarchy comes entirely from scale and weight contrast, not from multiple typefaces. SF Pro is precise and undemonstrative, like printed figures on a statement — exactly what the brand demands.
+**Character:** one sans-serif family throughout, no decorative pairing. Hierarchy comes from scale and weight contrast. Weights are tuned to a native SwiftUI feel — most text sits at Regular (400) / Medium (500), with Semibold (600) reserved for true emphasis; the old all-Semibold setting has been dialed back.
 
-All tokens are defined once in `src/typography.ts` and applied via `import { TYPE } from '../typography'`. Same role, same token, every screen. Color is never bundled into a token — apply with `[TYPE.body, { color: theme.text }]`.
+All tokens live in `src/typography.ts` and apply via `import { TYPE } from '../typography'` as `[TYPE.body, { color: theme.text }]`. **Color is never bundled into a token.**
 
 ### Hierarchy
-- **displayXl** (700, 48px, tracking −2.0px, lh 52): The primary spending figure on the Insights screen. One per surface.
-- **display** (700, 32px, tracking −1.2px, lh 36): The available / over-budget figure on the Home hero. One per surface.
-- **headline** (700, 20px, tracking −0.5px, lh 26): Editable income amount on the Budget screen.
-- **pageTitle** (700, 17px, tracking −0.4px, lh 22): Screen header titles — "History", "Insights", "Budget".
-- **sectionTitle** (700, 18px, tracking −0.4px, lh 22): Primary section heads on Home — "Spending", "Upcoming", "Activity".
-- **subsectionTitle** (700, 15px, tracking −0.3px, lh 20): Secondary section heads — "Recurring bills", "Needs / Wants / Savings", legend values.
-- **body** (600, 14px, tracking −0.2px, lh 19): Row titles, merchant names, field labels, primary list text.
-- **bodySm** (500, 13px, tracking −0.2px, lh 18): Amounts in rows, dense data, calendar action rows, sheet picker cells. `bodySmEm` (600) for emphasis.
-- **caption** (500, 12px, tracking −0.1px, lh 16): Sub-row metadata, time stamps, filter pill text. `captionEm` (600) for emphasis.
-- **labelLg** (600, 11px, tracking +0.5px, uppercase, lh 14): Status labels, strip headers, group headers — INCOME, BUDGET, TODAY, NEEDS.
-- **label** (600, 10px, tracking +0.6px, uppercase, lh 13): Smaller strip labels — INCOME on the hero, eyebrow tags.
-- **labelSm** (700, 9px, tracking +0.9px, uppercase, lh 12): Micro labels — UPCOMING pill, "FROM"/"TO" range markers, sheet group separators.
+- **displayXl** (600, 48): the single full-screen figure on the insight detail screen. One per surface.
+- **display** (600, 32): the available / over-budget figure on the Home hero, and the Spent figure on the Insights bento hero tile. One per surface.
+- **headline** (600, 20): editable income amount on Budget.
+- **pageTitle** (600, 17): screen header titles — "History", "Insights", "Budget".
+- **sectionTitle** (600, 18): primary section heads on Home — "Spending", "Upcoming", "Activity".
+- **subsectionTitle** (600, 15): secondary section heads, legend values.
+- **body / bodyRegular** (500 / 400, 14): row titles, merchant names, primary list text. Use `body` (Medium) for labels that anchor a row, `bodyRegular` for running text.
+- **bodySm / bodySmEm** (400 / 500, 13): amounts in rows, dense data, picker cells.
+- **caption / captionEm** (400 / 500, 12): sub-row metadata, timestamps, filter-pill text.
+- **labelLg / label / labelSm** (500 / 500 / 600; 11 / 10 / 9; uppercase): eyebrows and group headers — INCOME, BUDGET, TODAY, NEEDS.
+- **labelPlain / labelSmPlain**: same size/weight as label/labelSm but **without** uppercase or tracking — for sentence-case badges, pills, calendar headers.
+- **txDateLabel** (500, 13): transaction date-group headers — "Today", "Yesterday", "Mon 12 May".
+- **onMediaStatus / onMediaStatusSub / onMediaAmount / onMediaQa**: text on the wallpaper/glass, sized to sit alongside native SwiftUI controls (status row, hero amount at 44/700, quick-action labels).
 
 ### Named Rules
-**The Silent Scale Rule.** Type size changes signal function. The 48px display belongs to one metric (the Insights total); the 32px display belongs to one metric (the Home available figure). The 17px page title belongs to screen chrome; the 18px section title belongs to section anchors on Home. Emphasis within a tier uses weight (500→700), not size. Two elements sharing the same size should differ in weight, color, or case — never both size and weight at once.
+**The Silent Scale Rule.** Type size signals function. The 48px display belongs to one metric (insight detail); the 32px display to the Home available figure and the Insights bento hero. The 17px page title is screen chrome; the 18px section title anchors Home sections. Two elements sharing a size differ in weight, color, or case — never all at once.
 
-**The Token Rule.** No screen sets `fontSize` inline as part of a typographic role — every typographic style routes through `TYPE`. Off-scale overrides (e.g. 16px on a group total) are permitted only as a deliberate spread on top of a base token, never as fresh inline declarations.
+**The Token Rule.** No screen sets `fontSize` inline as a typographic role — every typographic style routes through `TYPE`. Off-scale overrides are permitted only as a deliberate spread on top of a base token (`[TYPE.bodySm, { fontSize: 16 }]`), never as fresh inline declarations.
 
-## 4. Elevation & Material
+## 4. Spacing & Radius
 
-**Frosted glass over a photographic wallpaper is the signature surface of the app.** The primary content screens (Home, Spending, History, Budget, Insights) render over a full-bleed `ImageBackground` with a `LinearGradient` scrim; content lives in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). This is a deliberate material identity, the chosen direction for the app, not a fallback or an exception. Flat (solid) surfaces still exist, but they are the **secondary** mode, reserved for surfaces that do not sit over the wallpaper: sheets, forms, edit fields.
+Spacing and radius are now tokenized like type and color. Reference the tokens; don't reach for magic numbers.
+
+**Spacing** (`src/spacing.ts`). A strict 4pt grid — `SPACE.xs` (4) through `SPACE.xxxl` (32). The only sub-grid token is `px2` (2), reserved for 1–2px optical nudges — never layout. The old half-steps (6/10/14/18) have been migrated out. For structural decisions use the **semantic `LAYOUT` roles** so the same role resolves identically everywhere:
+- `screenGutter` 16 — outer L/R padding of screen content.
+- `cardPadX / cardPadTop / cardPadBottom` 20 / 20 / 12 — `SectionCard` interior.
+- `sectionGap` 24 — vertical gap between stacked cards.
+- `rowPadY` 12 — list/transaction row vertical padding.
+
+> Screens still use a mix of gutters (16 / 20 / 22). `screenGutter: 16` is the canonical target (matches Insights `CARD_OUTER_PAD`); migrate the others onto it.
+
+**Radius** (`src/radius.ts`). `RADIUS`: `bar` 4, `chip` 10, `field` 14, `button` 16, `modal` 18, `card` 24, `full` 100. Same element type → same token. `getCardStyle` consumes `RADIUS.card`. Fully-circular elements (icon circles, tab buttons) use `width / 2`, not a radius token.
+
+## 5. Elevation & Material
+
+**Frosted glass over a photographic wallpaper is the signature surface of the app.** The primary content screens (Home, Insights, History, Budget) render over a full-bleed `ImageBackground` with a `LinearGradient` scrim; content lives in **frosted cards** — `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) wrapped in a 1px hairline border (`SectionCard`). This is a deliberate material identity, not a fallback. Flat solid surfaces are the **secondary** mode, for surfaces that don't sit over the wallpaper: sheets, forms, edit fields.
 
 The non-negotiable constraint on the glass is **legibility**. The blur is structural (it separates a card from the photo and keeps content readable), never ornamental, and when glass and legibility conflict, legibility wins:
-- **Scrim must hold card contrast.** Deepen the `LinearGradient` scrim (and/or raise the blur tint opacity) until numbers and labels clear WCAG AA (4.5:1) against the busiest region of the wallpaper behind them. Data-dense screens (Insights) need a stronger scrim than sparse ones; tune per screen, do not assume one scrim fits all.
-- **The wallpaper is a backdrop, not a subject.** Behind text-heavy screens, prefer low-contrast, low-detail imagery. A busy, high-contrast photo behind a data table is the failure mode.
-- **Text on glass uses the `MEDIA` / wallpaper palette**, not the flat-surface tokens.
-
-- **Flat surfaces** (secondary): 1px hairline borders and tonal fill differences, no shadow at rest. The default card variant uses `borderWidth: 1` with a hairline-opacity border. Used for sheets, forms, and any surface on a solid page background.
+- **Scrim must hold card contrast.** Deepen the `makeScrim` gradient (and/or raise the blur tint opacity) until numbers and labels clear WCAG AA (4.5:1) against the busiest region of the wallpaper behind them. Tune per screen — data-dense screens need a stronger scrim.
+- **The wallpaper is a backdrop, not a subject.** Behind text-heavy screens, prefer low-contrast, low-detail imagery.
+- **Text on glass uses the `MEDIA` / `makeP` palette,** not the flat-surface tokens.
 
 Elevation (shadow) enters only for chrome that physically layers above content:
 
 ### Shadow Vocabulary
-- **Tab bar ambient** (`shadowOffset: {0, 10}, shadowOpacity: 0.08, shadowRadius: 20` — light mode): The floating navigation pill separates from the content below. iOS wraps this in a BlurView (intensity 80); Android uses rgba(255,255,255,0.95) solid fill.
-- **Dropdown structured** (`shadowOffset: {0, 10}, shadowOpacity: 0.16, shadowRadius: 32`): The month-picker dropdown must be read as higher than the scroll container beneath it.
-- **TxSheet** (native SwiftUI bottom sheet elevation): Platform-managed. Not represented in app shadow tokens.
+- **Tab bar ambient** (`shadowOffset {0,10}, opacity 0.08, radius 20`, light): the floating navigation pill separates from content. iOS wraps it in a BlurView; Android uses a solid rgba fill.
+- **Dropdown / menu structured** (`shadowOffset {0,10}, opacity 0.16, radius 32`): popovers read as higher than the scroll container.
+- **Native sheets**: platform-managed SwiftUI elevation; not represented in app shadow tokens.
+- **`getCardStyle` variants**: `flat` (hairline border, no shadow), `shadow` (soft ambient), `glass` (translucent fill + hairline + soft shadow) — selected at runtime via `cardStyle`.
 
 ### Named Rules
-**The Flat Content Rule.** Data *contents* — transaction rows, category group lists, budget progress bars — are always flat at rest and never cast a shadow. On flat screens they sit on the solid surface; on wallpaper screens they sit inside a frosted `SectionCard`. The frosted card itself is a structural container against the wallpaper, not a shadowed elevation: if a surface can be scrolled past, it still casts no shadow. Shadows remain reserved for floating chrome (tab bar, dropdowns).
+**The Flat Content Rule.** Data *contents* — transaction rows, group lists, budget bars — are flat at rest and never cast a shadow. On flat screens they sit on the solid surface; on wallpaper screens they sit inside a frosted `SectionCard`. If a surface can be scrolled past, it casts no shadow. Shadows are reserved for floating chrome.
 
-**The Frosted Glass Rule.** The frosted `SectionCard` is the app's signature resting surface on wallpaper screens, not an exception to be justified. Glass is legitimate in two roles: the resting surface for content on wallpaper screens, and chrome that floats (tab bar, dropdowns). Two hard limits keep it from becoming slop: (1) **never nest glass inside glass** — one blur layer per stack, a frosted card on a frosted card is always wrong; (2) **never let blur cost legibility** — if a frosted card can't clear AA contrast against its wallpaper, deepen the scrim or calm the wallpaper, don't ship the unreadable card.
+**The Frosted Glass Rule.** The frosted `SectionCard` is the signature resting surface on wallpaper screens, not an exception. Two hard limits keep it from becoming slop: (1) **never nest glass inside glass** — one blur layer per stack; a frosted card on a frosted card is always wrong. (2) **never let blur cost legibility** — if a frosted card can't clear AA contrast against its wallpaper, deepen the scrim or calm the wallpaper; don't ship the unreadable card.
 
-## 5. Components
+## 6. Components
 
-### Tab Bar (Signature Component)
-Floating pill anchored above the safe-area bottom. Full-radius capsule (borderRadius: 100) with a 1px hairline border. On iOS: BlurView backdrop (intensity 80, adaptive tint). On Android: solid rgba equivalent.
+### Screen / Sheet Exit Button (`ScreenExitButton`, signature convention)
+The single standardized dismiss control, app-wide. A **Liquid Glass circle** (iOS 26+, `GlassCircleButton`; JS fallback circle below that), **top-left**, 36px (`EXIT_BTN_SIZE`), floated at `top 16 / left 20` when not hosted in a header row. **Variant decides the glyph: `back` → chevron (pushed full-screen views), `close` → X (bottom sheets / modals).** Only the tint adapts per surface. Never substitute a bespoke back/close button.
 
-- **Tab buttons:** 52×52px circles, icon-only, 22px icon at stroke 1.7 (inactive) / 2.4 (active). Active icon is near-ink; inactive is textSec.
-- **Mic/add button:** Separated by a 1px hairline divider. Background: violet-fill. Icon: violet-ink. Shape matches the tab buttons (52px circle).
+### Section Card (`SectionCard`)
+The frosted resting surface on wallpaper screens. `BlurView` (intensity 70 dark / 100 light, `systemMaterial` tint) + 1px hairline border, `RADIUS.card` (24), interior padding `LAYOUT.cardPadX/Top/Bottom` (20/20/12). `noPad` variant for flush content (e.g. the embedded calendar).
 
-### Segmented Control
-Pill container (chipBg fill, radius 100, 3px padding) with a width-measuring animated sliding indicator. Indicator background: near-ink. Active label: bg color. Inactive label: textSec, weight 500. Easing: spring (tension 220, friction 22).
+### Tab Bar (signature component)
+Floating pill anchored above the safe-area bottom — full capsule (`RADIUS.full`) with a 1px hairline border. iOS: BlurView backdrop; Android: solid rgba. Tab buttons are 52×52 icon-only circles (22px icon, stroke 1.7 inactive / 2.4 active; active = text, inactive = textSec). The mic/add button is divided off by a 1px hairline and carries the **accent** (fill + ink).
+
+### Segmented Control (`Segmented`)
+Pill container (chipBg fill, `RADIUS.full`, 3px padding) with a width-measuring animated sliding indicator. Active indicator: `accent.fill`; active label: `accent.ink`; inactive label: textSec, weight 500. Spring easing.
 
 ### Icon Circles
-36×36px circles used in transaction rows, bill rows, and as category icons on the transaction sheet. Background color is determined by spending group: blue (needs), clay (wants), teal (savings). Icon: white (#fff), 16px at stroke 1.6. The circle is always perfectly round — radius never deviates from 18px.
+36×36 circles in transaction rows, bill rows, and as category icons. Background = spending-group color (blue/clay/teal); icon white, 16px, stroke 1.6. Always perfectly round (radius = width/2 = 18).
 
 ### Category Progress Bars
-Two sizes: 10px height with radius 5 at group level; 5px height with radius 3 at sub-category level. Background: hairline color. Fill: group color, or over-ember when over budget. No animation on mount; state changes instantly.
-
-### Month Picker Dropdown
-borderRadius: 18, borderWidth: 1 (hairline), shadow: 0 10px 32px opacity 0.16. Contains a search row (Icon + TextInput, borderBottom hairline) and a scrollable month list. Each row includes a 38px MonthDonut (SVG progress ring) and the month label.
-
-### Transaction Sheet (TxSheet)
-Native SwiftUI BottomSheet with two detents: 0.48 fraction (summary) and large (edit form). Summary state centers a 52px category icon circle (pastel rgba tint), merchant name at 20px/700, and the amount at 40px/700. Edit state slides in with a 250ms ease-out animation.
+Two sizes: 10px height / radius 5 at group level; 5px / radius 3 at sub-category level. Background: hairline. Fill: group color, or over-ember when over budget. No mount animation; state changes instantly.
 
 ### Save Button
-Full-width single-action button. backgroundColor: near-ink. textColor: page-wash. borderRadius: 16px. paddingVertical: 16px. font: 15px/700. The only full-bleed button in the system.
+Full-width single-action button. Background `accent.fill`, text `accent.ink`, `RADIUS.button` (16), paddingVertical 16. The only full-bleed button in the system.
 
 ### Fields (Edit Form)
-Grouped inside a chipBg-background container with radius 14. Each row: paddingVertical 13, paddingHorizontal 16, separated by hairline borders. Labels: 14px/500/textSec. Inputs: 15px/500/text, right-aligned.
+Grouped inside a chipBg container at `RADIUS.field` (14). Each row: paddingVertical 13, paddingHorizontal 16, hairline separators. Labels 14/500/textSec; inputs 15/500/text, right-aligned.
 
-## 6. Do's and Don'ts
+### Bottom Sheets
+Native `@expo/ui` `BottomSheet` inside a `Host`, with `presentationDetents`, `presentationDragIndicator('visible')`, and `background(theme.surface)`. Header is a `ScreenExitButton` (`close` variant) + title; content scrolls with safe-area bottom padding. Sheets are flat surfaces (solid `theme.surface`), not frosted.
+
+## 7. Do's and Don'ts
 
 ### Do:
-- **Do** use 1px hairline borders (`rgba(14,12,24,0.10)` light / `rgba(180,160,240,0.14)` dark) to define surfaces at rest. The dark hairline carries a violet tint — use these exact values.
-- **Do** encode the three budget groups with their fixed colors: blue for needs, clay for wants, teal for savings. Every icon circle, progress bar, and group label uses these.
-- **Do** reserve the accent color (violet-dot, fill, ink) for action links, the mic button, and interactive indicators — and only those roles.
-- **Do** use over-ember (#D4522A) consistently for all over-budget signals: the amount, the label, and the budget bar fill.
-- **Do** use hero-avail (#5CC4BA) for the "Available" status and healthy budget bar on the hero — teal reads as growth against the deep violet hero.
-- **Do** let SF Pro (the system typeface) carry the full visual hierarchy without introducing a second typeface.
-- **Do** treat the 32px display as singular: exactly one per screen, for the primary budget figure.
-- **Do** treat the frosted `SectionCard` as the signature surface on wallpaper screens, and tune the scrim (and wallpaper choice) so content clears AA contrast. Glass is the material direction; legibility is the constraint on it.
+- **Do** pull every constant from its token source: color from `theme` / `MEDIA`, type from `TYPE`, spacing from `SPACE`/`LAYOUT`, radius from `RADIUS`.
+- **Do** keep type monochrome — hierarchy from size/weight/case, not hue.
+- **Do** encode the three budget groups with their fixed colors: blue (needs), clay (wants), teal (savings). Every icon circle, progress bar, and group label uses these.
+- **Do** reserve the accent (fill/ink/dot) for actions, selected states, and interactive indicators — and only those roles.
+- **Do** use over-ember (`#D4522A`) for every over-budget signal, hero-avail (`#5CC4BA`) for the healthy/available state, caution-amber (`#C5A946`) for due-soon.
+- **Do** treat the frosted `SectionCard` as the signature surface on wallpaper screens, and tune the scrim (and wallpaper choice) so content clears AA contrast.
 - **Do** keep data surfaces flat (no shadow) at rest, whether on a solid page or inside a frosted card.
-- **Do** tint dark mode surfaces with violet: bg #0F0B1C, surface #1A1530, surface2 #221D3C — not neutral gray.
+- **Do** use `ScreenExitButton` for every dismiss — top-left, chevron for pushed screens, X for sheets.
 
 ### Don't:
-- **Don't** add gamification: no badges, achievement notifications, points, streaks, or celebratory animations. Finance is serious; these patterns trivialize money. (From PRODUCT.md.)
-- **Don't** use navy and gold, golden amber for the wants group, neon on black, or any other finance-domain reflex palette. The wants-clay color exists specifically to break the amber/gold reflex.
-- **Don't** use gradient text (`background-clip: text`). Decorative, never meaningful.
-- **Don't** add side-stripe borders (border-left or border-right over 1px) to rows, cards, or callouts. Use a background tint, a leading icon, or nothing.
-- **Don't** nest glass inside glass, or let blur cost legibility. One frosted layer per stack (never a frosted card on a frosted card); if a frosted card can't hold AA contrast against the wallpaper, deepen the scrim or calm the wallpaper rather than shipping it. Frosted glass is the signature surface, but blur that separates nothing and only blurs is still wrong.
-- **Don't** use the accent violet in charts or data visualization. Charts read spending groups, not accent preference. (Exception: shopping pastel is violet-adjacent by design.)
+- **Don't** hardcode a hex/rgba for a themed role, or set `fontSize`/radius/spacing as a fresh inline literal when a token exists.
+- **Don't** add gamification: no badges, achievement notifications, points, streaks, or celebratory animations. (From PRODUCT.md.)
+- **Don't** use navy and gold, golden amber for wants, neon on black, or any finance-domain reflex palette. Wants-clay exists specifically to break the amber/gold reflex.
+- **Don't** reintroduce a brand hue into the neutral field or the accent — the field is neutral and the accent is ink.
+- **Don't** use the accent in charts or data visualization. Charts read spending groups, not action color.
+- **Don't** nest glass inside glass, or let blur cost legibility. One frosted layer per stack; if a card can't hold AA contrast, deepen the scrim or calm the wallpaper rather than shipping it.
+- **Don't** add side-stripe borders (border-left/right over 1px) to rows, cards, or callouts. Use a background tint, a leading icon, or nothing.
 - **Don't** shadow data rows, category cards, or list items. If it can be scrolled past, it stays flat.
-- **Don't** build complex navigation hierarchies or hide features behind nested menus. Busy professionals need clarity at a glance, not exploration. (From PRODUCT.md.)
+- **Don't** build a bespoke back/close button — use `ScreenExitButton`.
+- **Don't** use a pencil icon anywhere — use a chevron or a background treatment to signal "editable."
+- **Don't** build complex navigation hierarchies or hide features behind nested menus. (From PRODUCT.md.)

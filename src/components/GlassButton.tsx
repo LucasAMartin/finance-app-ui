@@ -4,6 +4,7 @@ import { Button, GlassEffectContainer, Host, Image } from '@expo/ui/swift-ui';
 import { frame, glassEffect } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { Icon } from './Icon';
+import { MEDIA } from '../wallpaperPalette';
 
 // Interactive Liquid Glass (the grow/finger-track/refraction press behavior) is
 // iOS 26+. Callers render their existing button as a fallback below that.
@@ -18,6 +19,8 @@ export interface GlassCircleButtonProps {
   size?: number;
   iconSize?: number;
   iconColor: string;
+  /** Optional Liquid Glass tint. Use when glass should follow a theme color. */
+  glassTint?: string;
   accessibilityLabel?: string;
 }
 
@@ -35,7 +38,7 @@ export interface GlassCircleButtonProps {
  */
 export const GlassCircleButton = React.forwardRef<View, GlassCircleButtonProps>(
   function GlassCircleButton(
-    { onPress, systemImage, size = 36, iconSize = 16, iconColor, accessibilityLabel },
+    { onPress, systemImage, size = 36, iconSize = 16, iconColor, glassTint, accessibilityLabel },
     ref,
   ) {
     return (
@@ -54,7 +57,9 @@ export const GlassCircleButton = React.forwardRef<View, GlassCircleButtonProps>(
               modifiers={[
                 frame({ width: size, height: size }),
                 glassEffect({
-                  glass: { variant: 'regular', interactive: true },
+                  glass: glassTint
+                    ? { variant: 'regular', interactive: true, tint: glassTint }
+                    : { variant: 'regular', interactive: true },
                   shape: 'circle',
                 }),
               ]}
@@ -74,6 +79,8 @@ export interface GlassCircleIconProps {
   size?: number;
   iconSize?: number;
   iconColor: string;
+  /** Optional Liquid Glass tint. Use when glass should follow a theme color. */
+  glassTint?: string;
 }
 
 /**
@@ -87,6 +94,7 @@ export function GlassCircleIcon({
   size = 36,
   iconSize = 16,
   iconColor,
+  glassTint,
 }: GlassCircleIconProps) {
   return (
     <View style={{ width: size, height: size }} pointerEvents="none">
@@ -99,7 +107,9 @@ export function GlassCircleIcon({
             modifiers={[
               frame({ width: size, height: size }),
               glassEffect({
-                glass: { variant: 'regular', interactive: true },
+                glass: glassTint
+                  ? { variant: 'regular', interactive: true, tint: glassTint }
+                  : { variant: 'regular', interactive: true },
                 shape: 'circle',
               }),
             ]}
@@ -116,6 +126,10 @@ export function GlassCircleIcon({
 // bottom sheets. Size/spacing are fixed here; only the tint adapts per surface.
 
 export const EXIT_BTN_SIZE = 36;
+
+// Canonical tint for ScreenExitButton on wallpaper/frosted-glass surfaces.
+// Import this instead of hardcoding '#F2F4F5'.
+export const EXIT_TINT_WALLPAPER = MEDIA.text;
 
 const exitStyles = StyleSheet.create({
   // Floating placement for sheets that don't host the button in a header row.

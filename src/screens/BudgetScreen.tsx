@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useCallback, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useCallback, useEffect, useContext, useSyncExternalStore } from 'react';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   View,
@@ -20,6 +20,13 @@ import {
 } from 'react-native';
 
 const { height: SCREEN_H } = Dimensions.get('window');
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  interpolate,
+  Easing as ReEasing,
+} from 'react-native-reanimated';
 import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 'react-native-gesture-handler';
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
@@ -29,12 +36,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
+import { NumericKeypad, applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
 import { Collapsible } from '../components/Collapsible';
 import { SheetPrimaryButton } from '../components/shared';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { SectionCard } from '../components/SectionCard';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { TYPE } from '../typography';
-import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor } from '../wallpaperPalette';
+import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA } from '../wallpaperPalette';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
 import type { Bill, Category, GroupKey, Income, RecurringRule, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
@@ -70,6 +79,8 @@ interface Props {
   theme: Theme;
   onOpenDrawer: () => void;
   onOpenIncome?: (ref: View) => void;
+  // Fired when the inline amount keypad opens/closes so the app can hide the tab bar.
+  onKeypadOpenChange?: (open: boolean) => void;
 }
 
 type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
@@ -91,6 +102,8 @@ const INCOME_DETENT: PresentationDetent = 'large';
 const CAT_DETENT: PresentationDetent = 'large';
 const CAT_DETENTS: PresentationDetent[] = [CAT_DETENT];
 const CURRENT_MONTH = '2026-05';
+// Height reserved above the keypad surface for the floating Done button.
+const KEYPAD_DONE_AREA = 76;
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // Cap Dynamic Type growth on dense, multi-column rows so large accessibility text
 // sizes can't clip or collide. Full-width prose is intentionally left uncapped.
@@ -183,6 +196,17 @@ const fmtAmt = (n: number) => n % 1 !== 0 ? n.toFixed(2) : n.toLocaleString();
 const fmtMoney = (n: number) => Math.round(n).toLocaleString();
 const fmtPct = (n: number) => `${Math.round(n * 100)}%`;
 
+// Groups the live keypad draft exactly like fmtMoney so the amount keeps an
+// identical width between display and edit (the leading "$" never shifts).
+// Preserves a decimal point / digits the user is still typing.
+const formatDraft = (draft: string): string => {
+  if (!draft) return '0';
+  const dot = draft.indexOf('.');
+  const intRaw = dot === -1 ? draft : draft.slice(0, dot);
+  const intGrouped = intRaw ? Number(intRaw).toLocaleString() : '0';
+  return dot === -1 ? intGrouped : `${intGrouped}.${draft.slice(dot + 1)}`;
+};
+
 const parseAmountDraft = (text: string): number | null => {
   const clean = text.replace(/[$,\s]/g, '');
   if (!/^\d*\.?\d{0,2}$/.test(clean) || clean === '' || clean === '.') return null;
@@ -219,16 +243,6 @@ function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; child
   );
 }
 
-function SectionCard({ children, style, dark }: { children: React.ReactNode; style?: any; dark: boolean }) {
-  const borderColor = dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.08)';
-  return (
-    <BlurView intensity={dark ? 70 : 100} tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-      style={[styles.sectionCard, style]}
-    >
-      <View style={[styles.sectionCardBorder, { borderColor }]}>{children}</View>
-    </BlurView>
-  );
-}
 
 function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
   children: React.ReactNode;
@@ -246,7 +260,7 @@ function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
       <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
         <TouchableOpacity
           onPress={onRemove}
-          style={{ flex: 1, marginLeft: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: OVER_DOT }}
+          style={{ flex: 1, marginLeft: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: OVER_DOT }}
         >
           <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
         </TouchableOpacity>
@@ -322,7 +336,100 @@ function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, w
   );
 }
 
-export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
+// External store for the live keypad draft. Keeping it out of BudgetScreen's
+// render means a keypress only repaints the active amount field (LiveDraftText)
+// — not the whole screen (groups, rows, blur, SVG) — so the digit appears instantly.
+type DraftStore = { subscribe: (cb: () => void) => () => void; getSnapshot: () => string };
+const DraftContext = React.createContext<DraftStore | null>(null);
+
+// Live amount text for the row being edited. The only thing that re-renders per
+// keystroke. Subscribes to the draft store via useSyncExternalStore.
+function LiveDraftText({ color }: { color: string }) {
+  const store = useContext(DraftContext);
+  const draft = useSyncExternalStore(store!.subscribe, store!.getSnapshot);
+  return (
+    <Text maxFontSizeMultiplier={MAX_FONT_SCALE} numberOfLines={1} style={[styles.catBudgetText, { color }]}>
+      ${formatDraft(draft)}
+    </Text>
+  );
+}
+
+// Blinking caret shown after the live amount while the custom keypad is open.
+function EditCaret({ color }: { color: string }) {
+  const blink = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(blink, { toValue: 0, duration: 480, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(blink, { toValue: 1, duration: 480, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [blink]);
+  return <Animated.View style={[styles.editCaret, { backgroundColor: color, opacity: blink }]} />;
+}
+
+// Category budget amount — tap to edit inline via the custom keypad. The
+// underline signals it's editable; the inner tap target pre-empts the whole-row
+// tap (which opens the editor sheet). Editing state lives in the parent so the
+// shared keypad can drive the live draft and commit.
+function EditableBudgetAmount({ value, active, color, accentColor, underlineColor, onStartEdit, onMeasured, accessibilityLabel }: {
+  value: number;
+  active: boolean;
+  color: string;
+  accentColor: string;
+  underlineColor: string;
+  onStartEdit: () => void;
+  onMeasured: (top: number, height: number) => void;
+  accessibilityLabel?: string;
+}) {
+  const ref = useRef<View>(null);
+
+  const startEdit = () => {
+    // Begin editing synchronously; measure afterwards purely for scroll-into-view.
+    onStartEdit();
+    ref.current?.measureInWindow((_x, y, _w, h) => onMeasured(y, h));
+  };
+
+  // Display and edit share one fixed-metric row: a "$" prefix glued to the
+  // leading digit, a constant-width caret slot, and the underline on the row
+  // itself. Only the text content, underline color, and caret↔spacer swap — the
+  // box never changes size, so the number stays put when the keypad opens. The
+  // live value comes from LiveDraftText (store-subscribed) so only it repaints.
+  if (active) {
+    return (
+      <View style={[styles.catBudgetWrap, { borderBottomColor: accentColor }]}>
+        <LiveDraftText color={color} />
+        <EditCaret color={accentColor} />
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity
+      ref={ref}
+      onPress={startEdit}
+      activeOpacity={0.6}
+      hitSlop={{ top: 10, bottom: 10, left: 12, right: 6 }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <View style={[styles.catBudgetWrap, { borderBottomColor: underlineColor }]}>
+        <Text
+          maxFontSizeMultiplier={MAX_FONT_SCALE}
+          numberOfLines={1}
+          style={[styles.catBudgetText, { color }]}
+        >
+          ${fmtMoney(value)}
+        </Text>
+        <View style={styles.catBudgetCaretSpacer} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenChange }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
@@ -398,8 +505,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
     extrapolate: 'clamp',
   });
 
+  // Latest content offset, mirrored for the keypad's scroll-into-view math.
+  const scrollOffsetRef = useRef(0);
   const handleScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
     const y = e.nativeEvent.contentOffset.y;
+    scrollOffsetRef.current = y;
     const cardAbsY = sectionStackYRef.current + allocCardYRef.current;
     // 4px hysteresis so the pin doesn't jitter when you hover right on the line.
     const isPinned = pinnedRef.current ? y > cardAbsY - 4 : y > cardAbsY + 4;
@@ -437,6 +547,30 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   const [pendingRemoveKeys, setPendingRemoveKeys] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [addingForGroup, setAddingForGroup] = useState<string | null>(null);
+
+  // ── Inline amount keypad ──────────────────────────────────────
+  // editingKey is the budget key whose amount the custom keypad is editing.
+  // The live draft lives in an external store (not state) so keypresses repaint
+  // only the active field, not this whole screen — see DraftContext / LiveDraftText.
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const draftStore = useRef<{ value: string; subs: Set<() => void> }>({ value: '', subs: new Set() }).current;
+  const subscribeDraft = useCallback((cb: () => void) => {
+    draftStore.subs.add(cb);
+    return () => { draftStore.subs.delete(cb); };
+  }, [draftStore]);
+  const getDraftSnapshot = useCallback(() => draftStore.value, [draftStore]);
+  const setDraft = useCallback((next: string) => {
+    draftStore.value = next;
+    draftStore.subs.forEach(cb => cb());
+  }, [draftStore]);
+  const draftContextValue = useMemo<DraftStore>(
+    () => ({ subscribe: subscribeDraft, getSnapshot: getDraftSnapshot }),
+    [subscribeDraft, getDraftSnapshot],
+  );
+  const [keypadH, setKeypadH] = useState(340);
+  // Reanimated drives the slide on the UI thread. The Done button moves via real
+  // layout (`bottom`) rather than a transform so its native hit-area tracks it.
+  const kbProgress = useSharedValue(0);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryLabelDraft, setCategoryLabelDraft] = useState('');
   const [categoryIconDraft, setCategoryIconDraft] = useState('tag');
@@ -585,6 +719,95 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
       });
     }
   };
+
+  const commitBudget = (key: string, value: number) => {
+    setBudgets(b => ({ ...b, [key]: value }));
+    syncBudgetRecord(key, value);
+  };
+
+  // Persist whatever the keypad has built for the active row, if it parses.
+  // Plain functions (not memoized) so each call uses the live commit closure —
+  // syncBudgetRecord reads budgetRecords/visibleSpendGroups/selectedMonth.
+  const flushEditDraft = (key: string, draft: string) => {
+    const parsed = parseAmountDraft(draft);
+    if (parsed !== null) commitBudget(key, parsed);
+  };
+
+  // Mirror of editingKey kept in sync synchronously so the tap-to-dismiss check
+  // (which runs a frame later) can tell "tapped empty space" from "switched rows".
+  const editingKeyRef = useRef<string | null>(null);
+
+  // Drive the slide imperatively (Reanimated UI thread) the instant a gesture
+  // fires — never via a state effect, which would wait behind a full re-render
+  // and make the pad lag a few frames before it moves.
+  const slideKeypad = useCallback((open: boolean) => {
+    onKeypadOpenChange?.(open);
+    kbProgress.value = withTiming(open ? 1 : 0, {
+      duration: 280,
+      easing: ReEasing.out(ReEasing.cubic),
+    });
+  }, [kbProgress, onKeypadOpenChange]);
+
+  const startAmountEdit = (key: string, value: number) => {
+    const wasOpen = editingKeyRef.current !== null;
+    // Switching rows mid-edit: commit the one we're leaving first. editingKey goes
+    // straight from one key to the next (never null), so the keypad and tab bar
+    // don't blink between rows.
+    if (editingKey && editingKey !== key) flushEditDraft(editingKey, draftStore.value);
+    editingKeyRef.current = key;
+    setDraft(value > 0 ? String(value) : '');
+    setEditingKey(key);
+    if (!wasOpen) slideKeypad(true);
+  };
+
+  // A keypress mutates the live draft only — no screen-level state changes, so
+  // only LiveDraftText repaints.
+  const handleKeypadKey = useCallback((k: KeypadKey) => {
+    setDraft(applyKeypadKey(draftStore.value, k));
+  }, [setDraft, draftStore]);
+
+  // Lift the tapped row above the keypad if the pad would cover it.
+  const scrollEditIntoView = (top: number, height: number) => {
+    const keypadTop = SCREEN_H - keypadH - KEYPAD_DONE_AREA;
+    const delta = (top + height) - (keypadTop - 16);
+    if (delta > 0) {
+      requestAnimationFrame(() => {
+        scrollViewRef.current?.scrollTo?.({ y: scrollOffsetRef.current + delta, animated: true });
+      });
+    }
+  };
+
+  const closeAmountEdit = () => {
+    if (!editingKeyRef.current) return;
+    // Start the slide-down first so it begins this frame, before the (heavier)
+    // commit + state updates re-render the screen.
+    slideKeypad(false);
+    flushEditDraft(editingKeyRef.current, draftStore.value);
+    editingKeyRef.current = null;
+    setEditingKey(null);
+  };
+
+  // A tap anywhere in the content closes the keypad — but a tap on another amount
+  // reopens it synchronously, so defer the close one frame and skip it if the
+  // active row changed in the meantime (a switch, not a dismiss).
+  const dismissKeypadFromTap = () => {
+    if (!editingKey) return;
+    const keyAtTap = editingKey;
+    requestAnimationFrame(() => {
+      if (editingKeyRef.current === keyAtTap) closeAmountEdit();
+    });
+  };
+
+  // Keypad surface — slides via transform (RN views hit-test fine under transform).
+  const keypadSurfaceStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(kbProgress.value, [0, 1], [keypadH + KEYPAD_DONE_AREA + 40, 0]) }],
+  }));
+  // Done button — slides via real layout (`bottom`) so the native host's hit-area
+  // moves with it; fades alongside.
+  const keypadDoneStyle = useAnimatedStyle(() => ({
+    bottom: interpolate(kbProgress.value, [0, 1], [-KEYPAD_DONE_AREA, keypadH + 12]),
+    opacity: kbProgress.value,
+  }));
 
   const syncCategoryRecurringRule = (
     catId: string,
@@ -746,6 +969,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   const openCategoryEditor = (catId: string) => {
     const category = categories.find(cat => cat.id === catId);
     if (!category) return;
+    closeAmountEdit();
     setEditingCategory(category);
     setCategoryLabelDraft(category.label);
     setCategoryIconDraft(category.icon);
@@ -927,28 +1151,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   const savingsFrac = barMax > 0 ? savingsTotal / barMax : 0;
 
   const gCol = (key: string) =>
-    (theme.dark ? GROUP_COLORS[key]?.dark : GROUP_COLORS[key]?.light) ?? '#8B8597';
+    (theme.dark ? GROUP_COLORS[key]?.dark : GROUP_COLORS[key]?.light) ?? theme.textTer;
   const needsCol   = gCol('needs');
   const wantsCol   = gCol('wants');
   const savingsCol = gCol('savings');
-
-  // Hero focal metric — zero-based "allocate to zero" framing.
-  const fullyAssigned = remaining === 0;
-  const heroEyebrow = isOver ? 'Over budget' : fullyAssigned ? 'Fully assigned' : 'Left to assign';
-
-  const fullyAssignedPulseAnim = useRef(new Animated.Value(0)).current;
-  const prevFullyAssigned = useRef(false);
-  useEffect(() => {
-    if (fullyAssigned && !prevFullyAssigned.current) {
-      fullyAssignedPulseAnim.setValue(0);
-      Animated.sequence([
-        Animated.timing(fullyAssignedPulseAnim, { toValue: 1, duration: 200, easing: Easing.out(Easing.quad), useNativeDriver: false }),
-        Animated.delay(360),
-        Animated.timing(fullyAssignedPulseAnim, { toValue: 0, duration: 400, easing: Easing.in(Easing.quad), useNativeDriver: false }),
-      ]).start();
-    }
-    prevFullyAssigned.current = fullyAssigned;
-  }, [fullyAssigned]);
 
   const showUndo = useCallback((label: string, onCommit?: () => void) => {
     if (pendingDeleteRef.current) {
@@ -997,11 +1203,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   }, []);
 
 
-  const heroLabelColor = fullyAssignedPulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['#FBF8FF', '#5CC4BA'],
-  });
-
   const _base = Math.max(income, totalBudgeted, 1);
   const _needsPct   = Math.round(needsTotal   / _base * 100);
   const _wantsPct   = Math.round(wantsTotal   / _base * 100);
@@ -1043,31 +1244,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
   );
 
   const incomeBtnRef = useRef<View>(null);
-  const incomeButtonCard = () => (
-    <SectionCard dark={theme.dark}>
-      <TouchableOpacity
-        onPress={() => { if (incomeBtnRef.current) onOpenIncome?.(incomeBtnRef.current); }}
-        activeOpacity={0.7}
-        style={[styles.allocationIncomeBtn, { backgroundColor: p.trackBg }]}
-        accessibilityRole="button"
-        accessibilityLabel={`Income $${fmtMoney(income)}, assigned $${fmtMoney(totalBudgeted)}`}
-      >
-        <View ref={incomeBtnRef} collapsable={false} style={{ flex: 1, alignItems: 'center' }}>
-          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(income)}</Text>
-          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.labelSm, { color: p.textSec }]}>INCOME</Text>
-        </View>
-        <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: p.textTer }} />
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.bodySmEm, { color: p.text }]}>${fmtMoney(totalBudgeted)}</Text>
-          <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.labelSm, { color: p.textSec }]}>ASSIGNED</Text>
-        </View>
-      </TouchableOpacity>
-    </SectionCard>
-  );
 
-  const stickyBorderColor = theme.dark ? 'rgba(235,225,255,0.16)' : 'rgba(14,12,24,0.08)';
+  const stickyBorderColor = theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
 
   return (
+    <DraftContext.Provider value={draftContextValue}>
     <View style={{ flex: 1, backgroundColor: floorColor }}>
 
       {/* Wallpaper + scrim — outside KAV so the keyboard never shifts it.
@@ -1106,7 +1287,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
           simultaneousHandlers={scrollViewRef}
           maxDist={10}
           onHandlerStateChange={({ nativeEvent }) => {
-            if (nativeEvent.state === State.END) dismissOpenSwipe();
+            if (nativeEvent.state === State.END) {
+              dismissOpenSwipe();
+              dismissKeypadFromTap();
+            }
           }}
         >
         <View style={{ flex: 1 }}>
@@ -1151,11 +1335,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
           <AnimatedGHScrollView
             ref={scrollViewRef}
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: 140 }}
+            contentContainerStyle={{ paddingBottom: editingKey ? keypadH + KEYPAD_DONE_AREA + 24 : 140 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={16}
-            onScrollBeginDrag={dismissOpenSwipe}
+            onScrollBeginDrag={() => { dismissOpenSwipe(); closeAmountEdit(); }}
             onScroll={Animated.event(
               [{ nativeEvent: { contentOffset: { y: scrollY } } }],
               { useNativeDriver: true, listener: handleScroll },
@@ -1171,16 +1355,19 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
                 style={styles.hero}
               >
                 <View style={styles.heroTopRow}>
-                  <View style={styles.heroStatusRow}>
-                    {isOver && <View style={[styles.heroOverDot, { backgroundColor: OVER_DOT }]} />}
-                    <Animated.Text style={[TYPE.onMediaStatusSub, { color: heroLabelColor }, shadow]}>{heroEyebrow}</Animated.Text>
-                    <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> · </Text>
-                    <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, shadow]}
-                      accessibilityLabel={`${heroEyebrow}, $${fmtMoney(Math.abs(remaining))}`}
-                    >
-                      {isOver ? '-' : ''}${fmtMoney(Math.abs(remaining))}
-                    </Text>
-                  </View>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => { if (incomeBtnRef.current) onOpenIncome?.(incomeBtnRef.current); }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Income $${fmtMoney(income)}, assigned $${fmtMoney(totalBudgeted)}. Edit income`}
+                  >
+                    <View ref={incomeBtnRef} collapsable={false} style={styles.heroStatusRow}>
+                      <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, shadow]}>${fmtMoney(income)}</Text>
+                      <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> Income · </Text>
+                      <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, shadow]}>${fmtMoney(totalBudgeted)}</Text>
+                      <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> Assigned</Text>
+                    </View>
+                  </TouchableOpacity>
                   <Host ignoreSafeArea="all" style={styles.monthPickerHost}>
                     <Menu
                       label={
@@ -1220,9 +1407,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
                   {allocationBarBody()}
                 </SectionCard>
               </Animated.View>
-
-              {/* Income button — own card, not animated */}
-              {incomeButtonCard()}
 
               {/* Spending group cards */}
               {visibleSpendGroups.map(g => {
@@ -1316,9 +1500,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
                                   </>
                                 )}
                               </View>
-	                              <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
-	                                ${fmtMoney(subBudget)}
-	                              </Text>
+	                              <EditableBudgetAmount
+                                value={subBudget}
+                                active={editingKey === rowKey}
+                                color={p.textSec}
+                                accentColor={theme.accent.dot}
+                                underlineColor={p.hairline}
+                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
+                                onMeasured={scrollEditIntoView}
+                                accessibilityLabel={`Edit ${sub.label} budget`}
+                              />
                             </TouchableOpacity>
                           </SwipeRow>
                         </CollapsingRow>
@@ -1346,9 +1537,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
 	                              <View style={{ flex: 1, minWidth: 0 }}>
 	                                <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
 	                              </View>
-	                              <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
-	                                ${fmtMoney(subBudget)}
-	                              </Text>
+	                              <EditableBudgetAmount
+                                value={subBudget}
+                                active={editingKey === rowKey}
+                                color={p.textSec}
+                                accentColor={theme.accent.dot}
+                                underlineColor={p.hairline}
+                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
+                                onMeasured={scrollEditIntoView}
+                                accessibilityLabel={`Edit ${sub.label} budget`}
+                              />
                             </TouchableOpacity>
                           </SwipeRow>
                         </CollapsingRow>
@@ -1383,9 +1581,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
 	                                    <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
 	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{formatDateShort(nextDate)}</Text>}
 	                                  </View>
-	                                  <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
-	                                    ${fmtMoney(subBudget)}
-	                                  </Text>
+	                                  <EditableBudgetAmount
+                                value={subBudget}
+                                active={editingKey === rowKey}
+                                color={p.textSec}
+                                accentColor={theme.accent.dot}
+                                underlineColor={p.hairline}
+                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
+                                onMeasured={scrollEditIntoView}
+                                accessibilityLabel={`Edit ${sub.label} budget`}
+                              />
 	                                </TouchableOpacity>
 	                              </SwipeRow>
                             </CollapsingRow>
@@ -1414,9 +1619,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
 	                                    <Text style={[TYPE.body, { color: p.text }]}>{sub.label}</Text>
 	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{formatDateShort(nextDate)}</Text>}
 	                                  </View>
-	                                  <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
-	                                    ${fmtMoney(subBudget)}
-	                                  </Text>
+	                                  <EditableBudgetAmount
+                                value={subBudget}
+                                active={editingKey === rowKey}
+                                color={p.textSec}
+                                accentColor={theme.accent.dot}
+                                underlineColor={p.hairline}
+                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
+                                onMeasured={scrollEditIntoView}
+                                accessibilityLabel={`Edit ${sub.label} budget`}
+                              />
                                 </TouchableOpacity>
                               </SwipeRow>
                             </CollapsingRow>
@@ -1440,9 +1652,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
                                   <Text style={[TYPE.body, { color: p.text }]}>{bill.name}</Text>
                                   <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]}>{bill.dueDate}</Text>
                                 </View>
-                                <Text style={[styles.catBudgetDisplay, { color: p.textSec }]}>
-                                  ${fmtMoney(budgets[billKey(g.key, bill.id)] ?? bill.amount)}
-                                </Text>
+                                <EditableBudgetAmount
+                                  value={budgets[billKey(g.key, bill.id)] ?? bill.amount}
+                                  active={editingKey === billKey(g.key, bill.id)}
+                                  color={p.textSec}
+                                  accentColor={theme.accent.dot}
+                                  underlineColor={p.hairline}
+                                  onStartEdit={() => startAmountEdit(billKey(g.key, bill.id), budgets[billKey(g.key, bill.id)] ?? bill.amount)}
+                                  onMeasured={scrollEditIntoView}
+                                  accessibilityLabel={`Edit ${bill.name} budget`}
+                                />
                               </TouchableOpacity>
                             </SwipeRow>
                             </CollapsingRow>
@@ -1512,6 +1731,36 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
         </TapGestureHandler>
       </KeyboardAvoidingView>
 
+      {/* Custom numeric keypad — stands in for the system keyboard while editing
+          a category amount inline. The surface slides on a native-driven transform;
+          the Done pill rides a separate, untransformed layer so its full hit-area
+          stays put (a transform offsets native host hit-testing). */}
+      <Reanimated.View
+        pointerEvents={editingKey ? 'box-none' : 'none'}
+        onLayout={e => setKeypadH(e.nativeEvent.layout.height)}
+        style={[styles.keypadOverlay, keypadSurfaceStyle]}
+      >
+        <BlurView
+          intensity={theme.dark ? 80 : 100}
+          tint={theme.dark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+          style={[styles.keypadSurface, { borderTopColor: stickyBorderColor }]}
+        >
+          <View style={{ paddingBottom: insets.bottom + 6, paddingTop: 8 }}>
+            <NumericKeypad onKey={handleKeypadKey} theme={theme} />
+          </View>
+        </BlurView>
+      </Reanimated.View>
+
+      {/* Done button (native Liquid Glass) — slides up just above the pad. */}
+      <Reanimated.View
+        pointerEvents={editingKey ? 'box-none' : 'none'}
+        style={[styles.keypadDoneFloat, keypadDoneStyle]}
+      >
+        <View style={styles.keypadDoneWrap} pointerEvents={editingKey ? 'auto' : 'none'}>
+          <SheetPrimaryButton label="Done" onPress={closeAmountEdit} theme={theme} />
+        </View>
+      </Reanimated.View>
+
       <CategoryEditSheet
         theme={theme}
         category={editingCategory}
@@ -1551,6 +1800,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
       />
 
     </View>
+    </DraftContext.Provider>
   );
 }
 
@@ -1567,6 +1817,47 @@ const parseDeadline = (s: string): Date | null => {
   if (m >= 1 && m <= 12 && y > 2000) return new Date(y, m - 1, 1);
   return null;
 };
+
+// Inline numeric amount field for the category sheet — identical look to the
+// budget-screen rows (catBudgetWrap / catBudgetText + underline + caret).
+// Tap to focus; when active the custom keypad drives the value.
+function SheetNumericField({ displayValue, draft, active, placeholder, color, accentColor, underlineColor, onActivate }: {
+  displayValue: string;
+  draft: string;       // live keypad draft — only used when active
+  active: boolean;
+  placeholder: string;
+  color: string;
+  accentColor: string;
+  underlineColor: string;
+  onActivate: () => void;
+}) {
+  // displayValue may arrive as "500" or "$500" depending on which path set it.
+  const raw = displayValue.replace(/[$,\s]/g, '');
+  const num = raw !== '' ? Number(raw) : NaN;
+  const isPlaceholder = !displayValue && !active;
+
+  if (active) {
+    return (
+      <View style={[styles.catBudgetWrap, { borderBottomColor: accentColor }]}>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.catBudgetText, { color }]}>
+          {draft ? `$${formatDraft(draft)}` : '$'}
+        </Text>
+        <EditCaret color={accentColor} />
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity onPress={onActivate} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 12, right: 6 }}>
+      <View style={[styles.catBudgetWrap, { borderBottomColor: underlineColor }]}>
+        <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.catBudgetText, { color: isPlaceholder ? underlineColor : color }]}>
+          {isPlaceholder ? placeholder : `$${fmtMoney(isNaN(num) ? 0 : num)}`}
+        </Text>
+        <View style={styles.catBudgetCaretSpacer} />
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 function CategoryEditSheet({
   theme, category, addingForGroup, label, icon, group, goalTarget, goalSaved,
@@ -1642,6 +1933,68 @@ function CategoryEditSheet({
   const goalPct = rawGoalTarget > 0 ? Math.min(100, Math.round(rawGoalSaved / rawGoalTarget * 100)) : 0;
   const selectedGroupIdx = GROUP_OPTIONS.findIndex(o => o.value === group);
   const keyboardAppearance = theme.dark ? 'dark' : 'light';
+
+  // ── Sheet numeric keypad ──────────────────────────────────────
+  type NumField = 'budget' | 'target' | 'saved';
+  const [activeNumField, setActiveNumField] = useState<NumField | null>(null);
+  const [numDraft, setNumDraft] = useState('');
+  const [sheetKbH, setSheetKbH] = useState(300);
+  const sheetKbProgress = useSharedValue(0);
+  const sheetScrollRef = useRef<ScrollView>(null);
+  const sheetScrollY = useRef(0);
+  const fieldRowRefs: Record<NumField, React.RefObject<View | null>> = {
+    budget: useRef<View | null>(null),
+    target: useRef<View | null>(null),
+    saved:  useRef<View | null>(null),
+  };
+
+  const scrollFieldIntoView = (ref: React.RefObject<View | null>, kbH: number) => {
+    ref.current?.measureInWindow((_x, y, _w, h) => {
+      // Window-space top edge of the keypad (incl. floating Done button). Scroll so
+      // the field's bottom sits 24px above it. The big paddingBottom added while
+      // editing guarantees there's enough scroll range to reach this.
+      const keypadTop = SCREEN_H - kbH - KEYPAD_DONE_AREA;
+      const delta = (y + h + 24) - keypadTop;
+      if (delta > 0) {
+        sheetScrollRef.current?.scrollTo({ y: sheetScrollY.current + delta, animated: true });
+      }
+    });
+  };
+
+  const activateNumField = (field: NumField, currentDisplay: string) => {
+    if (activeNumField && activeNumField !== field) commitNumField(activeNumField);
+    const raw = currentDisplay.replace(/[$,\s]/g, '');
+    setNumDraft(raw);
+    setActiveNumField(field);
+    sheetKbProgress.value = withTiming(1, { duration: 260, easing: ReEasing.out(ReEasing.cubic) });
+    // Scroll after the keypad has risen enough to know its final height.
+    setTimeout(() => scrollFieldIntoView(fieldRowRefs[field], sheetKbH), 180);
+  };
+  const commitNumField = (field: NumField = activeNumField!) => {
+    if (!field) return;
+    const parsed = parseAmountDraft(numDraft);
+    const formatted = parsed !== null ? String(parsed) : '';
+    if (field === 'budget') { setBudgetDisplay(formatted); onBudgetChange(formatted); }
+    else if (field === 'target') { setGoalTargetDisplay(formatted); onGoalTargetChange(formatted); }
+    else { setGoalSavedDisplay(formatted); onGoalSavedChange(formatted); }
+  };
+  const closeNumKeypad = () => {
+    sheetKbProgress.value = withTiming(0, { duration: 190, easing: ReEasing.out(ReEasing.cubic) });
+    commitNumField();
+    setActiveNumField(null);
+  };
+  const handleSheetKey = useCallback((k: KeypadKey) => {
+    setNumDraft(prev => applyKeypadKey(prev, k));
+  }, []);
+
+  const sheetKbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(sheetKbProgress.value, [0, 1], [sheetKbH + 60, 0]) }],
+  }));
+  const sheetDoneStyle = useAnimatedStyle(() => ({
+    opacity: sheetKbProgress.value,
+    bottom: interpolate(sheetKbProgress.value, [0, 1], [-60, sheetKbH + 8]),
+  }));
+
   // Keep the sheet's top/hero/segmented spacing constant across all groups so
   // switching to Savings only appends the goal fields at the bottom — nothing
   // above them shifts up or down. (Detent is a fixed 'large', so there's room.)
@@ -1718,7 +2071,7 @@ function CategoryEditSheet({
           ignoreSafeArea({ regions: 'keyboard', edges: 'bottom' }),
         ]}>
           <RNHostView>
-            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); if (activeNumField) closeNumKeypad(); }} accessible={false}>
             <View style={[styles.categorySheet, {
               backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
             }]}>
@@ -1732,16 +2085,25 @@ function CategoryEditSheet({
                 style={EXIT_FLOAT_STYLE}
               />
               <ScrollView
+                ref={sheetScrollRef}
                 style={styles.categorySheetScroll}
                 contentContainerStyle={[
                   styles.categorySheetContent,
                   {
                     paddingTop: sheetTopPadding,
-                    paddingBottom: sheetBottomPadding,
+                    // While editing, pad far past the keypad so the content is
+                    // genuinely taller than the frame — that's the only thing that
+                    // creates scroll range to lift a bottom field above the pad.
+                    paddingBottom: activeNumField
+                      ? sheetKbH + KEYPAD_DONE_AREA + 200
+                      : sheetBottomPadding,
+                    minHeight: '100%',
                   },
                 ]}
                 showsVerticalScrollIndicator={false}
-                scrollEnabled={false}
+                scrollEnabled={activeNumField !== null}
+                scrollEventThrottle={16}
+                onScroll={e => { sheetScrollY.current = e.nativeEvent.contentOffset.y; }}
 	                keyboardShouldPersistTaps="handled"
 	              >
 	              {/* Hero — tap circle to open native popup menu */}
@@ -1757,7 +2119,7 @@ function CategoryEditSheet({
                         <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
                           <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
                         </View>
-                        <View style={styles.iconPickerBadge}>
+                        <View style={[styles.iconPickerBadge, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
                           <Icon name="chevDown" size={7} color="rgba(0,0,0,0.55)" stroke={2.4} />
                         </View>
                       </View>
@@ -1817,22 +2179,17 @@ function CategoryEditSheet({
                     style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
                   />
                 </View>
-                <View style={[fieldRowStyle, sep]}>
+                <View ref={fieldRowRefs.budget} style={[fieldRowStyle, sep]}>
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Monthly budget</Text>
-                  <TextInput
-                    value={budgetDisplay}
-                    accessibilityLabel="Monthly budget amount"
-                    onChangeText={(t) => {
-                      const g = guardDollar(t);
-                      setBudgetDisplay(g);
-                      onBudgetChange(g.replace(/[$,\s]/g, ''));
-                    }}
-                    keyboardType="decimal-pad"
-                    keyboardAppearance={keyboardAppearance}
+                  <SheetNumericField
+                    displayValue={budgetDisplay}
+                    draft={activeNumField === 'budget' ? numDraft : ''}
+                    active={activeNumField === 'budget'}
                     placeholder="$0"
-                    placeholderTextColor={theme.textTer}
-                    selectTextOnFocus
-                    style={[styles.catFieldInput, { color: theme.text, textAlign: 'right', minWidth: 60 }]}
+                    color={theme.text}
+                    accentColor={theme.accent.dot}
+                    underlineColor={theme.hairline}
+                    onActivate={() => activateNumField('budget', budgetDisplay)}
                   />
                 </View>
                 <View style={[fieldRowStyle, recurring ? sep : {}]}>
@@ -1865,11 +2222,11 @@ function CategoryEditSheet({
 	                        </Picker>
 	                      </Host>
 	                    </View>
-	                    <View style={[fieldRowStyle, sep]}>
+	                    <View style={[fieldRowStyle, sep, styles.catFieldRowFixed]}>
 	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Next payment</Text>
 	                      {recurringDateVal ? (
-	                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-	                          <Host matchContents ignoreSafeArea="all">
+	                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+	                          <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
 	                            <DatePicker
 	                              selection={recurringDateVal}
 	                              onDateChange={(d) => { setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }}
@@ -1905,7 +2262,7 @@ function CategoryEditSheet({
                 </View>
               </View>
 	              {showCategoryError && (
-	                <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 6 }]}>
+	                <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 8 }]}>
 	                  {categoryValidationError}
 	                </Text>
 	              )}
@@ -1914,48 +2271,38 @@ function CategoryEditSheet({
               {showGoalFields && (
                 <>
                   <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 10 : 14 }]}>
-                    <View style={[fieldRowStyle, sep]}>
+                    <View ref={fieldRowRefs.target} style={[fieldRowStyle, sep]}>
                       <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target</Text>
-                      <TextInput
-                        value={goalTargetDisplay}
-                        accessibilityLabel="Savings target amount"
-                        onChangeText={(t) => {
-                          const g = guardDollar(t);
-                          setGoalTargetDisplay(g);
-                          onGoalTargetChange(g.replace(/[$,\s]/g, ''));
-                        }}
-                        keyboardType="decimal-pad"
-                        keyboardAppearance={keyboardAppearance}
+                      <SheetNumericField
+                        displayValue={goalTargetDisplay}
+                        draft={activeNumField === 'target' ? numDraft : ''}
+                        active={activeNumField === 'target'}
                         placeholder="$0"
-                        placeholderTextColor={theme.textTer}
-                        selectTextOnFocus
-                        style={[styles.catFieldInput, { color: theme.text, textAlign: 'right', minWidth: 60 }]}
+                        color={theme.text}
+                        accentColor={theme.accent.dot}
+                        underlineColor={theme.hairline}
+                        onActivate={() => activateNumField('target', goalTargetDisplay)}
                       />
                     </View>
-                    <View style={[fieldRowStyle, sep]}>
+                    <View ref={fieldRowRefs.saved} style={[fieldRowStyle, sep]}>
                       <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Saved so far</Text>
-                      <TextInput
-                        value={goalSavedDisplay}
-                        accessibilityLabel="Amount saved so far"
-                        onChangeText={(t) => {
-                          const g = guardDollar(t);
-                          setGoalSavedDisplay(g);
-                          onGoalSavedChange(g.replace(/[$,\s]/g, ''));
-                        }}
-                        keyboardType="decimal-pad"
-                        keyboardAppearance={keyboardAppearance}
+                      <SheetNumericField
+                        displayValue={goalSavedDisplay}
+                        draft={activeNumField === 'saved' ? numDraft : ''}
+                        active={activeNumField === 'saved'}
                         placeholder="$0"
-                        placeholderTextColor={theme.textTer}
-                        selectTextOnFocus
-                        style={[styles.catFieldInput, { color: theme.text, textAlign: 'right', minWidth: 60 }]}
+                        color={theme.text}
+                        accentColor={theme.accent.dot}
+                        underlineColor={theme.hairline}
+                        onActivate={() => activateNumField('saved', goalSavedDisplay)}
                       />
                     </View>
-                    {/* Target date — fixed height so picker appearance doesn't shift layout */}
-                    <View style={[fieldRowStyle, { minHeight: 56 }]}>
+                    {/* Target date — fixed-height row so the picker never shifts layout */}
+                    <View style={[fieldRowStyle, styles.catFieldRowFixed]}>
                       <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target date</Text>
                       {deadlineDate ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Host matchContents ignoreSafeArea="all">
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
                             <DatePicker
                               selection={deadlineDate}
                               onDateChange={(d) => { setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
@@ -1991,26 +2338,51 @@ function CategoryEditSheet({
                 </>
               )}
 
-              {/* Save — identical to TxSheet's SheetPrimaryButton */}
-	              <SheetPrimaryButton
-	                label={isAddMode ? 'Add category' : 'Save category'}
-	                onPress={handleSave}
-	                theme={theme}
-	                disabled={!canSaveCategory}
-	                style={{ marginTop: compactSheet ? 14 : 20 }}
-	              />
-	              {!isAddMode && (
-	                <Pressable
-	                  onPress={onDelete}
-	                  pointerEvents="box-only"
-	                  accessibilityRole="button"
-	                  accessibilityLabel="Delete category"
-	                  style={[styles.categoryDeleteButton, compactSheet && styles.categoryDeleteButtonCompact]}
-	                >
-	                  <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
-	                </Pressable>
-	              )}
+              <View style={styles.catSheetFooter}>
+                <SheetPrimaryButton
+                  label={isAddMode ? 'Add category' : 'Save category'}
+                  onPress={handleSave}
+                  theme={theme}
+                  disabled={!canSaveCategory}
+                />
+                {!isAddMode && (
+                  <Pressable
+                    onPress={onDelete}
+                    pointerEvents="box-only"
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete category"
+                    style={styles.categoryDeleteButton}
+                  >
+                    <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
+                  </Pressable>
+                )}
+              </View>
               </ScrollView>
+
+              {/* Sheet numeric keypad — slides up from the bottom of the sheet */}
+              <Reanimated.View
+                pointerEvents={activeNumField ? 'box-none' : 'none'}
+                onLayout={e => setSheetKbH(e.nativeEvent.layout.height)}
+                style={[styles.sheetKbOverlay, sheetKbStyle]}
+              >
+                <BlurView
+                  intensity={theme.dark ? 80 : 100}
+                  tint={theme.dark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+                  style={[styles.keypadSurface, { borderTopColor: theme.hairline }]}
+                >
+                  <View style={{ paddingBottom: insets.bottom + 6, paddingTop: 8 }}>
+                    <NumericKeypad onKey={handleSheetKey} theme={theme} />
+                  </View>
+                </BlurView>
+              </Reanimated.View>
+              <Reanimated.View
+                pointerEvents={activeNumField ? 'box-none' : 'none'}
+                style={[styles.sheetKbDone, sheetDoneStyle]}
+              >
+                <View style={styles.keypadDoneWrap} pointerEvents={activeNumField ? 'auto' : 'none'}>
+                  <SheetPrimaryButton label="Done" onPress={closeNumKeypad} theme={theme} />
+                </View>
+              </Reanimated.View>
             </View>
             </TouchableWithoutFeedback>
           </RNHostView>
@@ -2026,18 +2398,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingBottom: 12,
   },
   stickyCardInner: {
     borderBottomWidth: 1,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 14,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
   },
   hero: {
     paddingHorizontal: 4,
-    paddingTop: 6,
-    paddingBottom: 10,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   heroTopRow: {
     flexDirection: 'row',
@@ -2051,11 +2423,6 @@ const styles = StyleSheet.create({
     gap: 0,
     flexShrink: 1,
     flexWrap: 'nowrap',
-  },
-  heroOverDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
   },
   monthPickerHost: {
     height: 30,
@@ -2076,36 +2443,18 @@ const styles = StyleSheet.create({
     ...TYPE.onMediaStatusSub,
     fontWeight: '500' as const,
   },
-  allocationIncomeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    borderRadius: 10,
-  },
   sectionStack: {
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 0,
     gap: 16,
-  },
-  sectionCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  sectionCardBorder: {
-    borderRadius: 24,
-    borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 14,
   },
   cardHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    gap: 14,
-    marginBottom: 14,
+    gap: 16,
+    marginBottom: 16,
   },
   groupTitleRow: {
     flexDirection: 'row',
@@ -2133,11 +2482,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 22,
-    gap: 14,
+    gap: 16,
   },
   incomeHero: {
     alignItems: 'center',
-    paddingTop: 6,
+    paddingTop: 8,
     paddingBottom: 12,
   },
   incomeHeroCircle: {
@@ -2153,7 +2502,7 @@ const styles = StyleSheet.create({
   incomeFeedback: {
     minHeight: 34,
     borderRadius: 17,
-    marginTop: 10,
+    marginTop: 12,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2175,7 +2524,7 @@ const styles = StyleSheet.create({
   editRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     paddingVertical: 12,
   },
   subGoalTrack: {
@@ -2195,15 +2544,15 @@ const styles = StyleSheet.create({
   billsDivider: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingTop: 10,
+    gap: 8,
+    paddingTop: 12,
     paddingBottom: 2,
     borderTopWidth: 1,
   },
   addCatBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingTop: 12,
     paddingBottom: 2,
   },
@@ -2218,30 +2567,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   categoryGoalPreview: {
-    marginTop: 10,
-    gap: 6,
+    marginTop: 12,
+    gap: 8,
   },
   goalTrack: {
     height: 6,
     borderRadius: 3,
     overflow: 'hidden',
   },
+  catSheetFooter: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingTop: 16,
+  },
   categoryDeleteButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-  },
-  categoryDeleteButtonCompact: {
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
   catHero: {
     alignItems: 'center',
     paddingTop: 8,
-    paddingBottom: 14,
+    paddingBottom: 16,
   },
   catHeroCompact: {
     paddingTop: 4,
-    paddingBottom: 10,
+    paddingBottom: 12,
   },
   catHeroCircle: {
     width: 52,
@@ -2257,15 +2608,75 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: 'rgba(255,255,255,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
   },
-  catBudgetDisplay: {
-    ...TYPE.bodySmEm,
+  // One fixed-metric row for both display and edit so the amount never shifts
+  // when the keypad opens. The underline lives here (constant width/padding);
+  // only its color changes. catBudgetCaretSpacer reserves the caret's exact
+  // footprint (width 2 + marginLeft 1) in display mode so the right-pinned row
+  // is the same width in both states.
+  catBudgetWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     flexShrink: 0,
+    borderBottomWidth: 1,
+    paddingBottom: 1,
+  },
+  catBudgetText: {
+    ...TYPE.subsectionTitle,
+  },
+  catBudgetCaretSpacer: {
+    width: 3,
+  },
+  editCaret: {
+    width: 2,
+    height: 17,
+    borderRadius: 1,
+    marginLeft: 1,
+  },
+  keypadOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 40,
+  },
+  keypadDoneFloat: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 41,
+  },
+  keypadDoneWrap: {
+    paddingHorizontal: 16,
+  },
+  keypadSurface: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 8,
+  },
+  sheetKbOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+  },
+  sheetKbDone: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 21,
+  },
+  // Fixes date picker row height — prevents Host from expanding when a picker
+  // appears (it would shift layout otherwise since matchContents auto-sizes).
+  catFieldRowFixed: {
+    height: 44,
+  },
+  catDatePickerHost: {
+    width: 130,
+    height: 34,
   },
   catGroupSegmented: {
     marginTop: 4,
@@ -2292,8 +2703,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 44,
     paddingVertical: 8,
-    paddingHorizontal: 14,
-    gap: 10,
+    paddingHorizontal: 16,
+    gap: 12,
   },
   catFieldLabel: {
     ...TYPE.body,

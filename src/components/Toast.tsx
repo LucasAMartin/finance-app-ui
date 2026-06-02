@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
+import { RADIUS } from '../radius';
 
 // Tab-bar pill height (52 button + 2×8 padding) so the toast clears it.
 const TAB_BAR_HEIGHT = 68;
@@ -111,10 +112,10 @@ const S = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
-    paddingVertical: 11,
-    paddingHorizontal: 18,
-    borderRadius: 14,
+    gap: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: RADIUS.full,
     borderWidth: 1,
     maxWidth: 440,
     shadowColor: '#000',

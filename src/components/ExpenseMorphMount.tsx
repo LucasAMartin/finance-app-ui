@@ -1,5 +1,4 @@
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
 import { useTheme } from '../ThemeProvider';
 import { ContainerTransform, type SourceRect } from './ContainerTransform';
 import { ExpenseFlow, type SavedExpenseInfo } from './ExpenseFlow';
@@ -11,10 +10,11 @@ export interface ExpenseMorphHandle {
 
 interface Props {
   onSaved?: (info: SavedExpenseInfo) => void;
+  onCloseStart?: () => void;
 }
 
 export const ExpenseMorphMount = forwardRef<ExpenseMorphHandle, Props>(function ExpenseMorphMount(
-  { onSaved },
+  { onSaved, onCloseStart },
   ref,
 ) {
   const { theme, dark } = useTheme();
@@ -32,35 +32,28 @@ export const ExpenseMorphMount = forwardRef<ExpenseMorphHandle, Props>(function 
     },
   }), []);
 
-  const circle = (
-    <View style={[S.circle, { backgroundColor: dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)' }]} />
-  );
+  const sourceColor = dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
   const glyph = <Icon name={iconName} size={20} color={dark ? theme.text : '#0E0C18'} stroke={1.7} />;
+  const close = () => {
+    onCloseStart?.();
+    setVisible(false);
+  };
 
   return (
     <ContainerTransform
       visible={visible}
       source={source}
       cardColor={theme.bg}
-      sourceIcon={circle}
+      sourceColor={sourceColor}
       sourceGlyph={glyph}
       onClosed={() => setSource(null)}
     >
       <ExpenseFlow
         theme={theme}
         initialMode={mode}
-        onClose={() => setVisible(false)}
+        onClose={close}
         onSaved={onSaved}
       />
     </ContainerTransform>
   );
-});
-
-const S = StyleSheet.create({
-  circle: {
-    flex: 1,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 });

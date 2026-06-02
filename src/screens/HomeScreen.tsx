@@ -10,6 +10,7 @@ import {
   ImageBackground,
   Animated,
   Dimensions,
+  Easing,
 } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
 import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
@@ -27,12 +28,14 @@ import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Bill, Category, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
+import { Money } from '../components/shared';
 import { GlassCircleButton, GlassCircleIcon, SUPPORTS_GLASS } from '../components/GlassButton';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { MerchantMark } from '../components/MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { SectionCard } from '../components/SectionCard';
 import { useMorphSource } from '../components/useMorphSource';
 import type { SourceRect } from '../components/ContainerTransform';
 import { TYPE } from '../typography';
@@ -42,6 +45,21 @@ import type { SFSymbol } from 'sf-symbols-typescript';
 const { height: SCREEN_H } = Dimensions.get('window');
 const HOME_ACTIVITY_LIMIT = 8;
 const HOME_MONTH_PAGE_SIZE = 200;
+const HERO_MORPH_CLOSE_RETURN_DELAY = 130;
+type HeroAction = 'voice' | 'manual' | 'income';
+
+function quickActionColors(theme: Theme, p: P) {
+  const labelFg = p.text;
+  const glassTint = theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
+  return {
+    iconFg: theme.dark ? MEDIA.text : '#0E0C18',
+    labelFg,
+    circleBg: glassTint,
+    circleBorder: theme.dark ? 'rgba(235,239,242,0.16)' : 'rgba(14,12,24,0.10)',
+    glassTint,
+    menuImageColor: theme.dark ? MEDIA.text : '#0E0C18',
+  };
+}
 
 function monthRange(monthKey: string) {
   const [year, month] = monthKey.split('-').map(Number);
@@ -126,31 +144,34 @@ const QuickAction = React.forwardRef<View, {
   glassSymbol: SFSymbol;
   label: string;
   onPress: () => void;
+  onPrepare?: () => void;
+  containerStyle?: any;
   // Fire on finger-down instead of finger-up. RN's onPress waits for release and,
   // inside a ScrollView, for scroll arbitration — that gap is the perceived lag.
   // onPressIn fires immediately, so the action feels instant. Use for actions
   // that open a screen/sheet where mis-firing on a stray touch is harmless.
   instant?: boolean;
-  dark: boolean;
+  theme: Theme;
   p: P;
   shadow?: object;
 }>(function QuickAction(
-  { icon, glassSymbol, label, onPress, instant, dark, p, shadow },
+  { icon, glassSymbol, label, onPress, onPrepare, containerStyle, instant, theme, p, shadow },
   ref,
 ) {
-  const circleBg     = dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
-  const circleBorder = dark ? 'rgba(235,239,242,0.16)' : 'rgba(14,12,24,0.10)';
-  const iconColor    = dark ? p.text : '#0E0C18';
+  const colors = quickActionColors(theme, p);
   const fire = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
+  };
+  const prepare = () => {
+    onPrepare?.();
   };
 
   if (SUPPORTS_GLASS) {
     // Native interactive Liquid Glass button (iOS 26+). The morph ref lands on
     // the glass circle's wrapping View so a transform still grows from it.
     return (
-      <View style={styles.qa}>
+      <Animated.View style={[styles.qa, containerStyle]} onTouchStart={prepare}>
         <View style={styles.qaInner}>
           <GlassCircleButton
             ref={ref}
@@ -158,19 +179,20 @@ const QuickAction = React.forwardRef<View, {
             systemImage={glassSymbol}
             size={56}
             iconSize={22}
-            iconColor={iconColor}
+            iconColor={colors.iconFg}
+            glassTint={colors.glassTint}
             accessibilityLabel={label}
           />
-          <Text style={[styles.qaLabel, { color: p.text }, shadow]}>{label}</Text>
+          <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>{label}</Text>
         </View>
-      </View>
+      </Animated.View>
     );
   }
 
   return (
-    <View style={styles.qa}>
+    <Animated.View style={[styles.qa, containerStyle]}>
       <Pressable
-        onPressIn={instant ? fire : undefined}
+        onPressIn={instant ? fire : prepare}
         onPress={instant ? undefined : fire}
         style={({ pressed }) => [styles.qaInner, { opacity: pressed ? 0.7 : 1 }]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
@@ -179,32 +201,18 @@ const QuickAction = React.forwardRef<View, {
       >
         {/* ref is on the circle so a container transform grows from the circle
             itself (not the icon+label column). */}
-        <View ref={ref} collapsable={false} style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
-          <Icon name={icon} size={20} color={iconColor} stroke={1.7} />
+        <View ref={ref} collapsable={false} style={[styles.qaCircle, { backgroundColor: colors.circleBg, borderColor: colors.circleBorder }]}>
+          <Icon name={icon} size={20} color={colors.iconFg} stroke={1.7} />
         </View>
-        <Text style={[styles.qaLabel, { color: p.text }, shadow]}>{label}</Text>
+        <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>{label}</Text>
       </Pressable>
-    </View>
+    </Animated.View>
   );
 });
 
 // ── Section card ─────────────────────────────────────────────────
 // Dark: heavy dark frost (intensity 70). Light: light frost (intensity 35)
 // — barely opaque so the vivid wallpaper bleeds through.
-function SectionCard({ children, style, dark }: { children: React.ReactNode; style?: any; dark: boolean }) {
-  const borderColor = dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
-  return (
-    <BlurView
-      intensity={dark ? 70 : 100}
-      tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-      style={[styles.sectionCard, style]}
-    >
-      <View style={[styles.sectionCardBorder, { borderColor }]}>
-        {children}
-      </View>
-    </BlurView>
-  );
-}
 
 // All amounts on the home screen read as dollars-and-cents, e.g. $1,234.00 / $1,234.50.
 const fmtAmount = (n: number) =>
@@ -223,14 +231,18 @@ interface Props {
   onOpenTx: (tx: Transaction) => void;
   onDeleteTx: (tx: Transaction) => void;
   onOpenBill: (bill: Bill) => void;
+  morphResetToken?: number;
 }
 
-export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill }: Props) {
+export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   // Morph sources — all measured at press time from the circle (radius 28).
   const voiceMorph  = useMorphSource(28);
   const manualMorph = useMorphSource(28);
   const incomeMorph = useMorphSource(28);
+  const heroMorphAnim = useRef(new Animated.Value(0)).current;
+  const preparedHeroActionRef = useRef<HeroAction | null>(null);
+  const [heroMorphAction, setHeroMorphAction] = useState<HeroAction | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentMonthTransactions, setCurrentMonthTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
@@ -361,6 +373,152 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
     onOpenTheme();
   };
 
+  const prepareHeroMorphReaction = useCallback((action: HeroAction) => {
+    preparedHeroActionRef.current = action;
+    setHeroMorphAction(action);
+    heroMorphAnim.stopAnimation();
+    heroMorphAnim.setValue(0);
+  }, [heroMorphAnim]);
+
+  const startHeroMorphReaction = useCallback(() => {
+    heroMorphAnim.stopAnimation();
+    Animated.timing(heroMorphAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [heroMorphAnim]);
+
+  useEffect(() => {
+    if (morphResetToken === 0) return;
+    preparedHeroActionRef.current = null;
+    heroMorphAnim.stopAnimation();
+    const timer = setTimeout(() => {
+      Animated.timing(heroMorphAnim, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setHeroMorphAction(null);
+      });
+    }, HERO_MORPH_CLOSE_RETURN_DELAY);
+    return () => clearTimeout(timer);
+  }, [heroMorphAnim, morphResetToken]);
+
+  const prepareVoiceFromHero = useCallback(() => {
+    voiceMorph.prefetch();
+    prepareHeroMorphReaction('voice');
+  }, [prepareHeroMorphReaction, voiceMorph]);
+
+  const prepareManualFromHero = useCallback(() => {
+    manualMorph.prefetch();
+    prepareHeroMorphReaction('manual');
+  }, [manualMorph, prepareHeroMorphReaction]);
+
+  const prepareIncomeFromHero = useCallback(() => {
+    incomeMorph.prefetch();
+    prepareHeroMorphReaction('income');
+  }, [incomeMorph, prepareHeroMorphReaction]);
+
+  const openVoiceFromHero = useCallback(() => {
+    voiceMorph.measure(source => {
+      const wasPrepared = preparedHeroActionRef.current === 'voice';
+      if (!wasPrepared) prepareHeroMorphReaction('voice');
+      if (wasPrepared) startHeroMorphReaction();
+      else requestAnimationFrame(startHeroMorphReaction);
+      onAddVoice(source);
+    });
+  }, [onAddVoice, prepareHeroMorphReaction, startHeroMorphReaction, voiceMorph]);
+
+  const openManualFromHero = useCallback(() => {
+    manualMorph.measure(source => {
+      const wasPrepared = preparedHeroActionRef.current === 'manual';
+      if (!wasPrepared) prepareHeroMorphReaction('manual');
+      if (wasPrepared) startHeroMorphReaction();
+      else requestAnimationFrame(startHeroMorphReaction);
+      onAddManual(source);
+    });
+  }, [manualMorph, onAddManual, prepareHeroMorphReaction, startHeroMorphReaction]);
+
+  const openIncomeFromHero = useCallback(() => {
+    incomeMorph.measure(source => {
+      const wasPrepared = preparedHeroActionRef.current === 'income';
+      if (!wasPrepared) prepareHeroMorphReaction('income');
+      if (wasPrepared) startHeroMorphReaction();
+      else requestAnimationFrame(startHeroMorphReaction);
+      onLogIncome(source);
+    });
+  }, [incomeMorph, onLogIncome, prepareHeroMorphReaction, startHeroMorphReaction]);
+
+  const heroTopMorphStyle = {
+    opacity: heroMorphAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [1, 0.72],
+    }),
+    transform: [
+      {
+        translateY: heroMorphAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -9],
+        }),
+      },
+      {
+        scale: heroMorphAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 0.97],
+        }),
+      },
+    ],
+  };
+
+  const heroAmountMorphStyle = {
+    opacity: heroMorphAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [1, 0.58],
+    }),
+    transform: [
+      {
+        translateY: heroMorphAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -14],
+        }),
+      },
+      {
+        scale: heroMorphAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 0.94],
+        }),
+      },
+    ],
+  };
+
+  const quickActionMorphStyle = (key: HeroAction | 'more') => {
+    if (!heroMorphAction) return undefined;
+    const isActive = key === heroMorphAction;
+    return {
+      opacity: heroMorphAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, isActive ? 0.14 : 0.90],
+      }),
+      transform: [
+        {
+          translateY: heroMorphAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, isActive ? 0 : 2],
+          }),
+        },
+        {
+          scale: heroMorphAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, isActive ? 0.98 : 0.9],
+          }),
+        },
+      ],
+    };
+  };
+
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   useEffect(() => {
@@ -460,7 +618,11 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
               />
             </IconBtn>
             <View style={{ flexDirection: 'row', gap: 4 }}>
-              <View style={[styles.iconBtn, { width: 40, height: 40 }]}>
+              <View
+                style={[styles.iconBtn, { width: 40, height: 40 }]}
+                accessibilityLabel="Notifications"
+                accessibilityRole="image"
+              >
                 <HeaderIcon
                   name="bell"
                   wallpaperColor={pWallpaper.text}
@@ -495,7 +657,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
         >
           {/* ─── Hero ─────────────────────────────── */}
           <View style={styles.hero}>
-            <View style={styles.heroTopRow}>
+            <Animated.View style={styles.heroTopRow}>
               <View style={styles.heroStatusGroup}>
                 {loading ? (
                   <Skeleton width={150} height={13} radius={4} onMedia={theme.dark} />
@@ -540,15 +702,15 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                   </Menu>
                 </Host>
               )}
-            </View>
+            </Animated.View>
 
             {loading ? (
               <>
-                <Skeleton width={220} height={42} radius={8} onMedia={theme.dark} style={{ marginBottom: 18 }} />
+                <Skeleton width={220} height={42} radius={8} onMedia={theme.dark} style={{ marginBottom: 20 }} />
                 <Skeleton width="100%" height={5} radius={3} onMedia={theme.dark} />
               </>
             ) : (
-              <>
+              <Animated.View>
                 <View style={styles.heroAmountRow}>
                   <HeroAmount
                     value={over ? overage : available}
@@ -558,7 +720,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                   />
                 </View>
                 <BudgetBar pct={rawPct} trackBg={pWallpaper.trackBg} />
-              </>
+              </Animated.View>
             )}
           </View>
 
@@ -566,15 +728,16 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
           {/* Three capture modes (voice / manual / income) plus a More menu */}
           {/* for less-frequent options — all share the same soft button fill. */}
           <View style={styles.quickRow}>
-            <QuickAction ref={voiceMorph.ref}  icon="mic"    glassSymbol="mic.fill"             label="Voice"  onPress={() => voiceMorph.measure(onAddVoice)}   dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction ref={manualMorph.ref} icon="keypad" glassSymbol="square.grid.3x3.fill" label="Manual" onPress={() => manualMorph.measure(onAddManual)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
-            <QuickAction ref={incomeMorph.ref} icon="plus"   glassSymbol="plus"                 label="Income" onPress={() => incomeMorph.measure(onLogIncome)} dark={theme.dark} p={pWallpaper} shadow={shadow} />
+            <QuickAction ref={voiceMorph.ref}  icon="mic"    glassSymbol="mic.fill"             label="Voice"  onPrepare={prepareVoiceFromHero}  onPress={openVoiceFromHero}  theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('voice')} />
+            <QuickAction ref={manualMorph.ref} icon="keypad" glassSymbol="square.grid.3x3.fill" label="Manual" onPrepare={prepareManualFromHero} onPress={openManualFromHero} theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('manual')} />
+            <QuickAction ref={incomeMorph.ref} icon="plus"   glassSymbol="plus"                 label="Income" onPrepare={prepareIncomeFromHero} onPress={openIncomeFromHero} theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('income')} />
             <MoreMenuButton
-              dark={theme.dark}
+              theme={theme}
               p={pWallpaper}
               shadow={shadow}
               onEditTheme={handleEditTheme}
               onAddRecurring={onAddRecurring}
+              containerStyle={quickActionMorphStyle('more')}
             />
           </View>
 
@@ -643,7 +806,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                             </Text>
                           </Text>
                         </View>
-                        <Text style={[styles.rowAmt, { color: p.text }]}>{amountStr}</Text>
+                        <Money value={b.amount} theme={theme} color={p.text} prefix={b.estimate ? '~$' : '$'} />
                       </TouchableOpacity>
                     </SwipeBillRow>
                   );
@@ -667,7 +830,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                 </Text>
               ) : (
                 homeActivityGroups.map(group => (
-                    <View key={group.key} style={{ marginBottom: 14 }}>
+                    <View key={group.key} style={{ marginBottom: 16 }}>
                       <Text style={[styles.dayLabel, { color: p.textTer }]}>
                         {group.label}
                       </Text>
@@ -703,7 +866,7 @@ function CategorySkeleton({ dark }: { dark: boolean }) {
     <View>
       {groups.map((g, gi) => (
         <View key={gi} style={{ paddingBottom: 4, borderBottomWidth: gi < 2 ? 1 : 0, borderBottomColor: hairline }}>
-          <View style={{ paddingVertical: 18, gap: 10 }}>
+          <View style={{ paddingVertical: 20, gap: 12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Skeleton width={52} height={11} radius={4} onMedia={dark} />
               <Skeleton width={52} height={14} radius={4} onMedia={dark} />
@@ -712,9 +875,9 @@ function CategorySkeleton({ dark }: { dark: boolean }) {
             <Skeleton width={140} height={11} radius={4} onMedia={dark} />
           </View>
           {g.subs > 0 ? (
-            <View style={{ gap: 13, paddingBottom: 18 }}>
+            <View style={{ gap: 13, paddingBottom: 20 }}>
               {Array.from({ length: g.subs }).map((_, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <Skeleton width={28} height={28} radius={8} onMedia={dark} />
                   <View style={{ flex: 1, gap: 5 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -727,7 +890,7 @@ function CategorySkeleton({ dark }: { dark: boolean }) {
               ))}
             </View>
           ) : (
-            <View style={{ flexDirection: 'row', gap: 7, paddingBottom: 18 }}>
+            <View style={{ flexDirection: 'row', gap: 7, paddingBottom: 20 }}>
               {[0, 1, 2].map(i => (
                 <Skeleton key={i} width={undefined} height={46} radius={10} onMedia={dark} style={{ flex: 1 }} />
               ))}
@@ -748,7 +911,7 @@ function BillsSkeleton({ dark }: { dark: boolean }) {
           borderBottomWidth: i < 2 ? 1 : 0, borderBottomColor: hairline,
         }]}>
           <Skeleton width={36} height={36} radius={18} onMedia={dark} />
-          <View style={{ flex: 1, gap: 6 }}>
+          <View style={{ flex: 1, gap: 8 }}>
             <Skeleton width="48%" height={13} radius={4} onMedia={dark} />
             <Skeleton width="42%" height={11} radius={4} onMedia={dark} />
           </View>
@@ -764,14 +927,14 @@ function ActivitySkeleton({ dark }: { dark: boolean }) {
   return (
     <View>
       {[2, 3].map((rowCount, g) => (
-        <View key={g} style={{ marginBottom: 14 }}>
+        <View key={g} style={{ marginBottom: 16 }}>
           <Skeleton width={70} height={11} radius={4} onMedia={dark} style={{ marginBottom: 8, marginLeft: 2 }} />
           {Array.from({ length: rowCount }).map((_, i) => (
             <View key={i} style={[styles.txRow, {
               borderBottomWidth: i < rowCount - 1 ? 1 : 0, borderBottomColor: hairline,
             }]}>
               <Skeleton width={36} height={36} radius={18} onMedia={dark} />
-              <View style={{ flex: 1, gap: 6 }}>
+              <View style={{ flex: 1, gap: 8 }}>
                 <Skeleton width="48%" height={13} radius={4} onMedia={dark} />
                 <Skeleton width="32%" height={11} radius={4} onMedia={dark} />
               </View>
@@ -798,7 +961,7 @@ function SwipeBillRow({ children, onPaid, onOpen, onClose }: {
       <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
         <TouchableOpacity
           onPress={onPaid}
-          style={[styles.paidAction, { marginLeft: 6 }]}
+          style={[styles.paidAction, { marginLeft: 8 }]}
         >
           <Icon name="check" size={18} color="#FBF8FF" stroke={2.2} />
         </TouchableOpacity>
@@ -836,7 +999,7 @@ function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
       <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
         <TouchableOpacity
           onPress={() => { swipeRef.current?.close(); onDelete(); }}
-          style={[styles.deleteAction, { marginLeft: 6 }]}
+          style={[styles.deleteAction, { marginLeft: 8 }]}
           accessibilityRole="button"
           accessibilityLabel="Delete transaction"
         >
@@ -895,7 +1058,7 @@ const TxRow = React.memo(function TxRow({
         <Text style={[styles.rowTitle, { color: p.text }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
         <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
       </View>
-      <Text style={[styles.rowAmt, { color: p.text }]}>${fmtAmount(tx.amount)}</Text>
+      <Money value={tx.amount} theme={{ text: p.text } as Theme} color={p.text} prefix="$" />
     </GHTouchableOpacity>
   );
 });
@@ -905,24 +1068,23 @@ const TxRow = React.memo(function TxRow({
 // SwiftUI Menu but without the SwiftUI Host lifecycle bug that broke
 // off-screen menus on app foreground.
 function MoreMenuButton({
-  dark, p, shadow, onEditTheme, onAddRecurring,
+  theme, p, shadow, onEditTheme, onAddRecurring, containerStyle,
 }: {
-  dark: boolean;
+  theme: Theme;
   p: P;
   shadow?: object;
   onEditTheme: () => void;
   onAddRecurring: () => void;
+  containerStyle?: any;
 }) {
-  const circleBg     = dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
-  const circleBorder = dark ? 'rgba(235,239,242,0.16)' : 'rgba(14,12,24,0.10)';
-  const iconColor    = dark ? p.text : '#0E0C18';
+  const colors = quickActionColors(theme, p);
   return (
     <MenuView
       shouldOpenOnLongPress={false}
-      themeVariant={dark ? 'dark' : 'light'}
+      themeVariant={theme.dark ? 'dark' : 'light'}
       actions={[
-        { id: 'theme',     title: 'Edit theme',             image: 'paintbrush',                       imageColor: dark ? '#FFFFFF' : '#000000' },
-        { id: 'recurring', title: 'Add recurring expense',  image: 'arrow.triangle.2.circlepath',      imageColor: dark ? '#FFFFFF' : '#000000' },
+        { id: 'theme',     title: 'Edit theme',             image: 'paintbrush',                       imageColor: colors.menuImageColor },
+        { id: 'recurring', title: 'Add recurring expense',  image: 'arrow.triangle.2.circlepath',      imageColor: colors.menuImageColor },
       ]}
       onPressAction={({ nativeEvent }) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -931,18 +1093,18 @@ function MoreMenuButton({
       }}
       style={styles.qa}
     >
-      <View style={styles.qaInner}>
+      <Animated.View style={[styles.qaInner, containerStyle]}>
         {SUPPORTS_GLASS ? (
           // Glass visual only — MenuView owns the tap, so this must not be a
           // Button (which would swallow the press that opens the menu).
-          <GlassCircleIcon systemImage="ellipsis" size={56} iconSize={22} iconColor={iconColor} />
+          <GlassCircleIcon systemImage="ellipsis" size={56} iconSize={22} iconColor={colors.iconFg} glassTint={colors.glassTint} />
         ) : (
-          <View style={[styles.qaCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
-            <Icon name="ellipsis" size={20} color={iconColor} stroke={1.7} />
+          <View style={[styles.qaCircle, { backgroundColor: colors.circleBg, borderColor: colors.circleBorder }]}>
+            <Icon name="ellipsis" size={20} color={colors.iconFg} stroke={1.7} />
           </View>
         )}
-        <Text style={[styles.qaLabel, { color: p.text }, shadow]}>More</Text>
-      </View>
+        <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>More</Text>
+      </Animated.View>
     </MenuView>
   );
 }
@@ -993,13 +1155,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
     height: 30,
   },
   heroStatusGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     flexShrink: 1,
   },
   heroStatusLabel: {
@@ -1065,18 +1227,7 @@ const styles = StyleSheet.create({
   },
   sectionStack: {
     paddingHorizontal: 16,
-    gap: 22,
-  },
-  sectionCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  sectionCardBorder: {
-    borderRadius: 24,
-    borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 12,
+    gap: 24,
   },
   sectionHead: {
     flexDirection: 'row',
@@ -1123,13 +1274,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
   paidAction: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#34C759',
+    backgroundColor: GROUP_COLORS.savings.light,
   },
   deleteAction: {
     flex: 1,
@@ -1141,6 +1292,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
 });

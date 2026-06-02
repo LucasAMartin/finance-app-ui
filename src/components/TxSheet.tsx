@@ -44,11 +44,13 @@ const formatOccurredAt = (d: Date) =>
 
 export function TxSheet({
   tx,
+  visible,
   theme,
   onClose,
   onDeleted,
 }: {
   tx: Transaction | null;
+  visible: boolean;
   theme: Theme;
   onClose: () => void;
   onDeleted?: (tx: Transaction) => void;
@@ -160,7 +162,7 @@ export function TxSheet({
     <>
       <Host style={{ width: 0, height: 0, position: 'absolute' }}>
           <BottomSheet
-            isPresented={tx !== null}
+            isPresented={visible}
             onIsPresentedChange={(v) => { if (!v) onClose(); }}
           >
             <Group modifiers={[
@@ -528,13 +530,13 @@ const S = StyleSheet.create({
   },
   hero: {
     alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 18,
+    paddingTop: 12,
+    paddingBottom: 20,
     paddingHorizontal: 20,
   },
   heroCompact: {
-    paddingTop: 6,
-    paddingBottom: 10,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   catCircle: {
     width: 52,
@@ -586,7 +588,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
-    paddingVertical: 14,
+    paddingVertical: 16,
   },
   expandHintText: { ...TYPE.captionEm },
   editSection: {
@@ -599,7 +601,7 @@ const S = StyleSheet.create({
   editTitle: {
     ...TYPE.labelLg,
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   fieldCard: {
     borderRadius: 14,
@@ -636,8 +638,8 @@ const S = StyleSheet.create({
     overflow: 'hidden',
   },
   inlineDatePickerWrap: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   categoryPanel: {
     borderRadius: 18,
@@ -678,7 +680,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
   },
   deleteBtn: {
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
   },
 });

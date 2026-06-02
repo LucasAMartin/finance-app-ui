@@ -8,7 +8,6 @@ import {
   Animated,
   ImageBackground,
   Dimensions,
-  TouchableOpacity,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,13 +30,13 @@ import {
   CAUTION_AMBER,
   overText,
   cautionText,
+  overBg,
 } from '../theme';
 import {
   MEDIA,
   DARK_TEXT_SHADOW,
   makeP,
   deriveFloor,
-  WallpaperP as P,
 } from '../wallpaperPalette';
 import {
   useRepositories,
@@ -62,28 +61,28 @@ import {
   type ActivityInitialFilter,
   type CatRow,
 } from '../selectors/spending';
+import { buildSavedMetric } from '../selectors/savings';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
-import { LineChart } from '../components/charts/LineChart';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
 import type { InsightDetailTarget } from './InsightDetailScreen';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { SectionCard } from '../components/SectionCard';
 import {
-  InsightBarChart,
-  InsightPaceChart,
   type InsightBin,
   type InsightDetail,
 } from '../components/charts/InsightsCharts';
 import { SnapshotViz, type SnapshotVizSpec } from '../components/charts/SnapshotViz';
 import { TYPE } from '../typography';
+import { RADIUS } from '../radius';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 const CARD_OUTER_PAD = 16;
-const CARD_INNER_PAD = 18;
+const CARD_INNER_PAD = 20;
 const CARD_W = SCREEN_W - CARD_OUTER_PAD * 2;
 const CHART_INNER_W = CARD_W - CARD_INNER_PAD * 2;
 const CHART_H = 188;
@@ -96,18 +95,16 @@ const HERO_CHART_W = CARD_W - TILE_PAD * 2;
 const HALF_W = (CARD_W - 12) / 2;
 const HALF_CHART_W = HALF_W - TILE_PAD * 2;
 
-const CHART_TYPES = ['Spent', 'Pace'] as const;
 const PERIODS = ['Week', 'Month', 'Year'] as const;
 type Period = (typeof PERIODS)[number];
 
-// UI timeframe chips. The data layer only models Week/Month/Year, so 6M is
-// temporarily mapped onto the yearly range until a real 6-month range exists.
-const TIMEFRAMES = ['1W', '1M', '6M', '1Y'] as const;
+// UI timeframe chips. Each maps onto a range the data layer actually models, so
+// every chip's label matches the range it shows.
+const TIMEFRAMES = ['1W', '1M', '1Y'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 const TF_TO_PERIOD: Record<Timeframe, Period> = {
   '1W': 'Week',
   '1M': 'Month',
-  '6M': 'Year',
   '1Y': 'Year',
 };
 
@@ -116,7 +113,6 @@ const TF_TO_PERIOD: Record<Timeframe, Period> = {
 const TREND_CADENCE: Record<Timeframe, string> = {
   '1W': 'Daily',
   '1M': 'Weekly',
-  '6M': 'Monthly',
   '1Y': 'Quarterly',
 };
 
@@ -130,14 +126,18 @@ function trendScrubLabel(
   if (tf === '1W')
     return slot.from.toLocaleDateString('en-US', { weekday: 'long' });
   if (tf === '1M') return `Week ${idx + 1}`;
-  if (tf === '6M')
-    return slot.from.toLocaleDateString('en-US', { month: 'long' });
   return `Q${idx + 1}`;
 }
 
-// Snapshot rows are drawn from a scored candidate pool; only the strongest few
-// surface so the card stays compact and varies with the data/period.
-const MAX_SNAPSHOTS = 4;
+// Snapshot rows are drawn from a scored candidate pool; the pool is returned
+// sorted so each consumer can slice the strongest few for its own section.
+
+// Snapshot keys that represent period-over-period movement — surfaced together
+// in the "What changed" section.
+const CHANGE_KEYS = new Set(['trending-up', 'most-improved', 'bill-changed']);
+
+// The two "Where it went" lists, switched via the in-tile segmented control.
+const WHERE_TABS = ['Top Categories', 'Top Merchants'] as const;
 
 interface Snapshot {
   key: string;
@@ -147,6 +147,18 @@ interface Snapshot {
   icon: string;
   score: number;        // higher = more noteworthy right now
   detail: InsightDetail; // every snapshot opens a detail sheet (with a filter)
+}
+
+// A single "Where it went" row (category or merchant). The detail is prebuilt so
+// a tap opens the native insight sheet, identical to a "What changed" row.
+interface BreakdownItem {
+  key: string;
+  color: string;
+  icon: string;
+  label: string;
+  spent: number;
+  prevSpent: number;
+  detail: InsightDetail;
 }
 
 // Match the Home screen's spending palette: vibrant group colors in light mode,
@@ -289,26 +301,22 @@ function DeltaBadge({
   if (d.kind === 'new') return null;
 
   const isUp = d.kind === 'up';
+  // "Spending fell" reuses the savings group color so green reads identically to
+  // every other positive signal on the screen, rather than a one-off hex.
+  const green = groupDisplayColor('savings', dark);
   return (
     <View
       style={[
         styles.deltaBadge,
         {
           backgroundColor: isUp
-            ? dark
-              ? 'rgba(212,82,42,0.18)'
-              : 'rgba(212,82,42,0.12)'
-            : dark
-              ? 'rgba(122,205,138,0.16)'
-              : 'rgba(58,135,80,0.10)',
+            ? overBg(dark)
+            : `${green}1F`,
         },
       ]}
     >
       <Text
-        style={[
-          styles.deltaText,
-          { color: isUp ? OVER_DOT : dark ? '#7ACD8A' : '#3A8750' },
-        ]}
+        style={[styles.deltaText, { color: isUp ? OVER_DOT : green }]}
       >
         {isUp ? '▲' : '▼'} {d.pct}%
       </Text>
@@ -317,28 +325,6 @@ function DeltaBadge({
 }
 
 // ── Frosted section card ──────────────────────────────────────────
-function SectionCard({
-  children,
-  style,
-  dark,
-}: {
-  children: React.ReactNode;
-  style?: any;
-  dark: boolean;
-}) {
-  const borderColor = dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
-  return (
-    <BlurView
-      intensity={dark ? 70 : 100}
-      tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-      style={[styles.sectionCard, style]}
-    >
-      <View style={[styles.sectionCardBorder, { borderColor }]}>
-        {children}
-      </View>
-    </BlurView>
-  );
-}
 
 // ── Header icon button ────────────────────────────────────────────
 function IconBtn({
@@ -370,45 +356,6 @@ function IconBtn({
   );
 }
 
-function SelectedInsightStrip({
-  detail,
-  theme,
-  p,
-  onOpen,
-}: {
-  detail: InsightDetail | null;
-  theme: Theme;
-  p: P;
-  onOpen: () => void;
-}) {
-  if (!detail) return null;
-  return (
-    <Pressable
-      onPress={onOpen}
-      accessibilityRole="button"
-      accessibilityLabel={`Show details for ${detail.title}`}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      style={[styles.selectedStrip, { borderTopColor: p.hairline }]}
-    >
-      <View style={[styles.selectedDot, { backgroundColor: detail.color }]} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[TYPE.captionEm, { color: theme.text }]} numberOfLines={1}>
-          {detail.title}
-          <Text style={{ color: theme.textTer }}> · </Text>
-          {detail.amount}
-        </Text>
-        <Text
-          style={[TYPE.caption, { color: theme.textSec, marginTop: 1 }]}
-          numberOfLines={1}
-        >
-          {detail.description}
-        </Text>
-      </View>
-      <Icon name="chevR" size={15} color={p.textSec} stroke={2.2} />
-    </Pressable>
-  );
-}
-
 function EmptyState({
   title,
   body,
@@ -434,70 +381,6 @@ function EmptyState({
         {body}
       </Text>
     </View>
-  );
-}
-
-function ReadoutRow({
-  label,
-  title,
-  icon,
-  theme,
-  text,
-  textTer,
-  onPress,
-}: {
-  label: string;
-  title: string;
-  icon: string;
-  theme: Theme;
-  text: string;
-  textTer: string;
-  onPress?: () => void;
-}) {
-  const content = (
-    <>
-      <View
-        style={[
-          styles.readoutIcon,
-          {
-            backgroundColor: theme.dark ? 'rgba(242,244,245,0.92)' : '#0B0D10',
-          },
-        ]}
-      >
-        <Icon
-          name={icon}
-          size={15}
-          color={theme.dark ? '#080A0D' : '#F2F4F5'}
-          stroke={1.8}
-        />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[TYPE.labelSm, { color: textTer }]}>{label}</Text>
-        <Text
-          style={[TYPE.bodySmEm, { color: text, marginTop: 2 }]}
-          numberOfLines={1}
-        >
-          {title}
-        </Text>
-      </View>
-      {onPress ? (
-        <Icon name="chevR" size={14} color={textTer} stroke={2.1} />
-      ) : null}
-    </>
-  );
-
-  if (!onPress) return <View style={styles.readoutRow}>{content}</View>;
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.65}
-      delayPressIn={0}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}. ${title}`}
-      style={styles.readoutRow}
-    >
-      {content}
-    </TouchableOpacity>
   );
 }
 
@@ -547,9 +430,7 @@ function InsightBottomSheet({
               style={[
                 styles.insightSheetContent,
                 {
-                  backgroundColor: theme.dark
-                    ? theme.surface
-                    : 'rgba(255,255,255,0.44)',
+                  backgroundColor: theme.surface,
                   paddingBottom: Math.max(insets.bottom, 16) + 12,
                 },
               ]}
@@ -594,7 +475,7 @@ function InsightBottomSheet({
                     <Text
                       style={[
                         TYPE.display,
-                        { color: theme.text, marginTop: 10 },
+                        { color: theme.text, marginTop: 12 },
                       ]}
                     >
                       {d.amount}
@@ -697,13 +578,14 @@ export function InsightsScreen({
   onViewActivity,
   onOpenInsight,
 }: Props) {
-  const { transactionsRepo, categoriesRepo, budgetsRepo, recurringRulesRepo } =
+  const { transactionsRepo, categoriesRepo, budgetsRepo, recurringRulesRepo, incomeRepo } =
     useRepositories();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
   const categories = useRepositoryList(categoriesRepo);
   const budgets = useRepositoryList(budgetsRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
+  const incomes = useRepositoryList(incomeRepo);
   const { wallpaper, wallpaperFloorBase } = useTheme();
   const insets = useSafeAreaInsets();
   const pWall = makeP(true);
@@ -830,56 +712,6 @@ export function InsightsScreen({
     ranges.current.to,
     rangeComplete,
     recurringRules,
-    theme.dark,
-  ]);
-  const primaryComparison = useMemo(() => {
-    if (projected.budget > 0) {
-      const pct = Math.round(
-        (Math.abs(projected.delta) / projected.budget) * 100,
-      );
-      // Within a couple of points of plan reads as "on track" rather than a
-      // misleadingly precise over/under figure.
-      if (pct <= 2) {
-        return { label: 'On track with plan', color: p.textSec };
-      }
-      const direction = projected.delta > 0 ? 'over' : 'under';
-      const suffix = rangeComplete ? 'plan' : 'projected';
-      return {
-        label: `${pct}% ${direction} ${suffix}`,
-        color: projected.color,
-      };
-    }
-
-    // Fallback: compare discretionary spend only, so a bill that lands in one
-    // period but not the comparison period doesn't fake a big swing.
-    const variable = catBreakdown.variableTotal;
-    const prevVariable = catBreakdown.prevVariableTotal;
-    if (prevVariable > 0) {
-      const pct = Math.round(
-        Math.abs((variable - prevVariable) / prevVariable) * 100,
-      );
-      return {
-        label: `${pct}% ${variable <= prevVariable ? 'lower' : 'higher'} than last ${period.toLowerCase()}`,
-        color:
-          variable <= prevVariable
-            ? groupDisplayColor('savings', theme.dark)
-            : OVER_DOT,
-      };
-    }
-
-    return {
-      label: rangeComplete ? 'Range complete' : 'Range in progress',
-      color: p.textSec,
-    };
-  }, [
-    catBreakdown.prevVariableTotal,
-    catBreakdown.variableTotal,
-    period,
-    p.textSec,
-    projected.budget,
-    projected.color,
-    projected.delta,
-    rangeComplete,
     theme.dark,
   ]);
   const hasSpending = total > 0;
@@ -1297,7 +1129,7 @@ export function InsightsScreen({
       },
     });
 
-    return out.sort((a, b) => b.score - a.score).slice(0, MAX_SNAPSHOTS);
+    return out.sort((a, b) => b.score - a.score);
   }, [
     catBreakdown.rows,
     catBreakdown.variableTotal,
@@ -1315,6 +1147,21 @@ export function InsightsScreen({
     upcomingBills,
   ]);
 
+  // Which "Where it went" list is showing — top categories (0) or merchants (1).
+  const [whereTab, setWhereTab] = useState(0);
+
+  // "What changed" pulls the movement-oriented insights out of the snapshot pool
+  // (categories or bills that rose/fell vs the previous period). The section is
+  // hidden entirely when nothing notable moved.
+  const changeSnapshots = useMemo(
+    () => snapshots.filter((s) => CHANGE_KEYS.has(s.key)).slice(0, 3),
+    [snapshots],
+  );
+
+  // A tapped "What changed" row opens the native insight sheet (rich viz +
+  // "View matching transactions"); null = closed.
+  const [insightDetail, setInsightDetail] = useState<InsightDetail | null>(null);
+
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   const timeframeIdx = TIMEFRAMES.indexOf(timeframe);
@@ -1324,6 +1171,104 @@ export function InsightsScreen({
       : period === 'Month'
         ? 'This month'
         : 'This year';
+
+  // "Where it went" breakdowns. Each row carries a ready-built InsightDetail so
+  // tapping it opens the same native sheet as a "What changed" row (rich viz +
+  // "View matching transactions"). Bars scale to the leader so the list reads as
+  // a ranking, not a share-of-total. Both lists arrive sorted by spend.
+  const breakdownViz = (
+    spent: number,
+    prevSpent: number,
+    color: string,
+    dec: number,
+    per: string,
+  ): SnapshotVizSpec =>
+    prevSpent > 0
+      ? {
+          kind: 'compare',
+          prev: prevSpent,
+          now: spent,
+          color,
+          caption: `${signedMoney(spent - prevSpent)} vs last ${per}`,
+        }
+      : {
+          kind: 'meter',
+          value: spent,
+          max: Math.max(total, spent),
+          color,
+          leftLabel: money(spent, dec),
+          rightLabel: `of ${money(total)} spent`,
+        };
+
+  const categoryItems = useMemo<BreakdownItem[]>(() => {
+    const per = period.toLowerCase();
+    const range = { dateFrom: ranges.current.from, dateTo: ranges.current.to };
+    return catBreakdown.rows
+      .filter((r) => r.spent > 0)
+      .slice(0, 6)
+      .map((r) => {
+        const color = categoryDisplayColor(r.cat, categories, theme.dark);
+        const dec = Math.abs(r.spent) < 100 ? 2 : 0;
+        const share = total > 0 ? Math.round((r.spent / total) * 100) : 0;
+        return {
+          key: r.cat,
+          color,
+          icon: r.icon,
+          label: r.label,
+          spent: r.spent,
+          prevSpent: r.prevSpent,
+          detail: {
+            title: r.label,
+            eyebrow: `${rangeContextLabel} · category`,
+            amount: money(r.spent, dec),
+            color,
+            icon: r.icon,
+            description:
+              r.prevSpent > 0
+                ? `${share}% of spend · ${signedMoney(r.spent - r.prevSpent)} vs last ${per}.`
+                : `${share}% of spend across ${r.txCount} ${r.txCount === 1 ? 'charge' : 'charges'}.`,
+            viz: breakdownViz(r.spent, r.prevSpent, color, dec, per),
+            filter: { catIds: [r.cat], ...range },
+          },
+        };
+      });
+  }, [catBreakdown.rows, categories, period, ranges, rangeContextLabel, theme.dark, total]);
+
+  const merchantItems = useMemo<BreakdownItem[]>(() => {
+    const per = period.toLowerCase();
+    const range = { dateFrom: ranges.current.from, dateTo: ranges.current.to };
+    return merchBreakdown.rows
+      .filter((r) => r.spent > 0)
+      .slice(0, 6)
+      .map((r) => {
+        const color = categoryDisplayColor(r.cat, categories, theme.dark);
+        const dec = Math.abs(r.spent) < 100 ? 2 : 0;
+        const share = Math.round(r.pct * 100);
+        return {
+          key: r.merchant,
+          color,
+          icon: r.icon,
+          label: r.merchant,
+          spent: r.spent,
+          prevSpent: r.prevSpent,
+          detail: {
+            title: r.merchant,
+            eyebrow: `${rangeContextLabel} · ${r.recurring ? 'recurring bill' : 'merchant'}`,
+            amount: money(r.spent, dec),
+            color,
+            icon: r.icon,
+            description: r.recurring
+              ? `Recurring bill · ${share}% of spend.`
+              : `${share}% of spend across ${r.txCount} ${r.txCount === 1 ? 'charge' : 'charges'}.`,
+            viz: breakdownViz(r.spent, r.prevSpent, color, dec, per),
+            filter: { merchantQuery: r.merchant, ...range },
+          },
+        };
+      });
+  }, [merchBreakdown.rows, categories, period, ranges, rangeContextLabel, theme.dark, total]);
+
+  const whereItems = whereTab === 0 ? categoryItems : merchantItems;
+  const whereMax = whereItems[0]?.spent ?? 0;
 
   // Daily (Week/Month) or monthly (Year) spend series powering the hero line.
   // Aggregated in the data layer (GROUP BY) rather than by iterating every row.
@@ -1427,38 +1372,8 @@ export function InsightsScreen({
     ? scrubDateLabel(scrubIdx)
     : rangeContextLabel;
 
-  // ── Bento summary tiles (v3, in progress) ────────────────────────
-  // Most values come straight from selectors already computed above; the
-  // native Gauge (Left-to-spend tile) and the hero chart get wired in later
-  // build steps. Week has no real budget, so the budget tile flips to a
-  // projection (consistent with the rest of the screen's pace framing).
-  const isCycle = period !== 'Week';
-  const leftToSpend = projected.budget - total;
-  const onTrack = projected.delta <= 0;
+  // ── Bento summary tiles ───────────────────────────────────────────
   const savingsTint = groupDisplayColor('savings', theme.dark);
-  const groupMix = (() => {
-    const totals: Record<GroupKey, number> = { needs: 0, wants: 0, savings: 0 };
-    catBreakdown.rows.forEach((r) => {
-      totals[categoryGroupFor(r.cat, categories)] += r.spent;
-    });
-    const sum = totals.needs + totals.wants + totals.savings || 1;
-    return {
-      totals,
-      pct: {
-        needs: Math.round((totals.needs / sum) * 100),
-        wants: Math.round((totals.wants / sum) * 100),
-        savings: Math.round((totals.savings / sum) * 100),
-      },
-    };
-  })();
-  // The single most-notable insight, excluding the ones that already have their
-  // own tile (next bill, the 50/30/20 mix).
-  const topMoved =
-    snapshots.find((s) => s.key !== 'next-bill' && s.key !== 'mix') ??
-    snapshots[0];
-  const nextBill = upcomingBills[0];
-  const budgetFillPct =
-    projected.budget > 0 ? Math.min(1, total / projected.budget) : 0;
   // Neutral line colors for the spend chart (no accent in data viz).
   const lineColor = theme.dark
     ? 'rgba(242,244,245,0.72)'
@@ -1466,6 +1381,41 @@ export function InsightsScreen({
   const lineColorFaint = theme.dark
     ? 'rgba(242,244,245,0.32)'
     : 'rgba(14,12,24,0.22)';
+  const savedMetric = useMemo(
+    () =>
+      buildSavedMetric({
+        transactionsRepo,
+        categories,
+        incomes,
+        period,
+        from: ranges.current.from,
+        to: ranges.current.to,
+        now,
+      }),
+    [
+      transactionsRepo,
+      categories,
+      incomes,
+      period,
+      ranges.current.from,
+      ranges.current.to,
+      now,
+      repoVersion,
+    ],
+  );
+
+  // Scrub state for the Total saved tile — mirrors the hero: while held, the
+  // headline shows the cumulative saved amount at that point and the sub-label
+  // shows the date it represents (same date mapping as the hero series).
+  const [savedScrubIdx, setSavedScrubIdx] = useState<number | null>(null);
+  useEffect(() => setSavedScrubIdx(null), [savedMetric.cumulativeSeries]);
+  const savedScrubbing = savedScrubIdx != null;
+  const savedAmount = savedScrubbing
+    ? savedMetric.cumulativeSeries[savedScrubIdx] ?? savedMetric.total
+    : savedMetric.total;
+  const savedSubLabel = savedScrubbing
+    ? scrubDateLabel(savedScrubIdx)
+    : rangeContextLabel;
 
   const scrimTop = theme.dark ? 'rgba(3,5,8,0.55)' : 'rgba(3,5,8,0.30)';
   const scrimMid = theme.dark ? 'rgba(3,5,8,0.34)' : 'rgba(3,5,8,0.30)';
@@ -1590,7 +1540,7 @@ export function InsightsScreen({
                       : 'rgba(11,13,16,0.62)',
                   }}
                   activeFontStyle={{
-                    color: theme.dark ? '#080A0D' : '#F2F4F5',
+                    color: theme.accent.ink,
                     fontWeight: '600',
                   }}
                   style={styles.timeframeSeg}
@@ -1658,7 +1608,7 @@ export function InsightsScreen({
                 </View>
               </BentoTile>
 
-              {/* Row: Spending trends | Net cashflow */}
+              {/* Row: Spending trends | Total saved */}
               <View style={styles.bentoRow}>
                 <BentoTile
                   dark={theme.dark}
@@ -1708,108 +1658,225 @@ export function InsightsScreen({
                   style={styles.tileHalf}
                   onPress={() =>
                     onOpenInsight({
-                      title: 'Net cashflow',
+                      kind: 'savings',
+                      title: 'Total saved',
                       subtitle: rangeContextLabel,
                       icon: 'chart',
+                      accentColor: savingsTint,
                     })
                   }
-                  accessibilityLabel="Net cashflow"
+                  accessibilityLabel={`Total saved, ${money(savedAmount)}`}
                 >
                   <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                    Net cashflow
+                    Total saved
                   </Text>
                   <Text
-                    style={[styles.tileValue, { color: p.text }]}
+                    style={[styles.tileValue, { color: savingsTint }]}
                     numberOfLines={1}
                   >
-                    {money(0)}
+                    {money(savedAmount)}
+                  </Text>
+                  <Text
+                    style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
+                    numberOfLines={1}
+                  >
+                    {savedSubLabel}
                   </Text>
                   <View style={styles.tileMiniChart}>
-                    <LineChart
-                      data={lineSeries}
+                    <SpendChart
+                      data={savedMetric.cumulativeSeries}
                       width={HALF_CHART_W}
                       height={40}
-                      color={lineColorFaint}
+                      color={savingsTint}
+                      fillColor={savingsTint}
+                      ringColor={theme.surface}
                       strokeWidth={2}
+                      onScrub={setSavedScrubIdx}
                     />
                   </View>
                 </BentoTile>
               </View>
 
-              {/* Budget (full-width / "double" tile) */}
-              <Text style={[styles.bentoSection, { color: pWall.text }, shadow]}>
-                Budget
-              </Text>
-              <BentoTile
-                dark={theme.dark}
-                style={styles.tileBudget}
-                onPress={() =>
-                  onOpenInsight({
-                    title: 'Budget',
-                    subtitle: rangeContextLabel,
-                    icon: 'chart',
-                    accentColor: onTrack ? savingsTint : OVER_DOT,
-                  })
-                }
-                accessibilityLabel="Budget"
-              >
-                <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                  {isCycle ? 'This month' : 'This week'}
-                </Text>
-                <View style={styles.budgetLineRow}>
-                  <Text style={[styles.tileValue, { color: p.text }]}>
-                    {money(Math.max(0, leftToSpend))}
+              {/* What changed — movement vs the previous period */}
+              {changeSnapshots.length > 0 ? (
+                <>
+                  <Text style={[styles.bentoSection, { color: pWall.text }, shadow]}>
+                    What changed
                   </Text>
-                  <Text style={[TYPE.body, { color: p.textSec }]}>
-                    left to spend
-                  </Text>
-                </View>
-                <View style={styles.budgetStatusRow}>
-                  <View
-                    style={[
-                      styles.budgetDot,
-                      { backgroundColor: onTrack ? savingsTint : OVER_DOT },
-                    ]}
+                  <BentoTile dark={theme.dark}>
+                    {changeSnapshots.map((s, i) => (
+                      <Pressable
+                        key={s.key}
+                        onPress={() => setInsightDetail(s.detail)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${s.label}. ${s.title}`}
+                        style={({ pressed }) => [
+                          styles.changeRow,
+                          {
+                            borderBottomWidth:
+                              i < changeSnapshots.length - 1
+                                ? StyleSheet.hairlineWidth
+                                : 0,
+                            borderBottomColor: p.hairline,
+                            opacity: pressed ? 0.6 : 1,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[styles.changeIcon, { backgroundColor: `${s.color}26` }]}
+                        >
+                          <Icon name={s.icon} size={15} color={s.color} stroke={1.8} />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                            {s.label}
+                          </Text>
+                          <Text
+                            style={[TYPE.bodySmEm, { color: p.text, marginTop: 2 }]}
+                            numberOfLines={1}
+                          >
+                            {s.title}
+                          </Text>
+                        </View>
+                        <Icon name="chevR" size={14} color={p.textTer} stroke={2.1} />
+                      </Pressable>
+                    ))}
+                  </BentoTile>
+                </>
+              ) : null}
+
+              {/* Where it went — switchable top categories / merchants. The
+                  picker lives at the top of the tile (no section header); a row
+                  tap opens the same insight sheet as "What changed". */}
+              {hasSpending ? (
+                <BentoTile dark={theme.dark}>
+                  <SegmentedControl
+                    values={WHERE_TABS as unknown as string[]}
+                    selectedIndex={whereTab}
+                    onChange={(e) =>
+                      setWhereTab(e.nativeEvent.selectedSegmentIndex)
+                    }
+                    tintColor={theme.accent.dot}
+                    appearance={theme.dark ? 'dark' : 'light'}
+                    backgroundColor={theme.chipBg}
+                    fontStyle={{ color: theme.textSec }}
+                    activeFontStyle={{
+                      color: theme.accent.ink,
+                      fontWeight: '600',
+                    }}
+                    style={styles.whereSeg}
                   />
-                  <Text
-                    style={[
-                      TYPE.captionEm,
-                      { color: onTrack ? savingsTint : OVER_DOT },
-                    ]}
-                  >
-                    {onTrack ? 'On track' : 'Over budget'}
-                  </Text>
-                </View>
-                <View style={[styles.budgetBar, { backgroundColor: p.hairline }]}>
-                  <View
-                    style={[
-                      styles.budgetBarFill,
-                      {
-                        width: `${Math.max(0, 1 - budgetFillPct) * 100}%` as any,
-                        backgroundColor: onTrack ? savingsTint : OVER_DOT,
-                      },
-                    ]}
-                  />
-                </View>
-                <View style={styles.budgetFooter}>
-                  <Text style={[TYPE.caption, { color: p.textTer }]}>
-                    {Math.round(Math.max(0, 1 - budgetFillPct) * 100)}% remaining
-                  </Text>
-                  <Text style={[TYPE.caption, { color: p.textTer }]}>
-                    {money(projected.budget)}
-                  </Text>
-                </View>
-              </BentoTile>
+                  <View style={styles.whereList}>
+                    {whereItems.length === 0 ? (
+                      <Text
+                        style={[
+                          TYPE.bodySm,
+                          { color: p.textTer, paddingVertical: 12 },
+                        ]}
+                      >
+                        Nothing here for this period.
+                      </Text>
+                    ) : (
+                      whereItems.map((it, i) => {
+                        const dec = Math.abs(it.spent) < 100 ? 2 : 0;
+                        const fill = whereMax > 0 ? it.spent / whereMax : 0;
+                        return (
+                          <Pressable
+                            key={it.key}
+                            onPress={() => setInsightDetail(it.detail)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${it.label}, ${money(it.spent, dec)}`}
+                            style={({ pressed }) => [
+                              styles.catRow,
+                              {
+                                borderBottomWidth:
+                                  i < whereItems.length - 1
+                                    ? StyleSheet.hairlineWidth
+                                    : 0,
+                                borderBottomColor: p.hairline,
+                                opacity: pressed ? 0.6 : 1,
+                              },
+                            ]}
+                          >
+                            <View
+                              style={[styles.catIcon, { backgroundColor: it.color }]}
+                            >
+                              <Icon
+                                name={it.icon}
+                                size={16}
+                                color="#FFFFFF"
+                                stroke={1.7}
+                              />
+                            </View>
+                            <View style={styles.catMid}>
+                              <View style={styles.catTopLine}>
+                                <Text
+                                  style={[
+                                    TYPE.body,
+                                    { color: p.text, flexShrink: 1 },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {it.label}
+                                </Text>
+                                <View style={styles.catRight}>
+                                  <Text style={[TYPE.body, { color: p.text }]}>
+                                    {money(it.spent, dec)}
+                                  </Text>
+                                  <DeltaBadge
+                                    spent={it.spent}
+                                    prevSpent={it.prevSpent}
+                                    dark={theme.dark}
+                                  />
+                                </View>
+                              </View>
+                              <View
+                                style={[
+                                  styles.catBar,
+                                  { backgroundColor: p.hairline },
+                                ]}
+                              >
+                                <View
+                                  style={[
+                                    styles.catBarFill,
+                                    {
+                                      width: `${Math.max(4, fill * 100)}%` as any,
+                                      backgroundColor: it.color,
+                                    },
+                                  ]}
+                                />
+                              </View>
+                            </View>
+                          </Pressable>
+                        );
+                      })
+                    )}
+                  </View>
+                </BentoTile>
+              ) : (
+                <EmptyState
+                  theme={theme}
+                  title="No spending yet this period"
+                  body="Log an expense and your top categories, merchants, and what changed since last period show up here."
+                />
+              )}
             </View>
 
           </View>
         </Animated.ScrollView>
+
+        <InsightBottomSheet
+          detail={insightDetail}
+          theme={theme}
+          onClose={() => setInsightDetail(null)}
+          onViewActivity={onViewActivity}
+        />
     </View>
   );
 }
 
 // Spacing follows a 4px grid — 4 / 8 / 12 / 16 / 20 / 24. The only off-grid
-// value is CARD_INNER_PAD (18), kept because chart geometry is derived from it.
+// value is CARD_INNER_PAD (20), kept because chart geometry is derived from it.
 const styles = StyleSheet.create({
   headerWrap: {
     position: 'absolute',
@@ -1870,47 +1937,74 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  timeframeSeg: { width: 200, height: 30, borderRadius: 13, overflow: 'hidden' },
+  timeframeSeg: { width: 200, height: 30, borderRadius: RADIUS.field, overflow: 'hidden' },
   monthLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   monthLabelText: { ...TYPE.subsectionTitle },
   bentoRow: { flexDirection: 'row', gap: 12 },
   tileHero: { minHeight: 260 },
   tileHalf: { flex: 1, minHeight: Math.round(HALF_W) },
   tileWide: { minHeight: 56 },
-  tileBudget: { minHeight: 150 },
   tileHeroAmount: { ...TYPE.display, lineHeight: 38, marginTop: 8 },
   heroSubLabel: { marginTop: 2 },
-  tileValue: { ...TYPE.headline, marginTop: 6 },
+  tileValue: { ...TYPE.headline, marginTop: 8 },
   tileValueSm: { ...TYPE.subsectionTitle, marginTop: 8 },
   heroChart: { marginTop: 'auto', height: 150 },
   tileMiniChart: { marginTop: 'auto', height: 40 },
   tileTrendChart: { marginTop: 'auto', height: 64 },
   bentoSection: { ...TYPE.sectionTitle, marginTop: 4 },
-  budgetLineRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 6,
-    marginTop: 6,
-  },
-  budgetStatusRow: {
+  // "Where it went" category rows — flat rows inside one frosted tile.
+  catRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
+    gap: 12,
+    paddingVertical: 12,
   },
-  budgetDot: { width: 7, height: 7, borderRadius: 4 },
-  budgetBar: {
-    height: 6,
+  catIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  catMid: { flex: 1, minWidth: 0 },
+  catTopLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  catRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  catBar: {
+    height: 5,
     borderRadius: 3,
     overflow: 'hidden',
-    marginTop: 12,
+    marginTop: 9,
   },
-  budgetBarFill: { height: 6, borderRadius: 3 },
-  budgetFooter: {
+  catBarFill: { height: 5, borderRadius: 3 },
+  // "What changed" movement rows.
+  changeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
   },
+  changeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  // "Where it went" tile: segmented picker at the top, list below.
+  whereSeg: { height: 30, borderRadius: RADIUS.field, overflow: 'hidden' },
+  whereList: { marginTop: 4 },
   tileBar: {
     height: 6,
     borderRadius: 3,
@@ -1933,14 +2027,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   tileWideRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionCard: { borderRadius: 24, overflow: 'hidden' },
-  sectionCardBorder: {
-    borderRadius: 24,
-    borderWidth: 1,
-    paddingHorizontal: CARD_INNER_PAD,
-    paddingTop: 18,
-    paddingBottom: 16,
-  },
   // Chart
   chartTitle: { ...TYPE.bodySmEm, opacity: 0.7, letterSpacing: 0.2 },
   chartPeriodSegmented: {
@@ -1958,7 +2044,7 @@ const styles = StyleSheet.create({
   chartHeroLabel: { ...TYPE.bodySm, marginTop: 2 },
   chartHeroRight: {
     alignItems: 'flex-end',
-    gap: 6,
+    gap: 8,
     flexShrink: 0,
   },
   chartSegmented: {
@@ -1967,50 +2053,11 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   chartSlide: { height: CHART_H, justifyContent: 'center' },
-  selectedStrip: {
-    minHeight: 50,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 12,
-    paddingBottom: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 10,
-  },
-  selectedDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-  },
   emptyState: {
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 16,
     marginTop: 12,
-  },
-  // Readout
-  readoutHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  readoutRows: {
-    gap: 4,
-  },
-  readoutRow: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-  },
-  readoutIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   changedBlock: {
     borderTopWidth: 1,
@@ -2040,12 +2087,12 @@ const styles = StyleSheet.create({
   rowTitle: { ...TYPE.body },
   rowSub: { ...TYPE.caption, marginTop: 2 },
   rowRight: { alignItems: 'flex-end', flexShrink: 0, minWidth: 92 },
-  rowAmtRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowAmtRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowAmt: { ...TYPE.body },
   rowPct: { ...TYPE.caption, marginTop: 2 },
   rowBudgetStatus: { ...TYPE.caption, marginTop: 2 },
   // Delta badge
-  deltaBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 100 },
+  deltaBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 100 },
   deltaText: { fontSize: 11, fontWeight: '700', letterSpacing: -0.1 },
   // Budget bar
   budgetTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
@@ -2054,7 +2101,7 @@ const styles = StyleSheet.create({
   insightSheetContent: {
     flex: 1,
     paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingTop: 20,
   },
   insightSheetHero: {
     alignItems: 'center',
@@ -2076,7 +2123,7 @@ const styles = StyleSheet.create({
   insightStatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 18,
+    marginTop: 20,
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
@@ -2090,7 +2137,7 @@ const styles = StyleSheet.create({
     marginVertical: 1,
   },
   insightSheetAction: {
-    marginTop: 14,
+    marginTop: 16,
     minHeight: 50,
     borderRadius: 16,
     alignItems: 'center',

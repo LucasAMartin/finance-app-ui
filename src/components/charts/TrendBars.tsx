@@ -1,12 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import Svg, {
-  Defs,
-  G,
-  LinearGradient,
-  Rect,
-  Stop,
-  Text as SvgText,
-} from 'react-native-svg';
+import Svg, { Rect, Text as SvgText } from 'react-native-svg';
 import Animated, {
   Easing,
   runOnJS,
@@ -27,20 +20,22 @@ const GROW_MS = 600;
 
 interface BarProps {
   x: number;
-  y: number;
   width: number;
-  height: number;
+  /** Resting (final) bar height; the grow animates up to this. */
+  fullHeight: number;
   rx: number;
   baseY: number;
-  fillId: string;
+  fill: string;
   index: number;
   /** New identity whenever the series changes → replays the grow. */
   playKey: object;
 }
 
 // One bar, owning its own grow animation so the stagger can offset each by
-// index without violating hook rules (a shared per-index loop can't).
-function Bar({ x, y, width, height, rx, baseY, fillId, index, playKey }: BarProps) {
+// index without violating hook rules (a shared per-index loop can't). Animates
+// the rect's height/y (which react-native-svg drives on the UI thread) rather
+// than a scaleY transform, which animatedProps doesn't propagate for SVG.
+function Bar({ x, width, fullHeight, rx, baseY, fill, index, playKey }: BarProps) {
   const grow = useSharedValue(0);
   useEffect(() => {
     grow.value = 0;
@@ -50,20 +45,20 @@ function Bar({ x, y, width, height, rx, baseY, fillId, index, playKey }: BarProp
     );
   }, [playKey, index, grow]);
 
-  // Scale up from the baseline so the bar rises out of the floor.
-  const animatedProps = useAnimatedProps(() => ({
-    scaleY: grow.value,
-    originY: baseY,
-  }));
+  // Grow up out of the baseline: height climbs, top edge (y) follows it up.
+  const animatedProps = useAnimatedProps(() => {
+    const h = Math.max(0.01, fullHeight * grow.value);
+    return { height: h, y: baseY - h };
+  });
 
   return (
     <AnimatedRect
       x={x}
-      y={y}
+      y={baseY - fullHeight}
       width={width}
-      height={height}
+      height={fullHeight}
       rx={rx}
-      fill={`url(#${fillId})`}
+      fill={fill}
       animatedProps={animatedProps}
     />
   );
@@ -86,9 +81,9 @@ interface Props {
 }
 
 // Compact bar chart for the Insights "Spending trends" half-tile. Carries the
-// hero's two signatures into the bar idiom: a staggered grow-in on load, and a
-// soft top→bottom gradient fill (brightest at the value, settling toward the
-// base) instead of flat blocks. Neutral only — no chart accent. Long-press drag
+// hero's staggered grow-in on load into the bar idiom; bars use a flat fill
+// (faint by default, the stronger `selectedColor` for the scrubbed bar so it
+// reads as highlighted). Neutral only — no chart accent. Long-press drag
 // scrubs; the parent surfaces the selected bar's total, like the hero line.
 export function TrendBars({
   values,
@@ -114,7 +109,7 @@ export function TrendBars({
     const baseY = padT + plotH;
     const bars = values.map((v, i) => {
       const h = Math.max(2, (v / max) * plotH);
-      return { x: i * band + (band - barW) / 2, y: baseY - h, h };
+      return { x: i * band + (band - barW) / 2, h };
     });
     return { bars, band, baseY, barW };
   }, [values, width, height, n]);
@@ -168,29 +163,15 @@ export function TrendBars({
   return (
     <GestureDetector gesture={pan}>
       <Svg width={width} height={height}>
-        <Defs>
-          {/* Bbox-relative, so each bar fades over its own height: bright at the
-              value, easing toward the base — the hero's gradient, vertical. */}
-          <LinearGradient id="trendRest" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={barColor} stopOpacity={1} />
-            <Stop offset="1" stopColor={barColor} stopOpacity={0.55} />
-          </LinearGradient>
-          <LinearGradient id="trendSel" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={selectedColor} stopOpacity={1} />
-            <Stop offset="1" stopColor={selectedColor} stopOpacity={0.62} />
-          </LinearGradient>
-        </Defs>
-
         {geo.bars.map((b, i) => (
           <Bar
             key={i}
             x={b.x}
-            y={b.y}
             width={geo.barW}
-            height={b.h}
+            fullHeight={b.h}
             rx={rx}
             baseY={geo.baseY}
-            fillId={i === selectedIdx ? 'trendSel' : 'trendRest'}
+            fill={i === selectedIdx ? selectedColor : barColor}
             index={i}
             playKey={playKey}
           />

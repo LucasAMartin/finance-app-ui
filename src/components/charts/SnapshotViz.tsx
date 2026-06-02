@@ -76,7 +76,7 @@ function CaptionRow({
 function Caption({ text, theme }: { text: string; theme: Theme }) {
   return (
     <Text
-      style={[TYPE.caption, { color: theme.textSec, textAlign: 'center', marginTop: 10 }]}
+      style={[TYPE.caption, { color: theme.textSec, textAlign: 'center', marginTop: 12 }]}
       numberOfLines={1}
     >
       {text}
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
   captionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 12,
   },
   meterTrack: {
     height: 10,
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
   compareRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     marginBottom: 8,
   },
   compareTrack: {
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   },
   binLabels: {
     flexDirection: 'row',
-    marginTop: 6,
+    marginTop: 8,
   },
   avgLine: {
     position: 'absolute',

@@ -40,7 +40,7 @@ export function ThemeProvider({
   children,
   followSystem = false,
   defaultDark = false,
-  defaultAccent = 'sage',
+  defaultAccent = 'ink',
   defaultCardStyle = 'flat',
   defaultWallpaperId = DEFAULT_WALLPAPER_ID,
 }: ProviderProps) {

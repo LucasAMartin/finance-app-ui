@@ -275,7 +275,7 @@ const S = StyleSheet.create({
   sheet: {
     flex: 1,
     paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingTop: 20,
   },
   head: {
     flexDirection: 'row',
@@ -293,7 +293,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   input: {
@@ -320,11 +320,11 @@ const S = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
     borderTopWidth: 1,
-    marginTop: 14,
+    marginTop: 16,
   },
   sectionLabel: {
-    marginTop: 18,
-    marginBottom: 10,
+    marginTop: 20,
+    marginBottom: 12,
   },
   categoryGrid: {
     flexDirection: 'row',
@@ -338,7 +338,7 @@ const S = StyleSheet.create({
     gap: 5,
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   subcatList: {
     minHeight: 98,

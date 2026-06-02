@@ -122,7 +122,7 @@ export function PieChart({ data, theme, size = 240, selected, cats = {}, onSelec
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20, gap: 8, paddingVertical: 4 }}
-        style={{ marginTop: 6 }}
+        style={{ marginTop: 8 }}
       >
         {slices.map((s) => {
           const isSel = s.cat === selected;
@@ -136,7 +136,7 @@ export function PieChart({ data, theme, size = 240, selected, cats = {}, onSelec
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 5,
-                paddingHorizontal: 10,
+                paddingHorizontal: 12,
                 paddingVertical: 5,
                 borderRadius: 100,
                 backgroundColor: isSel ? s.color + '30' : theme.chipBg,

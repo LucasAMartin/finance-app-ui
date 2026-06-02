@@ -10,6 +10,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../theme';
 import { Icon } from './Icon';
+import { ScreenExitButton } from './GlassButton';
+import { TYPE } from '../typography';
+import { RADIUS } from '../radius';
 
 export interface DrawerItem {
   id: string;
@@ -87,34 +90,23 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
     >
       {/* Close button — top-left, matches the hamburger position on home */}
       <View style={styles.topRow}>
-        <TouchableOpacity
+        <ScreenExitButton
+          variant="close"
           onPress={onClose}
-          activeOpacity={0.5}
-          delayPressIn={0}
-          hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
-          style={styles.closeBtn}
-        >
-          <Icon name="close" size={22} color={theme.text} stroke={1.9} />
-        </TouchableOpacity>
+          tint={theme.textSec}
+          fallbackBg={theme.chipBg}
+        />
       </View>
 
       {/* Profile */}
       <View style={styles.profile}>
         <View style={[styles.avatar, { backgroundColor: theme.accent.fill }]}>
-          <Text style={{ color: theme.accent.ink, fontSize: 24, fontWeight: '700' }}>A</Text>
+          <Text style={[TYPE.headline, { color: theme.accent.ink }]}>A</Text>
         </View>
-        <Text
-          style={{
-            fontSize: 19,
-            fontWeight: '700',
-            color: theme.text,
-            marginTop: 12,
-            letterSpacing: -0.4,
-          }}
-        >
+        <Text style={[TYPE.headline, { color: theme.text, marginTop: 12 }]}>
           Alex Martin
         </Text>
-        <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSec, marginTop: 2 }}>
+        <Text style={[TYPE.bodySmEm, { color: theme.textSec, marginTop: 2 }]}>
           View profile
         </Text>
       </View>
@@ -126,9 +118,9 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
         contentContainerStyle={{ paddingBottom: 24 }}
       >
         {SECTIONS.map((section, si) => (
-          <View key={si} style={{ marginBottom: 18 }}>
+          <View key={si} style={{ marginBottom: 20 }}>
             {section.title && (
-              <Text style={[styles.sectionTitle, { color: theme.textTer }]}>
+              <Text style={[TYPE.labelLg, styles.sectionTitle, { color: theme.textTer }]}>
                 {section.title}
               </Text>
             )}
@@ -137,6 +129,7 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
                 key={item.id}
                 onPress={() => onNavigate(item.id)}
                 activeOpacity={0.55}
+                accessibilityRole="button"
                 style={styles.item}
               >
                 <View
@@ -154,20 +147,12 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
                     stroke={1.5}
                   />
                 </View>
-                <Text
-                  style={{
-                    flex: 1,
-                    fontSize: 15,
-                    fontWeight: '500',
-                    color: theme.text,
-                    letterSpacing: -0.2,
-                  }}
-                >
+                <Text style={[TYPE.subsectionTitle, { flex: 1, color: theme.text }]}>
                   {item.label}
                 </Text>
                 {item.badge != null && (
                   <View style={[styles.badge, { backgroundColor: theme.accent.fill }]}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.accent.ink }}>
+                    <Text style={[TYPE.labelLg, { color: theme.accent.ink }]}>
                       {item.badge}
                     </Text>
                   </View>
@@ -188,8 +173,8 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     paddingHorizontal: 20,
-    borderTopRightRadius: 28,
-    borderBottomRightRadius: 28,
+    borderTopRightRadius: RADIUS.card,
+    borderBottomRightRadius: RADIUS.card,
     borderRightWidth: 1,
   },
   topRow: {
@@ -198,12 +183,6 @@ const styles = StyleSheet.create({
     height: 44,
     marginBottom: 12,
     marginLeft: -4,
-  },
-  closeBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   profile: {
     alignItems: 'flex-start',
@@ -219,35 +198,31 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     marginTop: 20,
-    marginBottom: 18,
+    marginBottom: 20,
     marginHorizontal: -20,
   },
   sectionTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
     marginBottom: 8,
     paddingHorizontal: 4,
   },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingVertical: 10,
+    gap: 16,
+    paddingVertical: 12,
     paddingHorizontal: 4,
   },
   itemIcon: {
     width: 36,
     height: 36,
-    borderRadius: 11,
+    borderRadius: RADIUS.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
   badge: {
     minWidth: 24,
     height: 22,
-    borderRadius: 11,
+    borderRadius: RADIUS.chip,
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
 import { Theme } from '../theme';
@@ -121,7 +121,7 @@ function NavChevron({
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
-export function TransactionCalendar({
+export const TransactionCalendar = React.memo(function TransactionCalendar({
   theme, year, month, marks, selectedDay, today,
   categories = [],
   onSelectDay, onViewMonthChange, overrideColors,
@@ -131,16 +131,26 @@ export function TransactionCalendar({
   const [viewMonth, setViewMonth] = useState(month);
   const didMountRef = useRef(false);
 
-  const firstDow    = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  // Lazy catId → group-color cache: categoryGroupColor does a linear .find over
+  // categories, and the grid resolves it once per cat per cell on every render.
+  const colorForCat = useMemo(() => {
+    const cache: Record<string, string> = {};
+    return (catId: string) => (
+      cache[catId] ??= categoryGroupColor(catId, categories, theme.dark)
+    );
+  }, [categories, theme.dark]);
 
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < firstDow; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const weeks: (number | null)[][] = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  const weeks = useMemo(() => {
+    const firstDow    = (new Date(viewYear, viewMonth, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const cells: (number | null)[] = [];
+    for (let i = 0; i < firstDow; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+    const rows: (number | null)[][] = [];
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+    return rows;
+  }, [viewYear, viewMonth]);
 
   const navigateToMonth = (y: number, m: number) => {
     setViewYear(y);
@@ -233,8 +243,8 @@ export function TransactionCalendar({
                 const isSelected = day === selectedDay;
                 const isToday    = day === today;
 
-                const txDotColors   = [...new Set((mark?.txCats   ?? []).map(c => categoryGroupColor(c, categories, theme.dark)))].slice(0, MAX_DOTS);
-                const billDotColors = [...new Set((mark?.billCats ?? []).map(c => categoryGroupColor(c, categories, theme.dark)))].slice(0, Math.max(0, MAX_DOTS - txDotColors.length));
+                const txDotColors   = [...new Set((mark?.txCats   ?? []).map(colorForCat))].slice(0, MAX_DOTS);
+                const billDotColors = [...new Set((mark?.billCats ?? []).map(colorForCat))].slice(0, Math.max(0, MAX_DOTS - txDotColors.length));
 
                 return (
                   <Pressable
@@ -275,7 +285,7 @@ export function TransactionCalendar({
       </>
     </View>
   );
-}
+});
 
 // ── Calendar styles ───────────────────────────────────────────────────────────
 
@@ -283,7 +293,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   navBtn: {
     width: 44, height: 44,
@@ -301,7 +311,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 8,
   },
   row: { flexDirection: 'row' },
   cell: {

@@ -90,6 +90,18 @@ function AppInner() {
   const [activityFilterToken, setActivityFilterToken] = useState(0);
   const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
   const [toast, setToast] = useState<{ message: string; onUndo: () => void } | null>(null);
+  const [morphResetToken, setMorphResetToken] = useState(0);
+
+  // The inline budget keypad asks us to hide the floating tab bar so the pad has
+  // the bottom of the screen to itself (the pad mirrors the system keyboard slot).
+  const tabBarAnim = useRef(new Animated.Value(1)).current;
+  const handleKeypadOpenChange = useCallback((open: boolean) => {
+    Animated.timing(tabBarAnim, {
+      toValue: open ? 0 : 1,
+      duration: open ? 200 : 240,
+      useNativeDriver: true,
+    }).start();
+  }, [tabBarAnim]);
 
   // Every sheet/morph owns its own open state inside a leaf mount, poked via these
   // refs. Opening one re-renders only that mount — not App and its four mounted
@@ -102,11 +114,15 @@ function AppInner() {
   const billSheetRef = useRef<BillSheetHandle>(null);
   const recurringRef = useRef<RecurringSheetHandle>(null);
 
+  const prepareTx = useCallback((tx: Transaction) => txSheetRef.current?.prepare(tx), []);
   const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
   const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
   const openRecurring = useCallback(() => recurringRef.current?.open(), []);
   const openIncomeMorph = useCallback((source: SourceRect) => {
     incomeMorphRef.current?.open(source);
+  }, []);
+  const resetHomeMorphReaction = useCallback(() => {
+    setMorphResetToken(t => t + 1);
   }, []);
 
   const handleSaved = useCallback((info: SavedExpenseInfo) => {
@@ -247,9 +263,11 @@ function AppInner() {
       onOpenTx={openTx}
       onDeleteTx={handleDeleteTx}
       onOpenBill={openBill}
+      morphResetToken={morphResetToken}
     />
   ), [
     handleDeleteTx,
+    morphResetToken,
     navigateToActivity,
     openBill,
     openDrawer,
@@ -277,18 +295,20 @@ function AppInner() {
       theme={theme}
       onOpenDrawer={openDrawer}
       onOpenTx={openTx}
+      onPrepareTx={prepareTx}
       initialFilter={activityFilter}
       filterToken={activityFilterToken}
     />
-  ), [activityFilter, activityFilterToken, openDrawer, openTx, theme]);
+  ), [activityFilter, activityFilterToken, openDrawer, openTx, prepareTx, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen
       theme={theme}
       onOpenDrawer={openDrawer}
       onOpenIncome={openBudgetIncome}
+      onKeypadOpenChange={handleKeypadOpenChange}
     />
-  ), [openBudgetIncome, openDrawer, theme]);
+  ), [handleKeypadOpenChange, openBudgetIncome, openDrawer, theme]);
 
   const backdropOpacity = drawerAnim.interpolate({
     inputRange:  [0, 1],
@@ -316,12 +336,23 @@ function AppInner() {
           {budgetScreen}
         </AnimatedScreen>
 
-        <TabBar
-          theme={theme}
-          active={screen === 'activity' ? 'profile' : screen === 'insights' ? 'spending' : screen}
-          onAdd={openVoiceExpense}
-          onTabPress={handleTabPress}
-        />
+        <Animated.View
+          pointerEvents="box-none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              opacity: tabBarAnim,
+              transform: [{ translateY: tabBarAnim.interpolate({ inputRange: [0, 1], outputRange: [120, 0] }) }],
+            },
+          ]}
+        >
+          <TabBar
+            theme={theme}
+            active={screen === 'activity' ? 'profile' : screen === 'insights' ? 'spending' : screen}
+            onAdd={openVoiceExpense}
+            onTabPress={handleTabPress}
+          />
+        </Animated.View>
 
         {/* ─── Drawer backdrop ──────────────────────────────── */}
         <Animated.View
@@ -348,8 +379,16 @@ function AppInner() {
           />
         </View>
 
-        <IncomeMorphMount ref={incomeMorphRef} onSaved={handleIncomeSaved} />
-        <ExpenseMorphMount ref={expenseMorphRef} onSaved={handleSaved} />
+        <IncomeMorphMount
+          ref={incomeMorphRef}
+          onSaved={handleIncomeSaved}
+          onCloseStart={resetHomeMorphReaction}
+        />
+        <ExpenseMorphMount
+          ref={expenseMorphRef}
+          onSaved={handleSaved}
+          onCloseStart={resetHomeMorphReaction}
+        />
         <RecurringSheetMount ref={recurringRef} />
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
         <BillSheetMount ref={billSheetRef} />
@@ -385,7 +424,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <RepositoryProvider>
-        <ThemeProvider defaultDark={true} defaultAccent="plum" defaultCardStyle="flat">
+        <ThemeProvider defaultDark={true} defaultAccent="ink" defaultCardStyle="flat">
           <SafeAreaProvider>
             <AppInner />
           </SafeAreaProvider>

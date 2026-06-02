@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Theme, getCardStyle, OVER_DOT, GROUP_COLORS } from '../theme';
+import { TYPE } from '../typography';
 import type { SpendGroup } from '../repositories/types';
 import { Icon } from './Icon';
 import { Collapsible } from './Collapsible';
@@ -16,7 +17,7 @@ export function CategoryGroups({ theme, groups, income, naked }: Props) {
   const card = getCardStyle(theme);
   const containerStyle = naked
     ? { paddingVertical: 4 }
-    : [card, { paddingVertical: 4, marginBottom: 14 }];
+    : [card, { paddingVertical: 4, marginBottom: 16 }];
   return (
     <View style={containerStyle}>
       {groups.map((g, i) => (
@@ -82,13 +83,13 @@ function GroupRow({
         delayPressIn={0}
         style={styles.groupHead}
       >
-        <Animated.View style={{ transform: [{ rotate }], marginRight: 10 }}>
+        <Animated.View style={{ transform: [{ rotate }], marginRight: 12 }}>
           <Icon name="chevR" size={13} color={theme.textSec} stroke={1.8} />
         </Animated.View>
         <View style={{ flex: 1 }}>
           <View style={styles.groupTopRow}>
-            <Text style={[styles.groupName, { color }]}>{group.label}</Text>
-            <Text style={[styles.groupAmt, { color: theme.text }]}>
+            <Text style={[TYPE.body, { fontSize: 16, fontWeight: '700', letterSpacing: -0.4, color }]}>{group.label}</Text>
+            <Text style={[TYPE.body, { color: theme.text }]}>
               ${groupTotal.toLocaleString()}
             </Text>
           </View>
@@ -97,7 +98,7 @@ function GroupRow({
               style={[styles.fill, { width: `${fill * 100}%`, backgroundColor: barColor }]}
             />
           </View>
-          <Text style={[styles.groupMeta, { color: theme.textTer }]}>
+          <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: 8 }]}>
             {Math.round(actualPct * 100)}% of {Math.round(group.targetPct * 100)}% target
           </Text>
         </View>
@@ -115,10 +116,10 @@ function GroupRow({
                 </View>
                 <View style={{ flex: 1 }}>
                   <View style={styles.subTopRow}>
-                    <Text style={[styles.subName, { color: theme.text }]}>{sub.label}</Text>
-                    <Text style={[styles.subAmt, { color: theme.text }]}>
+                    <Text style={[TYPE.bodySmEm, { color: theme.text }]}>{sub.label}</Text>
+                    <Text style={[TYPE.captionEm, { color: theme.text }]}>
                       ${sub.spent.toLocaleString()}
-                      <Text style={{ color: theme.textSec, fontWeight: '500' }}>
+                      <Text style={[TYPE.captionEm, { color: theme.textSec }]}>
                         {' / $'}
                         {sub.budget.toLocaleString()}
                       </Text>
@@ -158,22 +159,6 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     marginBottom: 9,
   },
-  groupName: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: -0.4,
-  },
-  groupAmt: {
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: -0.2,
-  },
-  groupMeta: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: -0.1,
-    marginTop: 6,
-  },
   track: {
     height: 10,
     borderRadius: 5,
@@ -186,8 +171,8 @@ const styles = StyleSheet.create({
 
   subList: {
     paddingLeft: 23,
-    paddingBottom: 14,
-    gap: 14,
+    paddingBottom: 16,
+    gap: 16,
   },
   subRow: {
     flexDirection: 'row',
@@ -205,16 +190,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginBottom: 6,
-  },
-  subName: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: -0.2,
-  },
-  subAmt: {
-    fontSize: 12.5,
-    fontWeight: '700',
+    marginBottom: 8,
   },
   subTrack: {
     flex: 1,

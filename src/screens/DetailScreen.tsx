@@ -109,7 +109,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
         <View style={[styles.catIcon, { backgroundColor: categoryGroupColor(currentTx.cat, categories, theme.dark) }]}>
           <Icon name={cat?.icon} size={22} color="#fff" stroke={1.5} />
         </View>
-        <Text style={{ fontSize: 22, fontWeight: '700', letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 14 }}>
+        <Text style={{ fontSize: 22, fontWeight: '700', letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 16 }}>
           {currentTx.merchant}
         </Text>
         <Text style={{ fontSize: 13, color: theme.textSec, marginTop: 4, textAlign: 'center' }}>
@@ -155,14 +155,14 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
         </View>
 
         {/* Action buttons */}
-        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
           {(editing
-            ? [{ icon: 'pencil', label: 'Save', onPress: saveEdit }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
-            : [{ icon: 'split', label: 'Edit', onPress: () => setEditing(true) }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
+            ? [{ icon: null, label: 'Save', onPress: saveEdit }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
+            : [{ icon: 'chevR', label: 'Edit', onPress: () => setEditing(true) }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
           ).map(a => (
-            <TouchableOpacity key={a.label} onPress={a.onPress} style={[card, styles.actionBtn]}>
-              <Icon name={a.icon} size={16} color={theme.text} stroke={1.5} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: a.danger ? OVER_DOT : theme.text, marginLeft: 8 }}>{a.label}</Text>
+            <TouchableOpacity key={a.label} onPress={a.onPress} accessibilityRole="button" style={[card, styles.actionBtn]}>
+              {a.icon && <Icon name={a.icon} size={16} color={theme.text} stroke={1.5} />}
+              <Text style={{ fontSize: 13, fontWeight: '600', color: a.danger ? OVER_DOT : theme.text, marginLeft: a.icon ? 8 : 0 }}>{a.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -225,8 +225,8 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
   },
   visaChip: {
     width: 40,
@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 12,
   },
   catContext: {

@@ -325,6 +325,6 @@ export const SEED_BUDGETS: Budget[] = SEED_SPEND_GROUPS.flatMap(group =>
 export const SEED_SETTINGS: AppSettings = {
   id: 'settings',
   themeDark: true,
-  accentKey: 'plum',
+  accentKey: 'ink',
   cardStyle: 'flat',
 };

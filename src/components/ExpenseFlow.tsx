@@ -21,6 +21,7 @@ import { Host, Menu, Picker, Text as SwiftText, Button, Image as SwiftImage, Dat
 import {
   buttonStyle, controlSize, datePickerStyle, environment, frame, pickerStyle, tag, tint,
 } from '@expo/ui/swift-ui/modifiers';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 export interface SavedExpenseInfo {
   id: string;
@@ -64,6 +65,18 @@ const REPEAT_OPTIONS: { value: RepeatValue; label: string }[] = [
   { value: 'annual',  label: 'Yearly' },
 ];
 const repeatLabel = (v: RepeatValue) => REPEAT_OPTIONS.find(o => o.value === v)?.label ?? 'Never';
+
+const VOICE_EXAMPLES = [
+  'Grocery shopping at Trader Joe\'s, sixty two fifty',
+  'Dinner at Chipotle, twenty four dollars',
+  'Coffee at Starbucks, six fifty',
+  'Lunch at Sweetgreen, eighteen dollars',
+  'Gas at Shell, forty eight dollars',
+  'Pharmacy at Walgreens, sixteen dollars',
+  'Groceries at Costco, one hundred twelve',
+  'Shopping at Target, thirty two dollars',
+  'Ride at Uber, twenty one dollars',
+];
 
 // nextDueDate for a freshly-created rule: one cadence interval past the start.
 function nextDueAfter(start: Date, cadence: 'weekly' | 'monthly' | 'annual'): string {
@@ -228,6 +241,10 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
   const isVoiceMode = mode === 'idle' || mode === 'listening';
   const micLabel = mode === 'listening' ? 'Stop recording' : 'Start recording';
+  // Mic button is white in dark mode, black in light mode; the glyph flips to
+  // the opposite so it stays legible against the button.
+  const micButtonColor = theme.dark ? '#fff' : '#000';
+  const micColor = theme.dark ? '#000' : '#fff';
   const onMicPress = () => {
     Haptics.impactAsync(mode === 'listening'
       ? Haptics.ImpactFeedbackStyle.Medium
@@ -322,10 +339,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                     </View>
                   </View>
                 ) : (
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={[TYPE.captionEm, { color: theme.textTer, marginBottom: 10 }]}>Say something like</Text>
-                    <Text style={[S.hintExample, { color: theme.textSec }]}>Groceries at Walmart, sixty-two fifty</Text>
-                  </View>
+                  <VoiceIdlePrompt theme={theme} />
                 )}
               </View>
 
@@ -352,7 +366,8 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                       systemImage={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
                       size={88}
                       iconSize={mode === 'listening' ? 30 : 32}
-                      iconColor={theme.accent.dot}
+                      iconColor={micColor}
+                      glassTint={micButtonColor}
                       accessibilityLabel={micLabel}
                     />
                   ) : (
@@ -362,15 +377,11 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                       hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
                       accessibilityRole="button"
                       accessibilityLabel={micLabel}
-                      style={[S.micBtn, {
-                        backgroundColor: theme.dark ? 'rgba(255,255,255,0.1)' : 'rgba(14,12,24,0.07)',
-                        borderWidth: 1,
-                        borderColor: theme.hairline,
-                      }]}
+                      style={[S.micBtn, { backgroundColor: micButtonColor }]}
                     >
                       {mode === 'listening'
-                        ? <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
-                        : <Icon name="mic" size={30} color={theme.accent.dot} stroke={1.7} />
+                        ? <View style={[S.stopSquare, { backgroundColor: micColor }]} />
+                        : <Icon name="mic" size={30} color={micColor} stroke={1.7} />
                       }
                     </Pressable>
                   )}
@@ -497,7 +508,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 onPress={saveExpense}
                 theme={theme}
                 disabled={!canSave}
-                style={{ marginTop: 10 }}
+                style={{ marginTop: 12 }}
               />
             </View>
           )}
@@ -526,7 +537,7 @@ function CategoryPicker({
 
   return (
     <View style={[S.categoryPanel, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
-      <Host matchContents ignoreSafeArea="all">
+      <Host ignoreSafeArea="all" style={S.categoryGroupHost}>
         <Picker
           selection={selectedGroupIdx}
           onSelectionChange={(val) => {
@@ -539,6 +550,7 @@ function CategoryPicker({
           }}
           modifiers={[
             pickerStyle('segmented'),
+            frame({ maxWidth: PICKER_FILL_WIDTH, height: 42 }),
             tint(theme.accent.dot),
             environment({ key: 'colorScheme', value: darkScheme }),
           ]}
@@ -582,6 +594,101 @@ function CategoryPicker({
 }
 
 // ─── Amount display ───────────────────────────────────────────────────────────
+
+function VoiceIdlePrompt({ theme }: { theme: Theme }) {
+  const [idx, setIdx] = useState(0);
+  const fade = useRef(new Animated.Value(1)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const example = VOICE_EXAMPLES[idx];
+
+  useEffect(() => {
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    pulseLoop.start();
+
+    const interval = setInterval(() => {
+      Animated.timing(fade, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start(() => {
+        setIdx(i => (i + 1) % VOICE_EXAMPLES.length);
+        Animated.timing(fade, {
+          toValue: 1,
+          duration: 420,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      });
+    }, 3400);
+
+    return () => {
+      clearInterval(interval);
+      pulseLoop.stop();
+    };
+  }, [fade, pulse]);
+
+  const slide = fade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] });
+  const signalScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.04] });
+  const signalOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.54, 0.78] });
+
+  return (
+    <View style={S.idlePrompt} accessible accessibilityRole="text">
+      <Animated.View
+        pointerEvents="none"
+        style={[S.idleSignal, { opacity: signalOpacity, transform: [{ scale: signalScale }] }]}
+      >
+        <Svg width={168} height={34} viewBox="0 0 168 34">
+          <Path
+            d="M14 17 C38 4 56 4 82 17 C108 30 130 30 154 17"
+            fill="none"
+            stroke={theme.accent.dot}
+            strokeOpacity={0.24}
+            strokeWidth={1.4}
+          />
+          <Path
+            d="M34 18 C52 28 68 28 84 17 C100 6 116 6 134 18"
+            fill="none"
+            stroke={theme.textTer}
+            strokeOpacity={0.22}
+            strokeWidth={1}
+          />
+          <Circle cx={14} cy={17} r={2.5} fill={theme.accent.dot} fillOpacity={0.38} />
+          <Circle cx={84} cy={17} r={3.5} fill={theme.accent.dot} fillOpacity={0.5} />
+          <Circle cx={154} cy={17} r={2.5} fill={theme.accent.dot} fillOpacity={0.38} />
+          <Circle cx={34} cy={18} r={2} fill={theme.textTer} fillOpacity={0.28} />
+          <Circle cx={134} cy={18} r={2} fill={theme.textTer} fillOpacity={0.28} />
+        </Svg>
+      </Animated.View>
+      <Text style={[TYPE.captionEm, S.idleKicker, { color: theme.textTer }]}>
+        Speak naturally
+      </Text>
+      <Animated.View style={[S.idleExampleSlot, { opacity: fade, transform: [{ translateY: slide }] }]}>
+        <Text
+          style={[S.hintExample, { color: theme.textSec }]}
+          numberOfLines={2}
+        >
+          {example}
+        </Text>
+      </Animated.View>
+    </View>
+  );
+}
 
 function AmountText({ value, color, textStyle }: { value: string; color: string; textStyle: TextStyle }) {
   const chars = value.split('');
@@ -675,10 +782,33 @@ const S = StyleSheet.create({
     paddingHorizontal: 36, paddingTop: 8,
   },
   micBottomZone: { alignItems: 'center', paddingBottom: 36, paddingTop: 16 },
-  micRingWrapper: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  micRingWrapper: { width: 88, height: 88, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   ring: { position: 'absolute', width: 88, height: 88, borderRadius: 44 },
   micBtn: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center' },
   stopSquare: { width: 18, height: 18, borderRadius: 5 },
+  idlePrompt: {
+    width: '100%',
+    minHeight: 138,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  idleSignal: {
+    width: 168,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  idleKicker: {
+    marginBottom: 12,
+  },
+  idleExampleSlot: {
+    width: '100%',
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   hintExample: { fontSize: 20, fontWeight: '500', letterSpacing: -0.4, lineHeight: 27, textAlign: 'center' },
   hintText: { fontSize: 16, fontWeight: '500', letterSpacing: -0.3, lineHeight: 24, textAlign: 'center' },
   listeningText: { fontSize: 22, fontWeight: '500', letterSpacing: -0.4, lineHeight: 28, textAlign: 'center' },
@@ -687,7 +817,7 @@ const S = StyleSheet.create({
 
   // Manual layout
   manualRoot: { flex: 1, paddingHorizontal: 20, paddingTop: 4 },
-  manualAmountWrap: { alignItems: 'center', paddingVertical: 10, marginBottom: 2 },
+  manualAmountWrap: { alignItems: 'center', paddingVertical: 12, marginBottom: 2 },
   manualAmountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' },
   manualAmountSign: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, marginRight: 3 },
   manualAmountValue: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, fontVariant: ['tabular-nums'] },
@@ -696,14 +826,15 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 5, marginTop: -4, marginBottom: 12, paddingHorizontal: 16,
   },
-  fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 10 },
+  fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, paddingHorizontal: 16, gap: 12, minHeight: 46,
+    paddingVertical: 12, paddingHorizontal: 16, gap: 12, minHeight: 46,
   },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
   categoryPanel: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
-  categoryWrap: { marginBottom: 10 },
+  categoryWrap: { marginBottom: 12 },
+  categoryGroupHost: { width: '100%', height: 42 },
   subcategoryRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 12, paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth,

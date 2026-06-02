@@ -316,7 +316,7 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
                           <Text style={[S.hintSub, { color: theme.textTer }]}>Listening now</Text>
                         )
                       ) : voice.error ? (
-                        <View style={{ alignItems: 'center', gap: 10 }}>
+                        <View style={{ alignItems: 'center', gap: 12 }}>
                           <Text style={[S.hintSub, { color: theme.textSec, textAlign: 'center' }]}>
                             {voice.error}
                           </Text>
@@ -747,7 +747,7 @@ const S = StyleSheet.create({
   },
   headerBtn: {
     paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingHorizontal: 8,
     minWidth: 56,
   },
   voiceCenter: {
@@ -831,12 +831,12 @@ const S = StyleSheet.create({
     borderRadius: 2,
   },
   saveBtn: {
-    marginTop: 14,
+    marginTop: 16,
   },
   transcriptChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    padding: 16,
     borderRadius: 14,
     marginBottom: 16,
   },
@@ -888,8 +888,8 @@ const S = StyleSheet.create({
     alignItems: 'flex-end',
   },
   manualCategoryWrap: {
-    marginTop: 10,
-    marginBottom: 10,
+    marginTop: 12,
+    marginBottom: 12,
   },
   categoryPanel: {
     borderRadius: 12,
@@ -941,7 +941,7 @@ const S = StyleSheet.create({
   subcatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 8,
     paddingHorizontal: 7,
     borderRadius: 8,
     marginBottom: 3,
@@ -950,7 +950,7 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   keyCell: {
     width: '30%',
@@ -968,7 +968,7 @@ const S = StyleSheet.create({
     justifyContent: 'center',
     gap: 5,
     marginTop: -2,
-    marginBottom: 10,
+    marginBottom: 12,
     paddingHorizontal: 16,
   },
   errorActions: {

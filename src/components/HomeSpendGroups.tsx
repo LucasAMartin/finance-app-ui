@@ -278,7 +278,7 @@ const s = StyleSheet.create({
   },
   headerContent: {
     paddingHorizontal: 12,
-    paddingTop: 14,
+    paddingTop: 16,
     paddingBottom: 12,
   },
   headerRow: {
@@ -295,7 +295,7 @@ const s = StyleSheet.create({
   totalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   groupDot: {
     width: 7,
@@ -329,7 +329,7 @@ const s = StyleSheet.create({
   },
   subContent: {
     paddingHorizontal: 12,
-    paddingBottom: 14,
+    paddingBottom: 16,
   },
 
   // Detail rows
@@ -339,7 +339,7 @@ const s = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
   iconWrap: {
     width: 28,
@@ -398,8 +398,8 @@ const s = StyleSheet.create({
   wantRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
+    gap: 12,
+    paddingVertical: 12,
   },
   wantLabel: {
     flex: 1,

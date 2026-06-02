@@ -38,6 +38,7 @@ export const VoiceSheetMount = forwardRef<VoiceSheetHandle, {
 });
 
 export interface TxSheetHandle {
+  prepare: (tx: Transaction) => void;
   open: (tx: Transaction) => void;
 }
 
@@ -46,12 +47,25 @@ export const TxSheetMount = forwardRef<TxSheetHandle, {
 }>(function TxSheetMount({ onDeleted }, ref) {
   const { theme } = useTheme();
   const [tx, setTx] = useState<Transaction | null>(null);
+  const [visible, setVisible] = useState(false);
 
   useImperativeHandle(ref, () => ({
-    open: (next) => setTx(next),
+    prepare: (next) => setTx(next),
+    open: (next) => {
+      setTx(next);
+      setVisible(true);
+    },
   }), []);
 
-  return <TxSheet tx={tx} theme={theme} onClose={() => setTx(null)} onDeleted={onDeleted} />;
+  return (
+    <TxSheet
+      tx={tx}
+      visible={visible}
+      theme={theme}
+      onClose={() => setVisible(false)}
+      onDeleted={onDeleted}
+    />
+  );
 });
 
 export interface BillSheetHandle {

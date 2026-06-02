@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Host, Button as SwiftButton, Text as SwiftText, GlassEffectContainer } from '@expo/ui/swift-ui';
-import { frame, glassEffect, foregroundStyle, font, disabled as disabledModifier } from '@expo/ui/swift-ui/modifiers';
+import { frame, glassEffect, foregroundStyle, font, contentShape, shapes, disabled as disabledModifier } from '@expo/ui/swift-ui/modifiers';
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
 import { SUPPORTS_GLASS } from './GlassButton';
@@ -71,6 +71,7 @@ export function CircleBtn({ children, theme, dot = false, onPress, size = 38 }: 
 }
 
 // ── Back button ────────────────────────────────────────────────
+/** @deprecated Use ScreenExitButton from GlassButton.tsx instead. */
 interface BackBtnProps {
   theme: Theme;
   onBack: () => void;
@@ -130,6 +131,7 @@ export function SectionHeader({ title, actionLabel, onAction, theme }: SectionHe
       {actionLabel && (
         <Pressable
           onPress={onAction}
+          accessibilityRole="button"
           pointerEvents="box-only"
           hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
         >
@@ -183,7 +185,6 @@ export function SheetPrimaryButton({
               <SwiftButton
                 onPress={handlePress}
                 modifiers={[
-                  frame({ width: glassW, height: 52 }),
                   glassEffect({
                     glass: { variant: 'regular', interactive: true, tint: theme.text },
                     shape: 'roundedRectangle',
@@ -192,7 +193,15 @@ export function SheetPrimaryButton({
                   disabledModifier(disabled),
                 ]}
               >
-                <SwiftText modifiers={[foregroundStyle(theme.bg), font({ size: 17, weight: 'semibold' })]}>
+                {/* A SwiftUI Button's tap area is its label's bounds. The label
+                    must fill the pill (frame) and claim the whole rectangle for
+                    hit-testing (contentShape) — otherwise only the text is tappable. */}
+                <SwiftText modifiers={[
+                  frame({ width: glassW, height: 52 }),
+                  contentShape(shapes.rectangle()),
+                  foregroundStyle(theme.bg),
+                  font({ size: 17, weight: 'semibold' }),
+                ]}>
                   {label}
                 </SwiftText>
               </SwiftButton>
@@ -253,7 +262,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
   },
   // Glass-button branch: full-width, fixed height; cancel any paddingVertical/
   // paddingHorizontal a call-site style may carry (those shaped the RN fallback).

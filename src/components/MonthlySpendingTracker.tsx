@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Theme, getCardStyle, OVER_DOT, overBg, overText } from '../theme';
+import { Theme, getCardStyle, OVER_DOT, overBg, overText, GROUP_COLORS, CAUTION_AMBER } from '../theme';
+import { TYPE } from '../typography';
 import { Money } from './shared';
 
 interface Props {
@@ -16,8 +17,8 @@ const TICK_COUNT = 30;
 // Three-stop gradient: sage green → butter → terracotta.
 // Tuned to the app's existing accent palette rather than the vivid
 // green/red in the visual reference, so it sits in the same design language.
-const STOPS_LIGHT = ['#7A9D85', '#C5A946', '#C25A2E'];
-const STOPS_DARK  = ['#6FAF8A', '#D5B958', '#E36A3A'];
+const STOPS_LIGHT = [GROUP_COLORS.savings.light, CAUTION_AMBER, OVER_DOT];
+const STOPS_DARK  = [GROUP_COLORS.savings.dark,  CAUTION_AMBER, OVER_DOT];
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -119,14 +120,14 @@ export function MonthlySpendingTracker({
               },
             ]}
           >
-            <Text style={[styles.statusText, { color: statusFg }]}>{statusText}</Text>
+            <Text style={[TYPE.labelPlain, { fontWeight: '700', color: statusFg }]}>{statusText}</Text>
           </View>
         )}
       </View>
 
       <View style={styles.statsRow}>
         <View>
-          <Text style={[styles.statLabel, { color: theme.textSec }]}>Available this month</Text>
+          <Text style={[TYPE.labelLg, { color: theme.textSec, marginBottom: 4 }]}>Available this month</Text>
           <Money
             value={available}
             size={24}
@@ -137,7 +138,7 @@ export function MonthlySpendingTracker({
           />
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[styles.statLabel, { color: theme.textSec }]}>Spending limit</Text>
+          <Text style={[TYPE.labelLg, { color: theme.textSec, marginBottom: 4 }]}>Spending limit</Text>
           <Money value={budget} size={24} weight="600" prefix="$" theme={theme} />
         </View>
       </View>
@@ -145,10 +146,10 @@ export function MonthlySpendingTracker({
       <View style={[styles.metaDivider, { backgroundColor: theme.sep }]} />
 
       <View style={styles.metaRow}>
-        <Text style={[styles.meta, { color: theme.textTer }]}>
+        <Text style={[TYPE.labelLg, { color: theme.textTer }]}>
           {Math.round(rawPct * 100)}% used
         </Text>
-        <Text style={[styles.meta, { color: theme.textTer }]}>{remainingLabel}</Text>
+        <Text style={[TYPE.labelLg, { color: theme.textTer }]}>{remainingLabel}</Text>
       </View>
     </View>
   );
@@ -157,7 +158,7 @@ export function MonthlySpendingTracker({
 const styles = StyleSheet.create({
   card: {
     padding: 22,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   barWrap: {
     marginTop: 16,
@@ -190,20 +191,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginLeft: -34,
   },
-  statusText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-  },
-  statLabel: {
-    fontSize: 11.5,
-    fontWeight: '500',
-    marginBottom: 4,
   },
   metaDivider: {
     height: 1,
@@ -213,9 +204,5 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  meta: {
-    fontSize: 11,
-    fontWeight: '500',
   },
 });

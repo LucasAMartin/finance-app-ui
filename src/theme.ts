@@ -1,11 +1,10 @@
-export type AccentKey =
-  | 'sage'
-  | 'butter'
-  | 'sky'
-  | 'rose'
-  | 'plum'
-  | 'ink'
-  | 'wine';
+import { RADIUS } from './radius';
+
+// The app uses a single monochrome accent by design. The multi-hue keys
+// (sage/butter/sky/rose/plum/wine) were legacy and had silently collapsed to
+// identical ink values; they've been removed. `AccentKey` is retained as a type
+// so the settings layer keeps a stable shape, but `ink` is the only value.
+export type AccentKey = 'ink';
 export type CardStyle = 'flat' | 'shadow' | 'glass';
 
 export interface Accent {
@@ -15,6 +14,8 @@ export interface Accent {
 }
 
 // Internal accent definitions — light and dark variants resolved by makeTheme.
+// Single monochrome accent — high-contrast ink that flips per mode. Used for
+// primary buttons, the segmented-control active pill, action links, and dots.
 const ACCENT_DEFS: Record<
   AccentKey,
   {
@@ -26,55 +27,7 @@ const ACCENT_DEFS: Record<
     dotDark: string;
   }
 > = {
-  sage: {
-    fill: '#0E1116',
-    fillDark: '#E7EAED',
-    ink: '#F2F4F5',
-    inkDark: '#080A0D',
-    dot: '#0E1116',
-    dotDark: '#E7EAED',
-  },
-  butter: {
-    fill: '#0E1116',
-    fillDark: '#E7EAED',
-    ink: '#F2F4F5',
-    inkDark: '#080A0D',
-    dot: '#0E1116',
-    dotDark: '#E7EAED',
-  },
-  sky: {
-    fill: '#0E1116',
-    fillDark: '#E7EAED',
-    ink: '#F2F4F5',
-    inkDark: '#080A0D',
-    dot: '#0E1116',
-    dotDark: '#E7EAED',
-  },
-  rose: {
-    fill: '#0E1116',
-    fillDark: '#E7EAED',
-    ink: '#F2F4F5',
-    inkDark: '#080A0D',
-    dot: '#0E1116',
-    dotDark: '#E7EAED',
-  },
-  plum: {
-    fill: '#0E1116',
-    fillDark: '#E7EAED',
-    ink: '#F2F4F5',
-    inkDark: '#080A0D',
-    dot: '#0E1116',
-    dotDark: '#E7EAED',
-  },
   ink: {
-    fill: '#0E1116',
-    fillDark: '#E7EAED',
-    ink: '#F2F4F5',
-    inkDark: '#080A0D',
-    dot: '#0E1116',
-    dotDark: '#E7EAED',
-  },
-  wine: {
     fill: '#0E1116',
     fillDark: '#E7EAED',
     ink: '#F2F4F5',
@@ -101,10 +54,12 @@ export interface Theme {
 
 export function makeTheme(
   dark: boolean,
-  accentKey: AccentKey = 'plum',
+  accentKey: AccentKey = 'ink',
   cardStyle: CardStyle = 'flat',
 ): Theme {
-  const def = ACCENT_DEFS[accentKey];
+  // Guard against any stale accent_key persisted in settings (e.g. 'plum' from
+  // before the collapse) — fall back to the only accent.
+  const def = ACCENT_DEFS[accentKey] ?? ACCENT_DEFS.ink;
   const accent: Accent = dark
     ? { fill: def.fillDark, ink: def.inkDark, dot: def.dotDark }
     : { fill: def.fill, ink: def.ink, dot: def.dot };
@@ -125,7 +80,7 @@ export function makeTheme(
 }
 
 export function getCardStyle(theme: Theme) {
-  const base = { backgroundColor: theme.surface, borderRadius: 24 as number };
+  const base = { backgroundColor: theme.surface, borderRadius: RADIUS.card as number };
   if (theme.cardStyle === 'flat') {
     return { ...base, borderWidth: 1, borderColor: theme.hairline };
   }

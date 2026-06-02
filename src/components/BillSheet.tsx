@@ -145,7 +145,7 @@ export function BillSheet({
                       Due {b.dueDate}
                       {rule ? <Text style={{ color: theme.textTer }}> · {CADENCE_LABEL[rule.cadence] ?? 'Recurring'}</Text> : null}
                     </Text>
-                    <View style={{ marginTop: 14 }}>
+                    <View style={{ marginTop: 16 }}>
                       <Money value={b.amount} size={32} weight="600" prefix="$" theme={theme} />
                     </View>
                   </View>
@@ -193,7 +193,7 @@ const S = StyleSheet.create({
   },
   hero: {
     alignItems: 'center',
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: 20,
     paddingHorizontal: 20,
   },
@@ -248,7 +248,7 @@ const S = StyleSheet.create({
     paddingVertical: 15,
   },
   secondaryBtn: {
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
   },
   secondaryBtnText: {

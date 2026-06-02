@@ -26,6 +26,7 @@ import {
   Wallpaper,
 } from '../wallpapers';
 import { MEDIA, DARK_TEXT_SHADOW } from '../wallpaperPalette';
+import { RADIUS } from '../radius';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
 import { TYPE } from '../typography';
@@ -41,6 +42,9 @@ const APPEARANCE_OPTIONS: Array<{ label: string; dark: boolean }> = [
   { label: 'Dark Mode', dark: true },
   { label: 'Light Mode', dark: false },
 ];
+const SEGMENT_BG_DARK = MEDIA.trackBg;
+const SEGMENT_BG_LIGHT = MEDIA.trackBg;
+const SEGMENT_TEXT = MEDIA.textSec;
 
 interface Props {
   theme: Theme;
@@ -162,7 +166,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
         { zIndex: 80, opacity: anim, transform: [{ translateY }] },
       ]}
     >
-      <View style={[styles.root, { backgroundColor: theme.dark ? '#000' : '#F8F6FF' }]}>
+      <View style={[styles.root, { backgroundColor: theme.bg }]}>
         <ImageBackground
           source={previewSource}
           resizeMode="cover"
@@ -204,7 +208,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
               <ScreenExitButton
                 variant="back"
                 onPress={onClose}
-                tint="#F2F4F5"
+                tint={MEDIA.text}
                 fallbackBg="rgba(8,6,20,0.45)"
                 accessibilityLabel="Back"
               />
@@ -234,36 +238,40 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.segmentWrap}>
-              <SegmentedControl
-                values={APPEARANCE_OPTIONS.map(o => o.label)}
-                selectedIndex={appearanceIdx}
-                onChange={(e) => {
-                  const next = APPEARANCE_OPTIONS[e.nativeEvent.selectedSegmentIndex];
-                  if (next) setPendingDark(next.dark);
-                }}
-                tintColor={makeTheme(pendingDark, accentKey, cardStyle).accent.dot}
-                appearance={pendingDark ? 'dark' : 'light'}
-                backgroundColor={pendingDark ? 'rgba(242,244,245,0.055)' : 'rgba(255,255,255,0.12)'}
-                fontStyle={{ color: 'rgba(242,244,245,0.68)' }}
-                activeFontStyle={{ color: pendingDark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
-              />
+              <View style={styles.segmentClip}>
+                <SegmentedControl
+                  values={APPEARANCE_OPTIONS.map(o => o.label)}
+                  selectedIndex={appearanceIdx}
+                  onChange={(e) => {
+                    const next = APPEARANCE_OPTIONS[e.nativeEvent.selectedSegmentIndex];
+                    if (next) setPendingDark(next.dark);
+                  }}
+                  tintColor={makeTheme(pendingDark, accentKey, cardStyle).accent.dot}
+                  appearance={pendingDark ? 'dark' : 'light'}
+                  backgroundColor={pendingDark ? SEGMENT_BG_DARK : SEGMENT_BG_LIGHT}
+                  fontStyle={{ color: SEGMENT_TEXT }}
+                  activeFontStyle={{ color: pendingDark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
+                />
+              </View>
             </View>
 
             {/* ─── Tab selector ────────────────────────────── */}
             <View style={styles.segmentWrap}>
-              <SegmentedControl
-                values={WALLPAPER_TABS.map(t => t.label)}
-                selectedIndex={tabIdx}
-                onChange={(e) => {
-                  const next = WALLPAPER_TABS[e.nativeEvent.selectedSegmentIndex];
-                  if (next) setTabId(next.id);
-                }}
-                tintColor={makeTheme(pendingDark, accentKey, cardStyle).accent.dot}
-                appearance={pendingDark ? 'dark' : 'light'}
-                backgroundColor={pendingDark ? 'rgba(242,244,245,0.055)' : 'rgba(255,255,255,0.12)'}
-                fontStyle={{ color: 'rgba(242,244,245,0.68)' }}
-                activeFontStyle={{ color: pendingDark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
-              />
+              <View style={styles.segmentClip}>
+                <SegmentedControl
+                  values={WALLPAPER_TABS.map(t => t.label)}
+                  selectedIndex={tabIdx}
+                  onChange={(e) => {
+                    const next = WALLPAPER_TABS[e.nativeEvent.selectedSegmentIndex];
+                    if (next) setTabId(next.id);
+                  }}
+                  tintColor={makeTheme(pendingDark, accentKey, cardStyle).accent.dot}
+                  appearance={pendingDark ? 'dark' : 'light'}
+                  backgroundColor={pendingDark ? SEGMENT_BG_DARK : SEGMENT_BG_LIGHT}
+                  fontStyle={{ color: SEGMENT_TEXT }}
+                  activeFontStyle={{ color: pendingDark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
+                />
+              </View>
             </View>
 
             {/* ─── Grids (all mounted to avoid image pop-in) ─── */}
@@ -308,7 +316,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
               styles.applyWrap,
               {
                 paddingBottom: insets.bottom + 14,
-                paddingTop: 14,
+                paddingTop: 16,
               },
             ]}
             pointerEvents="box-none"
@@ -435,7 +443,11 @@ const styles = StyleSheet.create({
 
   segmentWrap: {
     paddingHorizontal: GRID_HPAD,
-    marginBottom: 18,
+    marginBottom: 20,
+  },
+  segmentClip: {
+    borderRadius: 14,
+    overflow: 'hidden',
   },
   gridStack: {
     position: 'relative',
@@ -487,7 +499,7 @@ const styles = StyleSheet.create({
   },
   applyBtn: {
     height: 54,
-    borderRadius: 27,
+    borderRadius: RADIUS.button,
     alignItems: 'center',
     justifyContent: 'center',
   },

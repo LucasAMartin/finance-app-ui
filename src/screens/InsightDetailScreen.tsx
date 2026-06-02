@@ -16,11 +16,12 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { Host, Menu, Button as SwiftButton, Section } from '@expo/ui/swift-ui';
+import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
 
 import { Theme, GROUP_COLORS } from '../theme';
 import { useTheme } from '../ThemeProvider';
-import { makeP, DARK_TEXT_SHADOW, MEDIA } from '../wallpaperPalette';
+import { makeP, makeScrim, DARK_TEXT_SHADOW, MEDIA } from '../wallpaperPalette';
+import { RADIUS } from '../radius';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
 import { SpendChart } from '../components/charts/SpendChart';
@@ -40,21 +41,22 @@ import {
   derivePeriodRanges,
   spendSeriesToBuckets,
 } from '../selectors/spending';
+import { buildSavedMetric } from '../selectors/savings';
 import { TYPE } from '../typography';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CHART_PAD = 16;
 const CHART_W = SCREEN_W - CHART_PAD * 2;
 const CHART_H = 160;
+const DETAIL_CHART_INSET_Y = 20;
 const PAGE_SIZE = 50;
 
-const TIMEFRAMES = ['1W', '1M', '6M', '1Y'] as const;
+const TIMEFRAMES = ['1W', '1M', '1Y'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 type Period = 'Week' | 'Month' | 'Year';
 const TF_TO_PERIOD: Record<Timeframe, Period> = {
   '1W': 'Week',
   '1M': 'Month',
-  '6M': 'Year',
   '1Y': 'Year',
 };
 
@@ -74,7 +76,17 @@ function addDays(d: Date, days: number): Date {
   return next;
 }
 
+function money(n: number, decimals = 0): string {
+  const abs = Math.abs(n);
+  const value =
+    abs >= 1000 && decimals === 0
+      ? Math.round(abs).toLocaleString()
+      : abs.toFixed(decimals);
+  return `$${value}`;
+}
+
 export interface InsightDetailTarget {
+  kind?: 'spending' | 'savings';
   title: string;
   subtitle?: string;
   icon?: string;
@@ -89,14 +101,24 @@ interface Props {
 }
 
 export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props) {
-  const { transactionsRepo, categoriesRepo } = useRepositories();
+  const { transactionsRepo, categoriesRepo, incomeRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
+  const incomes = useRepositoryList(incomeRepo);
   const cats = useMemo(() => categoryMap(categories), [categories]);
 
   const { wallpaper } = useTheme();
   const insets = useSafeAreaInsets();
+  // Text directly on the wallpaper (header title, hero) stays light in both
+  // themes, matching the Insights screen; frosted-card interiors use `p`, which
+  // adapts to the active theme so light mode no longer forces a dark screen.
   const pW = makeP(true);
+  const p = makeP(theme.dark);
   const visible = target !== null;
+
+  const { top: scrimTop, mid: scrimMid, lower: scrimLower, bottom: scrimBottom } = makeScrim(theme.dark);
+  const scrim: [string, string, string, string] = [scrimTop, scrimMid, scrimLower, scrimBottom];
+  const cardBorder = theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
+  const cardTint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
   const handleOpenTx = useCallback((selected: Transaction) => {
     onOpenTx?.(selected);
   }, [onOpenTx]);
@@ -105,6 +127,8 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   const last = useRef<InsightDetailTarget | null>(null);
   if (target) last.current = target;
   const t = last.current;
+  const isSavingsDetail = t?.kind === 'savings';
+  const savingsTint = t?.accentColor ?? GROUP_COLORS.savings.dark;
 
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -138,9 +162,6 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
     [period, dateIdx, now],
   );
 
-  // ── Chart type toggle ─────────────────────────────────────────────
-  const [chartTypeIdx, setChartTypeIdx] = useState(0);
-
   // ── Sort ──────────────────────────────────────────────────────────
   const [sortBy, setSortBy] = useState<SortOrder>('date-desc');
 
@@ -164,6 +185,29 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
       .map(c => c.id);
   }, [categories, query]);
 
+  const savedMetric = useMemo(
+    () =>
+      buildSavedMetric({
+        transactionsRepo,
+        categories,
+        incomes,
+        period,
+        from: ranges.current.from,
+        to: ranges.current.to,
+        now,
+      }),
+    [
+      transactionsRepo,
+      categories,
+      incomes,
+      period,
+      ranges.current.from,
+      ranges.current.to,
+      now,
+      repoVersion,
+    ],
+  );
+
   // ── Chart series ──────────────────────────────────────────────────
   // Aggregated in the data layer (GROUP BY) — independent of search and never
   // loads the full transaction set just to plot the line.
@@ -181,10 +225,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
     let s = 0;
     return lineSeries.map(v => (s += v));
   }, [lineSeries]);
+  const activeSeries = isSavingsDetail
+    ? savedMetric.cumulativeSeries
+    : cumulativeSeries;
 
   // ── Scrub ─────────────────────────────────────────────────────────
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
-  useEffect(() => setScrubIdx(null), [cumulativeSeries]);
+  useEffect(() => setScrubIdx(null), [activeSeries]);
 
   // Period total comes from the aggregate summary, not a reduce over rows.
   const total = useMemo(() => {
@@ -194,13 +241,9 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
       to: ranges.current.to.toISOString(),
     }).expenseTotal;
   }, [transactionsRepo, ranges, visible, repoVersion]);
-  const heroAmount = scrubIdx != null ? (cumulativeSeries[scrubIdx] ?? total) : total;
-
-  const splitMoney = (n: number) => {
-    const whole = Math.floor(n).toLocaleString();
-    const cents = Math.round((n - Math.floor(n)) * 100).toString().padStart(2, '0');
-    return { whole: `$${whole}`, cents: `.${cents}` };
-  };
+  const activeTotal = isSavingsDetail ? savedMetric.total : total;
+  const heroAmount =
+    scrubIdx != null ? (activeSeries[scrubIdx] ?? activeTotal) : activeTotal;
 
   const scrubDateLabel = (idx: number): string => {
     if (period === 'Year') {
@@ -211,8 +254,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
       .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
-  const spendDisplay = splitMoney(heroAmount);
+  const metricDisplay = money(heroAmount, heroAmount < 100 ? 2 : 0);
   const heroSubLabel = scrubIdx != null ? scrubDateLabel(scrubIdx) : dateLabel;
+  const savedIntentionalText = money(
+    savedMetric.intentional,
+    savedMetric.intentional < 100 ? 2 : 0,
+  );
+  const savedExtraText = money(savedMetric.extra, savedMetric.extra < 100 ? 2 : 0);
 
   // ── Paginated transaction list ────────────────────────────────────
   // Only the visible window is loaded; more pages stream in on scroll. The
@@ -221,9 +269,10 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   const listScope = useMemo<TransactionSummaryQuery>(() => ({
     from: ranges.current.from.toISOString(),
     to: ranges.current.to.toISOString(),
+    categoryIds: isSavingsDetail ? savedMetric.categoryIds : undefined,
     merchantQuery: query.trim() || undefined,
     searchCategoryIds,
-  }), [ranges, query, searchCategoryIds]);
+  }), [ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
 
   const [rows, setRows] = useState<Transaction[]>([]);
   const [nextCursor, setNextCursor] = useState<TransactionCursor | undefined>();
@@ -265,7 +314,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   }, [rows]);
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
 
-  const lineColor = 'rgba(242,244,245,0.82)';
+  const lineColor = isSavingsDetail ? savingsTint : 'rgba(242,244,245,0.82)';
 
   const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
 
@@ -285,55 +334,46 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
         >
           <LinearGradient
             pointerEvents="none"
-            colors={['rgba(8,6,20,0.62)', 'rgba(8,6,20,0.48)', 'rgba(8,6,20,0.74)', 'rgba(8,6,20,0.92)']}
+            colors={scrim}
             locations={[0, 0.28, 0.6, 1]}
             style={StyleSheet.absoluteFill}
           />
 
           {/* ─── Header ───────────────────────────────────────────── */}
           <View
-            style={[styles.headerWrap, { paddingTop: insets.top + 8, backgroundColor: 'rgba(8,6,20,0.55)' }]}
+            style={[
+              styles.headerWrap,
+              {
+                paddingTop: insets.top + 8,
+                backgroundColor: theme.dark
+                  ? 'rgba(8,6,20,0.55)'
+                  : 'rgba(8,6,20,0.16)',
+              },
+            ]}
           >
             <BlurView
-              intensity={60}
-              tint="systemMaterialDark"
+              intensity={theme.dark ? 60 : 90}
+              tint={cardTint}
               style={StyleSheet.absoluteFill}
             />
-            <View style={[styles.headerDivider, { backgroundColor: MEDIA.hairline }]} />
+            <View style={[styles.headerDivider, { backgroundColor: cardBorder }]} />
             <View style={styles.headerRow}>
               {/* Back */}
               <ScreenExitButton
                 variant="back"
                 onPress={onClose}
-                tint="#F2F4F5"
+                tint={pW.text}
                 fallbackBg="rgba(8,6,20,0.45)"
                 accessibilityLabel="Back"
               />
 
               {/* Title */}
-              <Text style={[styles.headerTitle, DARK_TEXT_SHADOW]} numberOfLines={1}>
+              <Text style={[styles.headerTitle, { color: pW.text }, DARK_TEXT_SHADOW]} numberOfLines={1}>
                 {t?.title ?? ''}
               </Text>
 
-              {/* Chart type toggle pill */}
-              <View style={styles.chartTypePill}>
-                {(['chartLine', 'chart', 'repeat'] as const).map((iconName, i) => (
-                  <Pressable
-                    key={i}
-                    onPress={() => setChartTypeIdx(i)}
-                    style={[styles.chartTypeBtn, chartTypeIdx === i && styles.chartTypeBtnActive]}
-                    accessibilityRole="button"
-                    accessibilityLabel={i === 0 ? 'Line chart' : i === 1 ? 'Bar chart' : 'Reset view'}
-                  >
-                    <Icon
-                      name={iconName}
-                      size={15}
-                      color={chartTypeIdx === i ? '#111111' : 'rgba(242,244,245,0.65)'}
-                      stroke={1.9}
-                    />
-                  </Pressable>
-                ))}
-              </View>
+              {/* Spacer keeps the title optically centered against the back button */}
+              <View style={styles.headerSpacer} />
             </View>
           </View>
 
@@ -366,30 +406,47 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
             onEndReachedThreshold={0.7}
             ListHeaderComponent={
               <View style={styles.headerStack}>
-                {/* Hero: amount + chart */}
                 <View style={styles.hero}>
-                  <Text style={[TYPE.labelSm, { color: pW.textTer, marginBottom: 4 }]}>Spent</Text>
-                  <Text style={styles.heroAmount}>
-                    {spendDisplay.whole}
-                    <Text style={styles.heroCents}>{spendDisplay.cents}</Text>
-                  </Text>
-                  <Text style={[TYPE.bodySm, { color: pW.textTer, marginTop: 4 }]}>
-                    {heroSubLabel}
-                  </Text>
+                  <View style={styles.metricHeroTop}>
+                    <Text style={[TYPE.labelSm, { color: pW.textTer }]}>
+                      {isSavingsDetail ? 'Saved' : 'Spent'}
+                    </Text>
+                    <Text style={[TYPE.labelSm, { color: pW.textTer }]}>
+                      ·
+                    </Text>
+                    <Text style={[TYPE.labelSm, { color: pW.textTer }]}>
+                      {heroSubLabel}
+                    </Text>
+                  </View>
+                  <Text style={[styles.metricHeroAmount, { color: pW.text }]}>{metricDisplay}</Text>
                   <View style={styles.heroChart}>
                     <SpendChart
-                      data={cumulativeSeries}
+                      data={activeSeries}
                       width={CHART_W}
                       height={CHART_H}
                       color={lineColor}
+                      fillColor={isSavingsDetail ? savingsTint : undefined}
                       ringColor="#08060e"
                       strokeWidth={2.5}
+                      verticalInset={DETAIL_CHART_INSET_Y}
                       onScrub={setScrubIdx}
                     />
                   </View>
+                  {isSavingsDetail ? (
+                    <Text style={[styles.savedComposition, { color: pW.textTer }]}>
+                      Paid in{' '}
+                      <Text style={{ color: pW.text }}>{savedIntentionalText}</Text>
+                      {'  '}·{'  '}
+                      Extra{' '}
+                      <Text style={{ color: savingsTint }}>{savedExtraText}</Text>
+                    </Text>
+                  ) : null}
                 </View>
 
-                {/* Period picker row */}
+                {/* Period picker row — same control vocabulary as the Insights
+                    screen: timeframe segmented + a labeled chevron date menu,
+                    with sort given its own affordance instead of hiding inside a
+                    generic overflow. */}
                 <View style={styles.pickerRow}>
                   <SegmentedControl
                     values={TIMEFRAMES as unknown as string[]}
@@ -398,57 +455,84 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                       const next = TIMEFRAMES[e.nativeEvent.selectedSegmentIndex];
                       if (next) setTimeframe(next);
                     }}
-                    tintColor="rgba(242,244,245,0.90)"
-                    appearance="dark"
-                    backgroundColor="rgba(242,244,245,0.10)"
-                    fontStyle={{ color: 'rgba(242,244,245,0.55)' }}
-                    activeFontStyle={{ color: '#111111', fontWeight: '600' }}
+                    tintColor={theme.accent.dot}
+                    appearance={theme.dark ? 'dark' : 'light'}
+                    backgroundColor={
+                      theme.dark
+                        ? 'rgba(242,244,245,0.06)'
+                        : 'rgba(255,255,255,0.16)'
+                    }
+                    fontStyle={{
+                      color: theme.dark
+                        ? 'rgba(242,244,245,0.68)'
+                        : 'rgba(11,13,16,0.62)',
+                    }}
+                    activeFontStyle={{
+                      color: theme.dark ? '#080A0D' : '#F2F4F5',
+                      fontWeight: '600',
+                    }}
                     style={styles.pickerSeg}
                   />
+
+                  {/* Date — labeled chevron menu, identical to the Insights pattern */}
+                  <Host ignoreSafeArea="all" style={{ width: 132, height: 36 }}>
+                    <Menu
+                      label={
+                        <View style={styles.dateLabel}>
+                          <Text
+                            style={[styles.dateLabelText, { color: pW.text }, DARK_TEXT_SHADOW]}
+                            numberOfLines={1}
+                          >
+                            {dateLabel}
+                          </Text>
+                          <Icon name="chevDown" size={13} color={pW.text} stroke={2.2} />
+                        </View>
+                      }
+                    >
+                      {dateOptions.map((opt, idx) => (
+                        <SwiftButton
+                          key={`date-${idx}`}
+                          systemImage={idx === dateIdx ? 'checkmark' : undefined}
+                          onPress={() => setDateIdxByPeriod(prev => ({ ...prev, [period]: idx }))}
+                          label={opt}
+                        />
+                      ))}
+                    </Menu>
+                  </Host>
+
+                  {/* Sort — its own visible control */}
                   <Host ignoreSafeArea="all" style={{ width: 36, height: 36 }}>
                     <Menu
                       label={
                         <View style={styles.moreBtn}>
-                          <Icon name="ellipsis" size={16} color="rgba(242,244,245,0.85)" />
+                          <Icon name="filter" size={16} color={pW.text} />
                         </View>
                       }
                     >
-                      <Section>
-                        {SORT_OPTIONS.map((o, i) => (
-                          <SwiftButton
-                            key={`sort-${o.id}`}
-                            systemImage={i === sortIdx ? 'checkmark' : undefined}
-                            onPress={() => setSortBy(o.id as SortOrder)}
-                            label={o.label}
-                          />
-                        ))}
-                      </Section>
-                      <Section>
-                        {dateOptions.map((opt, idx) => (
-                          <SwiftButton
-                            key={`date-${idx}`}
-                            systemImage={idx === dateIdx ? 'checkmark' : undefined}
-                            onPress={() => setDateIdxByPeriod(prev => ({ ...prev, [period]: idx }))}
-                            label={opt}
-                          />
-                        ))}
-                      </Section>
+                      {SORT_OPTIONS.map((o, i) => (
+                        <SwiftButton
+                          key={`sort-${o.id}`}
+                          systemImage={i === sortIdx ? 'checkmark' : undefined}
+                          onPress={() => setSortBy(o.id as SortOrder)}
+                          label={o.label}
+                        />
+                      ))}
                     </Menu>
                   </Host>
                 </View>
 
                 {/* Search bar */}
                 <View style={styles.searchWrap}>
-                  <BlurView intensity={50} tint="systemMaterialDark" style={styles.searchCard}>
-                    <View style={[styles.searchCardInner, { borderColor: MEDIA.hairline }]}>
+                  <BlurView intensity={theme.dark ? 50 : 90} tint={cardTint} style={styles.searchCard}>
+                    <View style={[styles.searchCardInner, { borderColor: cardBorder }]}>
                       <View style={styles.searchRow}>
-                        <Icon name="search" size={16} color={pW.textSec} />
+                        <Icon name="search" size={16} color={p.textSec} />
                         <TextInput
                           value={query}
                           onChangeText={setQuery}
                           placeholder="Search transactions…"
-                          placeholderTextColor={pW.textTer}
-                          style={[styles.searchInput, { color: pW.text }]}
+                          placeholderTextColor={p.textTer}
+                          style={[styles.searchInput, { color: p.text }]}
                           returnKeyType="search"
                           accessibilityLabel="Search transactions"
                         />
@@ -459,7 +543,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                             accessibilityRole="button"
                             accessibilityLabel="Clear search"
                           >
-                            <Icon name="close" size={14} color={pW.textSec} />
+                            <Icon name="close" size={14} color={p.textSec} />
                           </TouchableOpacity>
                         )}
                       </View>
@@ -469,12 +553,16 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
               </View>
             }
             ListEmptyComponent={
-              <BlurView intensity={50} tint="systemMaterialDark" style={styles.dayCard}>
-                <View style={[styles.dayCardInner, { borderColor: MEDIA.hairline }]}>
+              <BlurView intensity={theme.dark ? 50 : 90} tint={cardTint} style={styles.dayCard}>
+                <View style={[styles.dayCardInner, { borderColor: cardBorder }]}>
                   <View style={styles.emptyRow}>
-                    <Icon name="receipt" size={16} color={pW.textTer} />
-                    <Text style={[TYPE.bodySm, { color: pW.textTer }]}>
-                      {query ? 'No results' : 'No transactions'}
+                    <Icon name="receipt" size={16} color={p.textTer} />
+                    <Text style={[TYPE.bodySm, { color: p.textTer }]}>
+                      {query
+                        ? 'No results'
+                        : isSavingsDetail
+                          ? 'No savings transfers'
+                          : 'No transactions'}
                     </Text>
                   </View>
                 </View>
@@ -499,28 +587,30 @@ function DetailDayGroup({
   theme: Theme;
   onPress: (tx: Transaction) => void;
 }) {
-  const pW = makeP(true);
+  const p = makeP(theme.dark);
+  const tint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
+  const border = theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
   const label =
     txs[0]?.when === 'today'     ? 'Today'
     : txs[0]?.when === 'yesterday' ? 'Yesterday'
     : day;
   const spendTotal  = txs.filter(tx => tx.type !== 'income').reduce((s, tx) => s + tx.amount, 0);
   const expenseCount = txs.filter(tx => tx.type !== 'income').length;
-  const incomeColor = GROUP_COLORS.savings.dark;
+  const incomeColor = GROUP_COLORS.savings[theme.dark ? 'dark' : 'light'];
 
   return (
-    <BlurView intensity={50} tint="systemMaterialDark" style={styles.dayCard}>
-      <View style={[styles.dayCardInner, { borderColor: MEDIA.hairline }]}>
+    <BlurView intensity={theme.dark ? 50 : 90} tint={tint} style={styles.dayCard}>
+      <View style={[styles.dayCardInner, { borderColor: border }]}>
         <View style={styles.dayHeader}>
-          <Text style={[TYPE.txDateLabel, { color: pW.textTer }]}>{label}</Text>
-          <Text style={[TYPE.bodySmEm, { color: expenseCount > 1 ? pW.textSec : pW.textTer }]}>
+          <Text style={[TYPE.txDateLabel, { color: p.textTer }]}>{label}</Text>
+          <Text style={[TYPE.bodySmEm, { color: expenseCount > 1 ? p.textSec : p.textTer }]}>
             {expenseCount > 1
               ? `$${spendTotal.toFixed(2)} total`
               : `${txs.length} ${txs.length === 1 ? 'transaction' : 'transactions'}`}
           </Text>
         </View>
         {txs.map((tx, i) => {
-          const groupColor = categoryGroupColor(tx.cat, categories, true);
+          const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
           const cat        = cats[tx.cat];
           const isIncome   = tx.type === 'income';
           return (
@@ -531,7 +621,7 @@ function DetailDayGroup({
                 styles.txRow,
                 {
                   borderBottomWidth: i < txs.length - 1 ? 1 : 0,
-                  borderBottomColor: MEDIA.hairline,
+                  borderBottomColor: border,
                   opacity: pressed ? 0.6 : 1,
                 },
               ]}
@@ -547,14 +637,14 @@ function DetailDayGroup({
               />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <View style={styles.nameRow}>
-                  <Text style={[styles.txName, { color: pW.text, flexShrink: 1 }]} numberOfLines={1}>
+                  <Text style={[styles.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>
                     {tx.merchant}
                   </Text>
                   {tx.recurring && (
-                    <Icon name="repeat" size={11} color={pW.textTer} stroke={1.7} />
+                    <Icon name="repeat" size={11} color={p.textTer} stroke={1.7} />
                   )}
                 </View>
-                <Text style={[styles.txMeta, { color: pW.textSec }]}>
+                <Text style={[styles.txMeta, { color: p.textSec }]}>
                   {cat?.label} · {tx.time}
                 </Text>
               </View>
@@ -564,7 +654,7 @@ function DetailDayGroup({
                 weight="500"
                 theme={theme}
                 prefix={isIncome ? '+$' : '−$'}
-                color={isIncome ? incomeColor : pW.text}
+                color={isIncome ? incomeColor : p.text}
               />
             </Pressable>
           );
@@ -607,28 +697,10 @@ const styles = StyleSheet.create({
     ...TYPE.pageTitle,
     flex: 1,
     textAlign: 'center',
-    color: '#FFFFFF',
   },
 
-  // Chart type pill (top right in header)
-  chartTypePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(242,244,245,0.12)',
-    borderRadius: 20,
-    padding: 3,
-    gap: 2,
-  },
-  chartTypeBtn: {
-    width: 32,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-  },
-  chartTypeBtnActive: {
-    backgroundColor: 'rgba(242,244,245,0.88)',
-  },
+  // Balances the back button so the title stays optically centered
+  headerSpacer: { width: 40, height: 40 },
 
   // Scroll
   scrollContent: {
@@ -644,31 +716,33 @@ const styles = StyleSheet.create({
 
   // Hero
   hero: {
-    paddingTop: 12,
+    paddingTop: 20,
     paddingBottom: 4,
   },
-  heroAmount: {
-    fontSize: 42,
-    fontWeight: '700',
-    letterSpacing: -1.5,
-    color: '#F2F4F5',
-    lineHeight: 46,
+  metricHeroTop: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 7,
   },
-  heroCents: {
-    fontSize: 28,
-    fontWeight: '400',
-    color: 'rgba(242,244,245,0.55)',
+  metricHeroAmount: {
+    ...TYPE.displayXl,
+    marginTop: 8,
   },
   heroChart: {
     marginTop: 16,
     height: CHART_H,
+  },
+  savedComposition: {
+    ...TYPE.bodySm,
+    marginTop: 4,
+    lineHeight: 20,
   },
 
   // Period picker row
   pickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
   pickerSeg: {
     flex: 1,
@@ -680,11 +754,20 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(242,244,245,0.10)',
+    backgroundColor: MEDIA.trackBg,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
+  dateLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+    width: 132,
+    height: 36,
+  },
+  dateLabelText: { ...TYPE.subsectionTitle },
 
   // Search bar
   searchWrap: {},
@@ -695,13 +778,13 @@ const styles = StyleSheet.create({
   searchCardInner: {
     borderRadius: 18,
     borderWidth: 1,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 11,
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
   searchInput: {
     flex: 1,
@@ -711,14 +794,14 @@ const styles = StyleSheet.create({
 
   // Day card
   dayCard: {
-    borderRadius: 22,
+    borderRadius: RADIUS.card,
     overflow: 'hidden',
   },
   dayCardInner: {
-    borderRadius: 22,
+    borderRadius: RADIUS.card,
     borderWidth: 1,
     paddingHorizontal: 16,
-    paddingTop: 14,
+    paddingTop: 16,
     paddingBottom: 4,
   },
   dayHeader: {
@@ -726,13 +809,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
     paddingHorizontal: 2,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   emptyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
+    gap: 12,
+    paddingVertical: 16,
   },
 
   // Transaction rows
