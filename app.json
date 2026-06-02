@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash-screen.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -37,7 +32,9 @@
     "plugins": [
       [
         "expo-image-picker",
-        { "photosPermission": "Choose a photo from your library to use as the app background." }
+        {
+          "photosPermission": "Choose a photo from your library to use as the app background."
+        }
       ],
       [
         "expo-speech-recognition",
@@ -47,7 +44,16 @@
         }
       ],
       "expo-font",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-screen.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
     ],
     "extra": {
       "eas": {

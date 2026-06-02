@@ -574,7 +574,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, initialFilter, f
       <Animated.View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
@@ -587,25 +587,25 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, initialFilter, f
         pointerEvents="none"
         colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
         locations={[0, 0.30, 0.70, 1]}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
 
       {/* Floor — fades in over the wallpaper as the user scrolls down */}
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
       {/* ── Header — pinned ─────────────────────────────────────── */}
         <View style={[S.header, { paddingTop: insets.top + 8 }]}>
           <Animated.View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFillObject, { opacity: headerBgOpacity }]}
+            style={[StyleSheet.absoluteFill, { opacity: headerBgOpacity }]}
           >
             <BlurView
               intensity={theme.dark ? 70 : 100}
               tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <View style={[S.headerDivider, {
               backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)',
@@ -1377,7 +1377,7 @@ function MiniCalendar({
                 {showFill && (
                   <View
                     style={[
-                      StyleSheet.absoluteFillObject,
+                      StyleSheet.absoluteFill,
                       {
                         top: 3, bottom: 3,
                         left: fillLeft, right: fillRight,

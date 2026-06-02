@@ -154,7 +154,7 @@ export function RecurringSheet({ theme, visible, onClose }: Props) {
 
                 <View style={[S.optionRow, { borderTopColor: theme.hairline }]}>
                   <Text style={[TYPE.body, { color: theme.text }]}>Cadence</Text>
-                  <Host matchContents>
+                  <Host matchContents ignoreSafeArea="all">
                     <Picker
                       selection={cadence}
                       onSelectionChange={(val) => setCadence(val as RecurringRule['cadence'])}

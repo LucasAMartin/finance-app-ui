@@ -158,7 +158,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
       style={[
-        StyleSheet.absoluteFillObject,
+        StyleSheet.absoluteFill,
         { zIndex: 80, opacity: anim, transform: [{ translateY }] },
       ]}
     >
@@ -166,13 +166,13 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
         <ImageBackground
           source={previewSource}
           resizeMode="cover"
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         >
           <LinearGradient
             pointerEvents="none"
             colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
             locations={[0, 0.28, 0.6, 1]}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
 
           {/* ─── Header ─────────────────────────────────────── */}
@@ -192,7 +192,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
             <BlurView
               intensity={60}
               tint="systemMaterialDark"
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <View
               style={[
@@ -321,7 +321,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
                 theme.dark ? 'rgba(8,6,20,0.85)' : 'rgba(8,6,20,0.30)',
               ]}
               locations={[0, 0.5, 1]}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <Pressable
               onPress={handleApply}

@@ -57,10 +57,10 @@ export function HeaderIcon({
 }) {
   return (
     <View style={{ width: size, height: size }}>
-      <View style={StyleSheet.absoluteFillObject}>
+      <View style={StyleSheet.absoluteFill}>
         <Icon name={name} size={size} color={wallpaperColor} stroke={stroke} />
       </View>
-      <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: scrolledOpacity }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: scrolledOpacity }]}>
         <Icon name={name} size={size} color={scrolledColor} stroke={stroke} />
       </Animated.View>
     </View>

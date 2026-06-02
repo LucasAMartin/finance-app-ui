@@ -1416,7 +1416,7 @@ export function InsightsScreen({
       <Animated.View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
@@ -1429,13 +1429,13 @@ export function InsightsScreen({
         pointerEvents="none"
         colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
         locations={[0, 0.28, 0.6, 1]}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
 
       {/* Floor — fades in over the wallpaper as the user scrolls down */}
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
       {/* ─── Header ─────────────────────────────── */}
@@ -1443,14 +1443,14 @@ export function InsightsScreen({
           <Animated.View
             pointerEvents="none"
             style={[
-              StyleSheet.absoluteFillObject,
+              StyleSheet.absoluteFill,
               { opacity: headerBgOpacity },
             ]}
           >
             <BlurView
               intensity={theme.dark ? 70 : 100}
               tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <View
               style={[

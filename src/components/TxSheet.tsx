@@ -407,7 +407,7 @@ function EditSection({
             ]}
           >
             <View style={S.inlineDatePickerWrap}>
-              <Host matchContents>
+              <Host matchContents ignoreSafeArea="all">
                 <DatePicker
                   selection={editOccurredAt}
                   onDateChange={onDateChange}

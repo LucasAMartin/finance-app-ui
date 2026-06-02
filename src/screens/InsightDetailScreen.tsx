@@ -273,7 +273,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
       style={[
-        StyleSheet.absoluteFillObject,
+        StyleSheet.absoluteFill,
         { zIndex: 80, opacity: anim, transform: [{ translateX }] },
       ]}
     >
@@ -281,13 +281,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
         <ImageBackground
           source={wallpaper.source}
           resizeMode="cover"
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         >
           <LinearGradient
             pointerEvents="none"
             colors={['rgba(8,6,20,0.62)', 'rgba(8,6,20,0.48)', 'rgba(8,6,20,0.74)', 'rgba(8,6,20,0.92)']}
             locations={[0, 0.28, 0.6, 1]}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
 
           {/* ─── Header ───────────────────────────────────────────── */}
@@ -297,7 +297,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
             <BlurView
               intensity={60}
               tint="systemMaterialDark"
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <View style={[styles.headerDivider, { backgroundColor: MEDIA.hairline }]} />
             <View style={styles.headerRow}>

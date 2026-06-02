@@ -69,7 +69,7 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
 }) {
   return (
     <Animated.View
-      style={[StyleSheet.absoluteFillObject, { opacity }]}
+      style={[StyleSheet.absoluteFill, { opacity }]}
       pointerEvents={active ? 'auto' : 'none'}
     >
       {children}
@@ -327,7 +327,7 @@ function AppInner() {
         <Animated.View
           pointerEvents={drawerOpen ? 'auto' : 'none'}
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             { backgroundColor: '#000', opacity: backdropOpacity, zIndex: 50 },
           ]}
         >
@@ -336,7 +336,7 @@ function AppInner() {
 
         {/* ─── Drawer ───────────────────────────────────────── */}
         <View
-          style={[StyleSheet.absoluteFillObject, { zIndex: 60 }]}
+          style={[StyleSheet.absoluteFill, { zIndex: 60 }]}
           pointerEvents={drawerOpen ? 'box-none' : 'none'}
         >
           <Drawer

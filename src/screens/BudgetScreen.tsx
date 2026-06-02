@@ -1075,7 +1075,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
       <Animated.View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
@@ -1087,13 +1087,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome }: Props) {
       <LinearGradient pointerEvents="none"
         colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}
         locations={[0, 0.28, 0.60, 1]}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
 
       {/* Floor — fades in over the wallpaper as the user scrolls down */}
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1841,7 +1841,7 @@ function CategoryEditSheet({
 	                  <>
 	                    <View style={[fieldRowStyle, sep]}>
 	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
-	                      <Host matchContents>
+	                      <Host matchContents ignoreSafeArea="all">
 	                        <Picker
 	                          selection={recurringCadence}
 	                          onSelectionChange={(val) => onRecurringCadenceChange(val as CategoryRecurringCadence)}
@@ -1861,7 +1861,7 @@ function CategoryEditSheet({
 	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Next payment</Text>
 	                      {recurringDateVal ? (
 	                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-	                          <Host matchContents>
+	                          <Host matchContents ignoreSafeArea="all">
 	                            <DatePicker
 	                              selection={recurringDateVal}
 	                              onDateChange={(d) => { setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }}
@@ -1947,7 +1947,7 @@ function CategoryEditSheet({
                       <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target date</Text>
                       {deadlineDate ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Host matchContents>
+                          <Host matchContents ignoreSafeArea="all">
                             <DatePicker
                               selection={deadlineDate}
                               onDateChange={(d) => { setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}

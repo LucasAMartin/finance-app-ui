@@ -44,7 +44,7 @@ export const GlassCircleButton = React.forwardRef<View, GlassCircleButtonProps>(
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >
-        <Host matchContents>
+        <Host matchContents ignoreSafeArea="all">
           <Button
             onPress={onPress}
             modifiers={[
@@ -85,7 +85,7 @@ export function GlassCircleIcon({
 }: GlassCircleIconProps) {
   return (
     <View style={{ width: size, height: size }} pointerEvents="none">
-      <Host matchContents>
+      <Host matchContents ignoreSafeArea="all">
         <Image
           systemName={systemImage}
           size={iconSize}

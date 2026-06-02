@@ -381,7 +381,7 @@ export function InsightBarChart({
         )}
       </Svg>
       <View
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         {...interactionProps.panHandlers}
         {...chartAccessibilityProps({
           label: 'Spend rhythm chart',
@@ -393,7 +393,7 @@ export function InsightBarChart({
         })}
       >
         <Pressable
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           onPress={interactionProps.onPress}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
@@ -588,7 +588,7 @@ export function InsightPaceChart({
         )}
       </Svg>
       <View
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         {...interactionProps.panHandlers}
         {...chartAccessibilityProps({
           label: 'Budget pace chart',
@@ -600,7 +600,7 @@ export function InsightPaceChart({
         })}
       >
         <Pressable
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           onPress={interactionProps.onPress}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"

@@ -232,7 +232,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
       <View style={[S.root, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
         {/* Header */}
         <View style={S.header}>
-          <Host colorScheme={darkScheme} matchContents style={S.backBtnHost}>
+          <Host colorScheme={darkScheme} matchContents ignoreSafeArea="all" style={S.backBtnHost}>
             <Button
               onPress={() => { voice.abort(); onClose(); }}
               modifiers={[
@@ -250,7 +250,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
         {/* Voice / Manual toggle */}
         <View style={S.pickerWrapper}>
-          <Host matchContents>
+          <Host matchContents ignoreSafeArea="all">
             <Picker
               selection={mode === 'manual' ? 1 : 0}
               onSelectionChange={(val) => {
@@ -400,7 +400,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 </View>
                 <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
                   <Text style={[TYPE.body, { color: theme.textSec }]}>Date</Text>
-                  <Host matchContents>
+                  <Host matchContents ignoreSafeArea="all">
                     <DatePicker
                       selection={manualDate}
                       displayedComponents={['date']}
@@ -498,7 +498,7 @@ function CategoryPicker({
 
   return (
     <View style={[S.categoryPanel, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
-      <Host matchContents>
+      <Host matchContents ignoreSafeArea="all">
         <Picker
           selection={selectedGroupIdx}
           onSelectionChange={(val) => {

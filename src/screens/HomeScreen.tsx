@@ -412,7 +412,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
       <Animated.View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
@@ -425,25 +425,25 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
         pointerEvents="none"
         colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
         locations={[0, 0.28, 0.60, 1]}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
 
       {/* Floor — fades in over the wallpaper as the user scrolls down */}
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFillObject, { backgroundColor: floorColor, opacity: floorOpacity }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: floorColor, opacity: floorOpacity }]}
       />
 
         {/* ─── Header ─────────────────────────────── */}
         <View style={[styles.headerWrap, { paddingTop: insets.top + 8 }]}>
           <Animated.View
             pointerEvents="none"
-            style={[StyleSheet.absoluteFillObject, { opacity: headerBgOpacity }]}
+            style={[StyleSheet.absoluteFill, { opacity: headerBgOpacity }]}
           >
             <BlurView
               intensity={theme.dark ? 70 : 100}
               tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <View style={[styles.headerDivider, {
               backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)',

@@ -3,7 +3,7 @@ import { View, Text, Pressable, TextInput, StyleSheet, Animated, Easing, Linking
 import * as Haptics from 'expo-haptics';
 import { Theme } from '../theme';
 import { Icon } from './Icon';
-import { ScreenExitButton, GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
+import { ScreenExitButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
@@ -13,8 +13,8 @@ import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
-import { BottomSheet, Group, Host, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
-import { background, ignoreSafeArea, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { BottomSheet, Button, GlassEffectContainer, Group, Host, Image as SwiftImage, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
+import { background, frame, glassEffect, ignoreSafeArea, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
 import { MenuView } from '@react-native-menu/menu';
 
 type Mode = 'idle' | 'listening' | 'manual';
@@ -280,7 +280,7 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
                   within the sheet detent, so nothing here needs to scroll. */}
               <View style={[S.body, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
                 <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}>
-                  <Host matchContents>
+                  <Host matchContents ignoreSafeArea="all">
                     <Picker
                       selection={mode === 'manual' ? 1 : 0}
                       onSelectionChange={(val) => {
@@ -359,23 +359,32 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
 
                     {/* Mic button with expanding pulse rings */}
                     <View style={S.micZone}>
-                      {ringAnims.map((anim, i) => {
-                        const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
-                        const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
-                        return (
-                          <Animated.View
-                            key={i}
-                            style={[
-                              S.ring,
-                              {
-                                backgroundColor: theme.accent.fill,
-                                opacity,
-                                transform: [{ scale }],
-                              },
-                            ]}
-                          />
-                        );
-                      })}
+                      {/* Rings render only while listening. Off-state they'd be
+                          invisible but still overlap the SwiftUI host, which
+                          suppresses the mic's interactive Liquid Glass press —
+                          so at idle the glass button is the sole element here,
+                          exactly like the other glass buttons in the app. */}
+                      {mode === 'listening' && (
+                        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                          {ringAnims.map((anim, i) => {
+                            const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
+                            const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
+                            return (
+                              <Animated.View
+                                key={i}
+                                style={[
+                                  S.ring,
+                                  {
+                                    backgroundColor: theme.accent.fill,
+                                    opacity,
+                                    transform: [{ scale }],
+                                  },
+                                ]}
+                              />
+                            );
+                          })}
+                        </View>
+                      )}
                       {(() => {
                         const onMicPress = () => {
                           Haptics.impactAsync(
@@ -387,14 +396,38 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
                         };
                         const micLabel = mode === 'listening' ? 'Stop recording' : 'Start recording';
                         return SUPPORTS_GLASS ? (
-                          <GlassCircleButton
-                            onPress={onMicPress}
-                            systemImage={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
-                            size={88}
-                            iconSize={32}
-                            iconColor={theme.accent.dot}
+                          // Inline glass button inside a GlassEffectContainer —
+                          // the documented host for Liquid Glass effects. The
+                          // shared GlassCircleButton (no container) animates fine
+                          // for the small buttons, but the large 88pt mic needs
+                          // the container for its interactive press to render.
+                          <View
+                            style={{ width: 88, height: 88 }}
+                            accessible
+                            accessibilityRole="button"
                             accessibilityLabel={micLabel}
-                          />
+                          >
+                            <Host matchContents>
+                              <GlassEffectContainer>
+                                <Button
+                                  onPress={onMicPress}
+                                  modifiers={[
+                                    frame({ width: 88, height: 88 }),
+                                    glassEffect({
+                                      glass: { variant: 'regular', interactive: true },
+                                      shape: 'circle',
+                                    }),
+                                  ]}
+                                >
+                                  <SwiftImage
+                                    systemName={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
+                                    size={32}
+                                    color={theme.accent.dot}
+                                  />
+                                </Button>
+                              </GlassEffectContainer>
+                            </Host>
+                          </View>
                         ) : (
                           <Pressable
                             onPress={onMicPress}
@@ -555,7 +588,7 @@ function ManualCategoryPicker({
 
   return (
     <View style={[S.categoryPanel, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
-      <Host matchContents>
+      <Host matchContents ignoreSafeArea="all">
         <Picker
           selection={selectedGroupIdx}
           onSelectionChange={(val) => {
