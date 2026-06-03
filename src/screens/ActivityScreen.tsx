@@ -9,7 +9,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -61,6 +60,7 @@ let cachedCalOpen = false;
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
+import { SearchFilterBar } from '../components/SearchFilterBar';
 import { MerchantMark } from '../components/MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { Money } from '../components/shared';
@@ -605,6 +605,16 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
     theme,
   ]);
 
+  // Stable renderItem identity. An inline `({item}) => ...` here gives the list a
+  // fresh render function every screen render, which defeats VirtualizedList's
+  // per-cell memoization and re-renders every visible (Swipeable) row on any
+  // ActivityScreen state change — including opening the filter sheet, which then
+  // waits behind that work before the native sheet can present.
+  const renderActivityItem = useCallback(
+    ({ item }: { item: unknown }) => renderActivityDay(String(item)),
+    [renderActivityDay],
+  );
+
   // Stable identities for TransactionCalendar's props so the memoized grid only
   // re-renders when something it actually displays changes — not on every
   // keystroke, toast, or pagination render of this screen.
@@ -732,7 +742,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
           ref={scrollViewRef}
           data={activityDayKeys}
           keyExtractor={(day) => String(day)}
-          renderItem={({ item }) => renderActivityDay(String(item))}
+          renderItem={renderActivityItem}
           style={{ flex: 1 }}
           contentContainerStyle={[S.listContent, { paddingTop: insets.top + 64 }]}
           showsVerticalScrollIndicator={false}
@@ -825,57 +835,24 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
               </Pressable>
             </SectionCard>
 
-            {/* ── Search + filter card ──────────────────────────── */}
-            <SectionCard dark={theme.dark}>
-              <View style={S.searchRow}>
-                <View style={[S.search, { flex: 1, backgroundColor: theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(14,12,24,0.06)', borderColor: p.hairline }]}>
-                  <Icon name="search" size={16} color={p.textSec} />
-                  <TextInput
-                    value={query}
-                    onChangeText={setQuery}
-                    placeholder="Search transactions…"
-                    placeholderTextColor={p.textTer}
-                    style={[S.searchInput, { color: p.text }]}
-                    returnKeyType="search"
-                    accessibilityLabel="Search transactions"
-                    accessibilityHint="Searches by merchant name or category"
-                  />
-                  {query.length > 0 && (
-                    <TouchableOpacity
-                      onPress={() => setQuery('')}
-                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear search"
-                    >
-                      <Icon name="close" size={14} color={p.textSec} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <TouchableOpacity
-                  onPress={() => setFilterSheetOpen(true)}
-                  activeOpacity={0.7}
-                  style={[S.filterBtn, { backgroundColor: activeCount > 0
-                    ? (theme.dark ? 'rgba(255,255,255,0.90)' : 'rgba(14,12,24,0.85)')
-                    : (theme.dark ? 'rgba(255,255,255,0.12)' : 'rgba(14,12,24,0.08)') }]}
-                  accessibilityRole="button"
-                  accessibilityLabel={activeCount > 0 ? `Filters, ${activeCount} active` : 'Filters'}
-                >
-                  <Icon name="filter" size={15} color={activeCount > 0 ? (theme.dark ? theme.bg : theme.surface) : p.textSec} stroke={1.6} />
-                  {activeCount > 0 && (
-                    <View style={[S.filterBadge, { backgroundColor: theme.dark ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.18)' }]}>
-                      <Text style={[S.filterBadgeText, { color: theme.dark ? theme.bg : theme.surface }]}>{activeCount}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              </View>
+            {/* ── Search + filter — floats directly on wallpaper ── */}
+            <View style={S.searchWrap}>
+              <SearchFilterBar
+                theme={theme}
+                p={pWallpaper}
+                query={query}
+                onChangeQuery={setQuery}
+                activeCount={activeCount}
+                onOpenFilter={() => setFilterSheetOpen(true)}
+              />
 
               {/* Active filter pills */}
               {hasFilterPills && (
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  style={{ marginHorizontal: -20, marginTop: 12 }}
-                  contentContainerStyle={[S.filterStripScroll, { paddingHorizontal: 20 }]}
+                  style={{ marginHorizontal: -16, marginTop: 12 }}
+                  contentContainerStyle={[S.filterStripScroll, { paddingHorizontal: 16 }]}
                   keyboardShouldPersistTaps="handled"
                 >
                   {selectedDay !== null && (
@@ -944,7 +921,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
                   })}
                 </ScrollView>
               )}
-            </SectionCard>
+            </View>
 
             {loading ? (
               <SectionCard dark={theme.dark}>
@@ -1787,9 +1764,13 @@ function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; 
       borderBottomColor: p.hairline,
       backgroundColor: theme.dark ? 'rgba(255,255,255,0.03)' : 'rgba(14,12,24,0.025)',
     }]}>
-      <View style={[S.billIcon, { borderColor: groupColor }]}>
-        <Icon name={bill.icon} size={15} color={groupColor} stroke={1.7} />
-      </View>
+      <MerchantMark
+        merchant={bill.merchant}
+        catIcon={bill.icon}
+        color={groupColor}
+        size={36}
+        iconSize={15}
+      />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
           <Text style={[S.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>
@@ -2024,30 +2005,9 @@ const S = StyleSheet.create({
     ...TYPE.caption,
   },
 
-  // Search
-  searchRow: {
-    flexDirection: 'row', alignItems: 'stretch', gap: 8,
+  searchWrap: {
+    paddingHorizontal: 4,
   },
-  search: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1,
-  },
-  searchInput: { flex: 1, ...TYPE.bodyRegular, padding: 0 },
-  filterBtn: {
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    minWidth: 44,
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  filterBadge: {
-    width: 16, height: 16, borderRadius: 8,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  filterBadgeText: { ...TYPE.labelPlain },
   filterPill: {
     flexDirection: 'row', alignItems: 'center',
     paddingLeft: 12, paddingRight: 8, paddingVertical: 8,
@@ -2073,10 +2033,6 @@ const S = StyleSheet.create({
   // Rows
   nameRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-  },
-  billIcon: {
-    width: 36, height: 36, borderRadius: 18, borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   upcomingPill: {
     paddingHorizontal: 8, paddingVertical: 2, borderRadius: 100,

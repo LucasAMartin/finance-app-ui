@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, OVER_DOT } from '../theme';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
@@ -8,6 +8,8 @@ import type { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
 import { Money } from '../components/shared';
+import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
+import { applyKeypadKey } from '../components/NumericKeypad';
 
 interface Props {
   tx: Transaction | null;
@@ -27,6 +29,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   const [merchantDraft, setMerchantDraft] = useState('');
   const [amountDraft, setAmountDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
+  const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
 
   useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
 
@@ -35,6 +38,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
     setMerchantDraft(currentTx.merchant);
     setAmountDraft(currentTx.amount.toFixed(2));
     setNoteDraft(currentTx.note ?? '');
+    setAmountKeypadOpen(false);
   }, [currentTx?.id, currentTx?.merchant, currentTx?.amount, currentTx?.note, repoVersion]);
 
   if (!currentTx) return null;
@@ -56,10 +60,12 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
       updatedByUserId: 'local',
       meta: currentTx.meta,
     });
+    setAmountKeypadOpen(false);
     setEditing(false);
   };
 
   const deleteTx = () => {
+    setAmountKeypadOpen(false);
     transactionsRepo.delete(currentTx.id);
     onBack();
   };
@@ -73,6 +79,10 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   }).expenseTotal;
   const catBudget = cat?.budget ?? 0;
   const catPct = catBudget > 0 ? Math.round((catTotal / catBudget) * 100) : 0;
+  const openAmountKeypad = () => {
+    Keyboard.dismiss();
+    requestAnimationFrame(() => setAmountKeypadOpen(true));
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -80,7 +90,10 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
       <View style={[styles.navBar, { paddingTop: insets.top + 8 }]}>
         <ScreenExitButton
           variant="back"
-          onPress={onBack}
+          onPress={() => {
+            setAmountKeypadOpen(false);
+            onBack();
+          }}
           tint={theme.text}
           fallbackBg={theme.surface}
           accessibilityLabel="Back"
@@ -89,7 +102,10 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           {cat?.label}
         </Text>
         <TouchableOpacity
-          onPress={() => setEditing(e => !e)}
+          onPress={() => {
+            setAmountKeypadOpen(false);
+            setEditing(e => !e);
+          }}
           delayPressIn={0}
           hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
           style={[styles.circleBtn, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
@@ -102,12 +118,13 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
       style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 50 }}
       showsVerticalScrollIndicator={false}
+      onScrollBeginDrag={() => setAmountKeypadOpen(false)}
     >
 
       {/* Hero */}
       <View style={styles.hero}>
-        <View style={[styles.catIcon, { backgroundColor: categoryGroupColor(currentTx.cat, categories, theme.dark) }]}>
-          <Icon name={cat?.icon} size={22} color="#fff" stroke={1.5} />
+        <View style={[styles.catIcon, { backgroundColor: `${categoryGroupColor(currentTx.cat, categories, theme.dark)}26` }]}>
+          <Icon name={cat?.icon} size={22} color={categoryGroupColor(currentTx.cat, categories, theme.dark)} stroke={1.5} />
         </View>
         <Text style={{ fontSize: 22, fontWeight: '700', letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 16 }}>
           {currentTx.merchant}
@@ -140,13 +157,27 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
             >
               <Text style={{ fontSize: 13, color: theme.textSec, flex: 1 }}>{r.label}</Text>
               {'setter' in r ? (
-                <TextInput
-                  value={r.value}
-                  onChangeText={r.setter}
-                  keyboardType={r.label === 'Amount' ? 'decimal-pad' : 'default'}
-                  placeholderTextColor={theme.textTer}
-                  style={{ fontSize: 13, color: theme.text, fontWeight: '500', textAlign: 'right', flex: 1, padding: 0 }}
-                />
+                r.label === 'Amount' ? (
+                  <TouchableOpacity
+                    onPress={openAmountKeypad}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit transaction amount"
+                    style={styles.amountDisplay}
+                  >
+                    <Text style={[styles.amountText, { color: r.value ? theme.text : theme.textTer }]}>
+                      ${r.value || '0.00'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TextInput
+                    value={r.value}
+                    onChangeText={r.setter}
+                    placeholderTextColor={theme.textTer}
+                    onFocus={() => setAmountKeypadOpen(false)}
+                    style={{ fontSize: 13, color: theme.text, fontWeight: '500', textAlign: 'right', flex: 1, padding: 0 }}
+                  />
+                )
               ) : (
                 <Text style={{ fontSize: 13, color: theme.text, fontWeight: '500' }}>{r.value}</Text>
               )}
@@ -188,6 +219,12 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
         </View>
       </View>
     </ScrollView>
+    <PopupNumericKeypad
+      visible={amountKeypadOpen}
+      theme={theme}
+      onKey={(key) => setAmountDraft(prev => applyKeypadKey(prev, key))}
+      onDone={() => setAmountKeypadOpen(false)}
+    />
     </View>
   );
 }
@@ -227,6 +264,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 20,
+  },
+  amountDisplay: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  amountText: {
+    fontSize: 13,
+    fontWeight: '500',
+    textAlign: 'right',
   },
   visaChip: {
     width: 40,

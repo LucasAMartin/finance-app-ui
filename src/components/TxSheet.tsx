@@ -1,13 +1,29 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, View, Text, Pressable, TextInput, ScrollView, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { InteractionManager, View, Text, Pressable, StyleSheet, Keyboard, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, Button as SwiftButton, DatePicker, Group, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
-import { background, datePickerStyle, presentationDetents, presentationDragIndicator, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetTextInput,
+  type BottomSheetBackdropProps,
+} from '@gorhom/bottom-sheet';
+import { Button as SwiftButton, DatePicker, Host, Menu } from '@expo/ui/swift-ui';
+import { datePickerStyle, environment } from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 
-const DETENT_DEFAULT: PresentationDetent = { fraction: 0.48 };
-const DETENT_LARGE: PresentationDetent = 'large';
-const DETENTS: PresentationDetent[] = [DETENT_DEFAULT, DETENT_LARGE];
+// Compact (~0.48 of the screen) and expanded (near-full) snap points, mirroring
+// the old SwiftUI `{ fraction: 0.48 }` and `.large` detents. Index 0 = compact,
+// index 1 = expanded edit mode.
+const COMPACT_FRACTION = 0.48;
+const EXPANDED_FRACTION = 0.92;
+const SNAP_POINTS = [`${COMPACT_FRACTION * 100}%`, `${EXPANDED_FRACTION * 100}%`];
+const COMPACT_INDEX = 0;
+const EXPANDED_INDEX = 1;
+// gorhom's content view spans the full sheet height and slides down to reveal
+// the active detent, so to vertically center within the *visible* area we size
+// the content box to the detent height minus the chrome above it (drag handle +
+// content top padding).
+const SHEET_CHROME = 44;
 const DATE_PICKER_EXPANDED_HEIGHT = 236;
 
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
@@ -17,8 +33,10 @@ import { Icon } from './Icon';
 import { MerchantMark } from './MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { Money, SheetPrimaryButton, SheetTextButton } from './shared';
+import { PopupNumericKeypad } from './PopupNumericKeypad';
+import { applyKeypadKey } from './NumericKeypad';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
-import { Theme, catPastel, GROUP_COLORS } from '../theme';
+import { Theme, GROUP_COLORS } from '../theme';
 import { TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 
@@ -60,15 +78,20 @@ export function TxSheet({
   const categories = useRepositoryList(categoriesRepo);
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const insets = useSafeAreaInsets();
+  const { height: winH } = useWindowDimensions();
+  const sheetRef = useRef<BottomSheetModal>(null);
+  const presentedRef = useRef(false);
   const lastTx = useRef<Transaction | null>(null);
+  const sheetHeightRef = useRef(0);
   if (tx) lastTx.current = tx;
   const t = lastTx.current;
 
-  const [detent, setDetent] = useState<PresentationDetent>(DETENT_DEFAULT);
+  const [sheetIndex, setSheetIndex] = useState(COMPACT_INDEX);
   const [editCat, setEditCat] = useState('');
   const [editMerchant, setEditMerchant] = useState('');
   const [editNote, setEditNote] = useState('');
   const [editAmt, setEditAmt] = useState('');
+  const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
   const [editOccurredAt, setEditOccurredAt] = useState<Date>(new Date());
   const [datePickerInlineOpen, setDatePickerInlineOpen] = useState(false);
   const [catTotal, setCatTotal] = useState<number | null>(null);
@@ -76,18 +99,43 @@ export function TxSheet({
 
   useEffect(() => {
     if (tx !== null) {
-      setDetent(DETENT_DEFAULT);
+      setSheetIndex(COMPACT_INDEX);
       setEditCat(tx.cat);
       setEditMerchant(tx.merchant);
       setEditNote(tx.note ?? '');
       setEditAmt(tx.amount.toFixed(2));
+      setAmountKeypadOpen(false);
       setEditOccurredAt(dateFromIso(tx.occurredAt));
       setDatePickerInlineOpen(false);
     }
   }, [tx]);
 
-  const isExpanded = detent === DETENT_LARGE;
+  useEffect(() => {
+    if (!visible) setAmountKeypadOpen(false);
+  }, [visible]);
+
+  const isExpanded = sheetIndex >= EXPANDED_INDEX;
+  const visibleContentH = (isExpanded ? EXPANDED_FRACTION : COMPACT_FRACTION) * winH - SHEET_CHROME;
   const deferredContentReady = tx !== null && deferredTxId === tx.id;
+
+  // Drive present/dismiss from the `visible` prop. The `presentedRef` guard is
+  // essential: calling `dismiss()` on a modal that was never presented (e.g. the
+  // initial visible=false render) puts gorhom into a stuck DISMISSING status,
+  // after which it silently refuses to render on the next `present()`. So only
+  // dismiss a sheet we actually presented, and only present one not already up.
+  useEffect(() => {
+    if (visible && !presentedRef.current) {
+      presentedRef.current = true;
+      sheetRef.current?.present();
+    } else if (!visible && presentedRef.current) {
+      presentedRef.current = false;
+      sheetRef.current?.dismiss();
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!isExpanded && amountKeypadOpen) setAmountKeypadOpen(false);
+  }, [amountKeypadOpen, isExpanded]);
 
   useEffect(() => {
     if (!tx) {
@@ -149,6 +197,7 @@ export function TxSheet({
         merchantSource: nextMerchant !== t.merchant || t.meta?.merchantSource === 'user' ? 'user' : t.meta?.merchantSource,
       },
     });
+    setAmountKeypadOpen(false);
     onClose();
   };
 
@@ -156,99 +205,158 @@ export function TxSheet({
     if (!t) return;
     if (onDeleted) onDeleted(t);
     else transactionsRepo.delete(t.id);
+    setAmountKeypadOpen(false);
     onClose();
   };
 
+  const applySheetIndex = useCallback((index: number) => {
+    setSheetIndex(index);
+    if (index < EXPANDED_INDEX) setAmountKeypadOpen(false);
+  }, []);
+
+  // Swap compact↔edit content (and resize the content box) the moment the
+  // animation *starts* — `onChange` only fires once the sheet has fully
+  // settled, which made the edit UI appear well after the sheet finished
+  // growing. `toIndex` is -1 while dismissing; clamp so we don't thrash.
+  const handleSheetAnimate = useCallback((_from: number, to: number) => {
+    if (to >= COMPACT_INDEX) applySheetIndex(to);
+  }, [applySheetIndex]);
+
+  // Fires after the dismiss animation completes (swipe or programmatic). Clear
+  // the presented flag here so the visible→false effect doesn't fire a second,
+  // status-corrupting dismiss(), then sync the parent's `visible` state.
+  const handleModalDismiss = useCallback(() => {
+    presentedRef.current = false;
+    onClose();
+  }, [onClose]);
+
+  const expandToEdit = useCallback(() => {
+    sheetRef.current?.snapToIndex(EXPANDED_INDEX);
+  }, []);
+
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={COMPACT_INDEX}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  ), []);
+
+  const handleContentLayout = (height: number) => {
+    const previous = sheetHeightRef.current;
+    sheetHeightRef.current = height;
+    if (amountKeypadOpen && previous > 0 && Math.abs(height - previous) > 8) {
+      setAmountKeypadOpen(false);
+    }
+  };
+
+  const openAmountKeypad = () => {
+    Keyboard.dismiss();
+    requestAnimationFrame(() => setAmountKeypadOpen(true));
+  };
+
   return (
-    <>
-      <Host style={{ width: 0, height: 0, position: 'absolute' }}>
-          <BottomSheet
-            isPresented={visible}
-            onIsPresentedChange={(v) => { if (!v) onClose(); }}
-          >
-            <Group modifiers={[
-              presentationDetents(DETENTS, { selection: detent, onSelectionChange: setDetent }),
-              presentationDragIndicator('visible'),
-              environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-              background(theme.surface),
-            ]}>
-              <RNHostView>
-                <View style={[S.content, {
-                  backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
-                }]}>
-                  {t && (
-                    <>
-                      <ScreenExitButton
-                        variant="close"
-                        onPress={onClose}
-                        tint={theme.textSec}
-                        fallbackBg={theme.chipBg}
-                        style={EXIT_FLOAT_STYLE}
-                        accessibilityLabel="Close"
-                      />
-                      <ScrollView
-                        bounces={false}
-                        showsVerticalScrollIndicator={false}
-                        scrollEnabled={false}
-                        keyboardShouldPersistTaps="handled"
-                        contentContainerStyle={{
-                          flexGrow: 1,
-                          justifyContent: isExpanded ? 'flex-start' : 'center',
-                          paddingBottom: Math.max(insets.bottom, 16) + 12,
-                        }}
-                      >
-                        <SheetBody
-                          tx={t}
-                          theme={theme}
-                          isExpanded={isExpanded}
-                          logoEnabled={deferredContentReady}
-                          cats={cats}
-                          categories={categories}
-                        />
-                        {!isExpanded ? (
-                          <View>
-                            <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
-                            <Pressable
-                              onPress={() => setDetent(DETENT_LARGE)}
-                              pointerEvents="box-only"
-                              style={S.expandHint}
-                              accessibilityRole="button"
-                              accessibilityLabel="Edit transaction"
-                            >
-                              <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
-                              <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
-                            </Pressable>
-                          </View>
-                        ) : (
-                          <EditSection
-                            theme={theme}
-                            editCat={editCat}
-                            setEditCat={setEditCat}
-                            editMerchant={editMerchant}
-                            setEditMerchant={setEditMerchant}
-                            editNote={editNote}
-                            setEditNote={setEditNote}
-                            editAmt={editAmt}
-                            setEditAmt={setEditAmt}
-                            editOccurredAt={editOccurredAt}
-                            datePickerInlineOpen={datePickerInlineOpen}
-                            onToggleDatePicker={() => setDatePickerInlineOpen(v => !v)}
-                            onDateChange={setEditOccurredAt}
-                            cats={cats}
-                            categories={categories}
-                            onSave={saveEdit}
-                            onDelete={deleteTx}
-                          />
-                        )}
-                      </ScrollView>
-                    </>
-                  )}
+    <BottomSheetModal
+      ref={sheetRef}
+      index={COMPACT_INDEX}
+      snapPoints={SNAP_POINTS}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      onAnimate={handleSheetAnimate}
+      onChange={applySheetIndex}
+      // Close on `onDismiss` (fires AFTER the dismiss animation completes), so
+      // no React commit lands on top of the running dismiss — this is what kept
+      // swipe-to-close stuttering on the old SwiftUI sheet.
+      onDismiss={handleModalDismiss}
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={{ backgroundColor: theme.textTer }}
+      backgroundStyle={{ backgroundColor: theme.surface }}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+    >
+      <View
+        style={[S.content, { backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)' }]}
+        onLayout={event => handleContentLayout(event.nativeEvent.layout.height)}
+      >
+        {t && (
+          <>
+            <ScreenExitButton
+              variant="close"
+              onPress={onClose}
+              tint={theme.textSec}
+              fallbackBg={theme.chipBg}
+              style={EXIT_FLOAT_STYLE}
+              accessibilityLabel="Close"
+            />
+            <View
+              style={{
+                height: visibleContentH,
+                justifyContent: isExpanded ? 'flex-start' : 'center',
+                paddingBottom: Math.max(insets.bottom, 16) + 12,
+              }}
+            >
+              <SheetBody
+                tx={t}
+                theme={theme}
+                isExpanded={isExpanded}
+                logoEnabled={deferredContentReady}
+                cats={cats}
+                categories={categories}
+              />
+              {!isExpanded ? (
+                <View>
+                  <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
+                  <Pressable
+                    onPress={expandToEdit}
+                    pointerEvents="box-only"
+                    style={S.expandHint}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit transaction"
+                  >
+                    <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
+                    <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
+                  </Pressable>
                 </View>
-              </RNHostView>
-            </Group>
-          </BottomSheet>
-      </Host>
-    </>
+              ) : (
+                <EditSection
+                  theme={theme}
+                  editCat={editCat}
+                  setEditCat={setEditCat}
+                  editMerchant={editMerchant}
+                  setEditMerchant={setEditMerchant}
+                  editNote={editNote}
+                  setEditNote={setEditNote}
+                  editAmt={editAmt}
+                  setEditAmt={setEditAmt}
+                  onOpenAmountKeypad={openAmountKeypad}
+                  onDismissAmountKeypad={() => setAmountKeypadOpen(false)}
+                  editOccurredAt={editOccurredAt}
+                  datePickerInlineOpen={datePickerInlineOpen}
+                  onToggleDatePicker={() => setDatePickerInlineOpen(v => !v)}
+                  onDateChange={setEditOccurredAt}
+                  cats={cats}
+                  categories={categories}
+                  onSave={saveEdit}
+                  onDelete={deleteTx}
+                />
+              )}
+            </View>
+          </>
+        )}
+        {/* Mount the keypad only in expanded edit mode — it contains a BlurView
+            that would otherwise composite on every frame of the sheet animation. */}
+        {isExpanded && (
+          <PopupNumericKeypad
+            visible={amountKeypadOpen}
+            theme={theme}
+            onKey={(key) => setEditAmt(prev => applyKeypadKey(prev, key))}
+            onDone={() => setAmountKeypadOpen(false)}
+          />
+        )}
+      </View>
+    </BottomSheetModal>
   );
 }
 
@@ -268,7 +376,6 @@ function SheetBody({
   categories: Category[];
 }) {
   const cat = cats[tx.cat];
-  const color = catPastel(tx.cat, theme.dark);
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const useLogo = logoEnabled && transactionUsesMerchantLogo(tx);
 
@@ -277,8 +384,7 @@ function SheetBody({
       <MerchantMark
         merchant={tx.merchant}
         catIcon={cat?.icon}
-        color={color + '42'}
-        iconColor={groupColor}
+        color={groupColor}
         iconSize={isExpanded ? 18 : 24}
         logoEnabled={useLogo}
         size={isExpanded ? 40 : 52}
@@ -345,7 +451,8 @@ function CompactSummary({
 
 function EditSection({
   theme, editCat, setEditCat, editMerchant, setEditMerchant,
-  editNote, setEditNote, editAmt, setEditAmt, editOccurredAt, datePickerInlineOpen, onToggleDatePicker, onDateChange,
+  editNote, setEditNote, editAmt, setEditAmt, onOpenAmountKeypad, onDismissAmountKeypad,
+  editOccurredAt, datePickerInlineOpen, onToggleDatePicker, onDateChange,
   cats, categories, onSave, onDelete,
 }: {
   theme: Theme;
@@ -353,6 +460,8 @@ function EditSection({
   editMerchant: string; setEditMerchant: (v: string) => void;
   editNote: string; setEditNote: (v: string) => void;
   editAmt: string; setEditAmt: (v: string) => void;
+  onOpenAmountKeypad: () => void;
+  onDismissAmountKeypad: () => void;
   editOccurredAt: Date;
   datePickerInlineOpen: boolean;
   onToggleDatePicker: () => void;
@@ -376,18 +485,19 @@ function EditSection({
   return (
     <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
       <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
-        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+        <Pressable
+          onPress={onOpenAmountKeypad}
+          accessibilityRole="button"
+          accessibilityLabel="Edit transaction amount"
+          style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
+        >
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
-          <View style={S.amountEditor}>
-            <TextInput
-              value={editAmt}
-              onChangeText={setEditAmt}
-              keyboardType="decimal-pad"
-              selectTextOnFocus
-              style={[S.fieldInput, S.amountInput, { color: theme.text }]}
-            />
+          <View style={S.amountDisplay}>
+            <Text numberOfLines={1} style={[S.amountValue, { color: editAmt ? theme.text : theme.textTer }]}>
+              ${editAmt || '0.00'}
+            </Text>
           </View>
-        </View>
+        </Pressable>
         <Pressable
           onPress={onToggleDatePicker}
           style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
@@ -425,22 +535,30 @@ function EditSection({
         ) : null}
         <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Merchant</Text>
-          <TextInput
+          <BottomSheetTextInput
             value={editMerchant}
             onChangeText={setEditMerchant}
             placeholder="Merchant name"
             placeholderTextColor={theme.textTer}
             clearButtonMode="while-editing"
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
+            returnKeyType="done"
+            selectTextOnFocus
+            onFocus={onDismissAmountKeypad}
             style={[S.fieldInput, { color: theme.text, flex: 1 }]}
           />
         </View>
         <View style={S.fieldRow}>
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Note</Text>
-          <TextInput
+          <BottomSheetTextInput
             value={editNote}
             onChangeText={setEditNote}
             placeholder="Optional"
             placeholderTextColor={theme.textTer}
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
+            returnKeyType="done"
+            selectTextOnFocus
+            onFocus={onDismissAmountKeypad}
             style={[S.fieldInput, { color: theme.text, flex: 1 }]}
           />
         </View>
@@ -526,7 +644,6 @@ function EditSection({
 
 const S = StyleSheet.create({
   content: {
-    flex: 1,
     paddingTop: 20,
   },
   hero: {
@@ -619,14 +736,13 @@ const S = StyleSheet.create({
   },
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
-  amountEditor: {
+  amountDisplay: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'flex-end',
   },
-  amountInput: {
-    minWidth: 84,
+  amountValue: {
+    ...TYPE.subsectionTitle,
     textAlign: 'right',
   },
   dateTimeEditor: {

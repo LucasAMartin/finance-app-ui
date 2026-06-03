@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, Pressable, TextInput, StyleSheet, ScrollView,
+  View, Text, Pressable, TextInput, StyleSheet, ScrollView, Keyboard,
 } from 'react-native';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import * as Haptics from 'expo-haptics';
@@ -9,11 +9,13 @@ import { Theme, OVER_DOT } from '../theme';
 import { Icon } from './Icon';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
+import { PopupNumericKeypad } from './PopupNumericKeypad';
+import { applyKeypadKey } from './NumericKeypad';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import type { Income } from '../repositories/types';
 import { monthlyIncome } from '../selectors/finance';
 import {
-  DatePicker, Host, Picker, Text as SwiftText, Button,
+  DatePicker, Host, Picker, Text as SwiftText, Button, Menu,
 } from '@expo/ui/swift-ui';
 import {
   datePickerStyle, environment, fixedSize, pickerStyle, tag, tint,
@@ -64,10 +66,6 @@ const defaultDate = (): Date => {
 const monthLabel = (key: string) =>
   new Date(`${key}-15`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const fmtMoney = (n: number) => Math.round(n).toLocaleString();
-const guardDollar = (t: string): string => {
-  if (t === '' || t === '$') return t;
-  return t.startsWith('$') ? t : `$${t.replace(/\$/g, '')}`;
-};
 const parseAmountDraft = (text: string): number | null => {
   const n = parseFloat(text.replace(/[$,]/g, ''));
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -107,13 +105,14 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [receivedDate, setReceivedDate] = useState<Date>(defaultDate);
   const [feedback, setFeedback] = useState('');
+  const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
 
   const loadRegular = (inc: Income) => {
     setKind('regular');
     setEditingId(inc.id);
     setSource(inc.source);
     setCadence(INCOME_TO_CADENCE[inc.cadence] ?? 'Mo');
-    setDraft(`$${inc.amount}`);
+    setDraft(inc.amount.toFixed(2));
     setStartDate(dateFromYMD(inc.startDate));
     setEndDate(inc.endDate ? dateFromYMD(inc.endDate) : null);
     setFeedback('');
@@ -123,7 +122,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     setKind('irregular');
     setEditingId(inc.id);
     setSource(inc.source === 'One-time income' ? '' : inc.source);
-    setDraft(`$${inc.amount}`);
+    setDraft(inc.amount.toFixed(2));
     setReceivedDate(dateFromYMD(inc.receivedAt ?? inc.startDate));
     setFeedback('');
   };
@@ -148,6 +147,10 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const dateRangeValid = !endDate || endDate >= startDate;
   const canSave = amountValue !== null && amountValue > 0
     && (kind === 'irregular' || (source.trim().length > 0 && dateRangeValid));
+  const openAmountKeypad = () => {
+    Keyboard.dismiss();
+    requestAnimationFrame(() => setAmountKeypadOpen(true));
+  };
 
   const removeIncome = (id: string) => {
     incomeRepo.delete(id);
@@ -226,9 +229,10 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={[S.scroll, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}
+        contentContainerStyle={[S.scroll, { paddingBottom: amountKeypadOpen ? 420 : Math.max(insets.bottom, 16) + 16 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={() => { if (amountKeypadOpen) setAmountKeypadOpen(false); }}
       >
         {/* Hero summary */}
         <View style={S.hero}>
@@ -279,24 +283,34 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               {regularIncomes.length > 0 && (
                 <View style={[S.fieldRow, sep]}>
                   <Text style={[S.fieldLabel, { color: theme.textSec }]}>Source</Text>
-                  <Host matchContents ignoreSafeArea="all">
-                    <Picker
-                      selection={editingId ?? '__new__'}
-                      onSelectionChange={(val) => {
-                        const id = String(val);
-                        if (id === '__new__') resetRegular();
-                        else {
-                          const inc = regularIncomes.find(i => i.id === id);
-                          if (inc) loadRegular(inc);
-                        }
-                      }}
-                      modifiers={[pickerStyle('menu'), tint(theme.text), fixedSize({ horizontal: true, vertical: false })]}
+                  <Host ignoreSafeArea="all" style={S.menuHost}>
+                    <Menu
+                      label={
+                        <View style={[S.menuTrigger, { justifyContent: 'flex-end' }]}>
+                          <Text style={[S.menuText, { color: theme.text }]} numberOfLines={1}>
+                            {editingId
+                              ? (regularIncomes.find(i => i.id === editingId)?.source ?? 'New source')
+                              : 'New source'}
+                          </Text>
+                          <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                        </View>
+                      }
                     >
                       {regularIncomes.map(inc => (
-                        <SwiftText key={inc.id} modifiers={[tag(inc.id)]}>{inc.source}</SwiftText>
+                        <Button
+                          key={inc.id}
+                          systemImage={inc.id === editingId ? 'checkmark' : undefined}
+                          onPress={() => loadRegular(inc)}
+                          label={inc.source}
+                        />
                       ))}
-                      <SwiftText key="__new__" modifiers={[tag('__new__')]}>New source</SwiftText>
-                    </Picker>
+                      <Button
+                        key="__new__"
+                        systemImage={!editingId ? 'checkmark' : undefined}
+                        onPress={resetRegular}
+                        label="New source"
+                      />
+                    </Menu>
                   </Host>
                 </View>
               )}
@@ -309,28 +323,39 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   style={[S.fieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
                 />
               </View>
-              <View style={[S.fieldRow, sep]}>
+              <Pressable
+                onPress={openAmountKeypad}
+                accessibilityRole="button"
+                accessibilityLabel="Edit income amount"
+                style={[S.fieldRow, sep]}
+              >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
-                <TextInput
-                  value={draft} onChangeText={(t) => setDraft(guardDollar(t))}
-                  keyboardType="decimal-pad" keyboardAppearance={darkScheme}
-                  placeholder="$0" placeholderTextColor={theme.textTer}
-                  returnKeyType="done" selectTextOnFocus
-                  style={[S.fieldInput, S.amountInput, { color: theme.text }]}
-                />
-              </View>
+                <Text style={[S.amountValue, { color: draft ? theme.text : theme.textTer }]}>
+                  <Text style={{ color: theme.textSec }}>$</Text>{draft || '0.00'}
+                </Text>
+              </Pressable>
               <View style={[S.fieldRow, sep]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Frequency</Text>
-                <Host matchContents ignoreSafeArea="all">
-                  <Picker
-                    selection={cadence}
-                    onSelectionChange={(val) => setCadence(val as Cadence)}
-                    modifiers={[pickerStyle('menu'), tint(theme.text), fixedSize({ horizontal: true, vertical: false })]}
+                <Host ignoreSafeArea="all" style={S.menuHost}>
+                  <Menu
+                    label={
+                      <View style={[S.menuTrigger, { justifyContent: 'flex-end' }]}>
+                        <Text style={[S.menuText, { color: theme.text }]} numberOfLines={1}>
+                          {CADENCES.find(c => c.value === cadence)?.label ?? 'Monthly'}
+                        </Text>
+                        <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                      </View>
+                    }
                   >
                     {CADENCES.map(c => (
-                      <SwiftText key={c.value} modifiers={[tag(c.value)]}>{c.label}</SwiftText>
+                      <Button
+                        key={c.value}
+                        systemImage={c.value === cadence ? 'checkmark' : undefined}
+                        onPress={() => setCadence(c.value)}
+                        label={c.label}
+                      />
                     ))}
-                  </Picker>
+                  </Menu>
                 </Host>
               </View>
               <View style={[S.fieldRow, sep]}>
@@ -423,16 +448,17 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   style={[S.fieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
                 />
               </View>
-              <View style={[S.fieldRow, sep]}>
+              <Pressable
+                onPress={openAmountKeypad}
+                accessibilityRole="button"
+                accessibilityLabel="Edit income amount"
+                style={[S.fieldRow, sep]}
+              >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
-                <TextInput
-                  value={draft} onChangeText={(t) => setDraft(guardDollar(t))}
-                  keyboardType="decimal-pad" keyboardAppearance={darkScheme}
-                  placeholder="$0" placeholderTextColor={theme.textTer}
-                  returnKeyType="done" selectTextOnFocus
-                  style={[S.fieldInput, S.amountInput, { color: theme.text, textAlign: 'right' }]}
-                />
-              </View>
+                <Text style={[S.amountValue, { color: draft ? theme.text : theme.textTer }]}>
+                  <Text style={{ color: theme.textSec }}>$</Text>{draft || '0.00'}
+                </Text>
+              </Pressable>
               <View style={S.fieldRow}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Received</Text>
                 <Host matchContents ignoreSafeArea="all">
@@ -457,6 +483,12 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
           </>
         )}
       </ScrollView>
+      <PopupNumericKeypad
+        visible={amountKeypadOpen}
+        theme={theme}
+        onKey={(key) => setDraft(prev => applyKeypadKey(prev, key))}
+        onDone={() => setAmountKeypadOpen(false)}
+      />
     </View>
   );
 }
@@ -488,6 +520,17 @@ const S = StyleSheet.create({
   },
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', padding: 0 },
-  amountInput: { minWidth: 60, textAlign: 'right' },
+  amountValue: {
+    ...TYPE.subsectionTitle,
+    textAlign: 'right',
+  },
   deleteBtn: { alignItems: 'center', paddingVertical: 16 },
+  // Fixed-size Host avoids the one-frame layout shift that `matchContents`
+  // pickers cause while SwiftUI measures their content on mount.
+  menuHost: { width: 180, height: 28 },
+  menuTrigger: {
+    width: 180, height: 28, flexDirection: 'row', alignItems: 'center',
+    gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1,
+  },
+  menuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
 });

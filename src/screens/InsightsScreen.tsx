@@ -30,7 +30,6 @@ import {
   CAUTION_AMBER,
   overText,
   cautionText,
-  overBg,
 } from '../theme';
 import {
   MEDIA,
@@ -303,24 +302,15 @@ function DeltaBadge({
 
   const isUp = d.kind === 'up';
   // "Spending fell" reuses the savings group color so green reads identically to
-  // every other positive signal on the screen, rather than a one-off hex.
+  // every other positive signal on the screen, rather than a one-off hex. No
+  // pill background and a real caret glyph (not ▲▼) keep the delta in the same
+  // restrained, monochrome-leaning register as the charts above it.
   const green = groupDisplayColor('savings', dark);
+  const tint = isUp ? OVER_DOT : green;
   return (
-    <View
-      style={[
-        styles.deltaBadge,
-        {
-          backgroundColor: isUp
-            ? overBg(dark)
-            : `${green}1F`,
-        },
-      ]}
-    >
-      <Text
-        style={[styles.deltaText, { color: isUp ? OVER_DOT : green }]}
-      >
-        {isUp ? '▲' : '▼'} {d.pct}%
-      </Text>
+    <View style={styles.delta}>
+      <Icon name={isUp ? 'chevUp' : 'chevDown'} size={10} color={tint} stroke={2.6} />
+      <Text style={[TYPE.captionEm, { color: tint }]}>{d.pct}%</Text>
     </View>
   );
 }
@@ -572,7 +562,6 @@ export function InsightsScreen({
 }: Props) {
   const { transactionsRepo, categoriesRepo, budgetsRepo, recurringRulesRepo, incomeRepo } =
     useRepositories();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
   const categories = useRepositoryList(categoriesRepo);
   const budgets = useRepositoryList(budgetsRepo);
@@ -612,7 +601,13 @@ export function InsightsScreen({
     [period, dateIdx, now],
   );
   useEffect(() => transactionsRepo.subscribe(() => setRepoVersion(v => v + 1)), [transactionsRepo]);
-  useEffect(() => {
+  // Loaded synchronously in render (the SQLite repo is synchronous) and keyed on
+  // `ranges` so the transaction set never lags a frame behind a period switch.
+  // Loading in an effect instead would leave one render where year-scoped ranges
+  // are paired with the previous period's rows — that mismatch emptied
+  // "What changed", then refilled it a frame later, popping the section in and
+  // shoving "Where it went" down.
+  const transactions = useMemo<Transaction[]>(() => {
     const from = ranges.prev.from < ranges.current.from ? ranges.prev.from : ranges.current.from;
     const to = ranges.prev.to > ranges.current.to ? ranges.prev.to : ranges.current.to;
     const rows: Transaction[] = [];
@@ -628,7 +623,7 @@ export function InsightsScreen({
       rows.push(...page.rows);
       cursor = page.nextCursor;
     } while (cursor);
-    setTransactions(rows);
+    return rows;
   }, [transactionsRepo, ranges, repoVersion]);
   // A range whose end is in the past is settled: its totals are actuals, not
   // projections, so we drop the "pace"/"projected" framing for it.
@@ -1607,6 +1602,7 @@ export function InsightsScreen({
                   style={styles.tileHalf}
                   onPress={() =>
                     onOpenInsight({
+                      kind: 'trends',
                       title: 'Spending trends',
                       subtitle: `Average ${TREND_CADENCE[timeframe]} spend`,
                       icon: 'chart',
@@ -1737,11 +1733,16 @@ export function InsightsScreen({
                 </>
               ) : null}
 
-              {/* Where it went — switchable top categories / merchants. The
-                  picker lives at the top of the tile (no section header); a row
-                  tap opens the same insight sheet as "What changed". */}
+              {/* Where it went — switchable top categories / merchants. Carries
+                  a section title for rhythm parity with "What changed" so the two
+                  lists read as a matched pair; the picker switches the sub-view
+                  and a row tap opens the same insight sheet. */}
               {hasSpending ? (
-                <BentoTile dark={theme.dark}>
+                <>
+                  <Text style={[styles.bentoSection, { color: pWall.text }, shadow]}>
+                    Where it went
+                  </Text>
+                  <BentoTile dark={theme.dark}>
                   <SegmentedControl
                     values={WHERE_TABS as unknown as string[]}
                     selectedIndex={whereTab}
@@ -1791,13 +1792,13 @@ export function InsightsScreen({
                             ]}
                           >
                             <View
-                              style={[styles.catIcon, { backgroundColor: it.color }]}
+                              style={[styles.catIcon, { backgroundColor: `${it.color}26` }]}
                             >
                               <Icon
                                 name={it.icon}
-                                size={16}
-                                color="#FFFFFF"
-                                stroke={1.7}
+                                size={15}
+                                color={it.color}
+                                stroke={1.8}
                               />
                             </View>
                             <View style={styles.catMid}>
@@ -1844,7 +1845,8 @@ export function InsightsScreen({
                       })
                     )}
                   </View>
-                </BentoTile>
+                  </BentoTile>
+                </>
               ) : (
                 <EmptyState
                   theme={theme}
@@ -2083,9 +2085,8 @@ const styles = StyleSheet.create({
   rowAmt: { ...TYPE.body },
   rowPct: { ...TYPE.caption, marginTop: 2 },
   rowBudgetStatus: { ...TYPE.caption, marginTop: 2 },
-  // Delta badge
-  deltaBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 100 },
-  deltaText: { fontSize: 11, fontWeight: '700', letterSpacing: -0.1 },
+  // Delta indicator — caret + percent, no pill, in the row's right cluster.
+  delta: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   // Budget bar
   budgetTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
   budgetFill: { height: 4, borderRadius: 2 },

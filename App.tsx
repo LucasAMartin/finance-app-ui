@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { router, useFocusEffect } from 'expo-router';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
@@ -34,7 +35,6 @@ import type { SourceRect } from './src/components/ContainerTransform';
 import {
   TxSheetMount, type TxSheetHandle,
   BillSheetMount, type BillSheetHandle,
-  RecurringSheetMount, type RecurringSheetHandle,
 } from './src/components/sheetMounts';
 import type { Bill, Transaction } from './src/repositories/types';
 
@@ -102,12 +102,9 @@ export function DashboardApp() {
 
   const txSheetRef = useRef<TxSheetHandle>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
-  const recurringRef = useRef<RecurringSheetHandle>(null);
-
   const prepareTx = useCallback((tx: Transaction) => txSheetRef.current?.prepare(tx), []);
   const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
   const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
-  const openRecurring = useCallback(() => recurringRef.current?.open(), []);
   const openIncomeRoute = useCallback((_source?: SourceRect) => {
     router.push('/income');
   }, []);
@@ -229,10 +226,10 @@ export function DashboardApp() {
       onOpenDrawer={openDrawer}
       onAddVoice={openVoiceExpense}
       onAddManual={openManualExpense}
-      onAddRecurring={openRecurring}
       onLogIncome={openIncomeRoute}
       onOpenTheme={openTheme}
       onOpenTx={openTx}
+      onPrepareTx={prepareTx}
       onDeleteTx={handleDeleteTx}
       onOpenBill={openBill}
       morphResetToken={morphResetToken}
@@ -246,9 +243,9 @@ export function DashboardApp() {
     openIncomeRoute,
     openInsights,
     openManualExpense,
-    openRecurring,
     openTheme,
     openTx,
+    prepareTx,
     openVoiceExpense,
     theme,
   ]);
@@ -290,6 +287,11 @@ export function DashboardApp() {
   return (
     <>
       <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} backgroundColor={theme.bg} />
+      {/* Provider lives INSIDE this screen (not in the root _layout above the
+          native Stack), so its portal host renders within the same native
+          screen and the sheet paints on top of the app content rather than
+          behind a react-native-screens native view. */}
+      <BottomSheetModalProvider>
       <View style={[styles.root, { backgroundColor: theme.bg }]}>
 
         <AnimatedScreen opacity={OP.home} active={screen === 'home'}>
@@ -351,7 +353,6 @@ export function DashboardApp() {
           />
         </View>
 
-        <RecurringSheetMount ref={recurringRef} />
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
         <BillSheetMount ref={billSheetRef} />
 
@@ -369,6 +370,7 @@ export function DashboardApp() {
         />
 
       </View>
+      </BottomSheetModalProvider>
     </>
   );
 }

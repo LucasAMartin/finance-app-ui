@@ -366,6 +366,70 @@ export function foldTrendSeries(
   return vals;
 }
 
+// ─── Trailing period-over-period trend (Insights "Spending trends" detail) ────
+
+/**
+ * The Spending-trends *detail* answers a different question from the Spent
+ * chart: not "where am I in this period" but "is my spending rising or falling
+ * across periods". So it plots a rolling window of whole past periods ending
+ * now — one bar per week/month/quarter — rather than one period broken into
+ * buckets. `count` is the maximum window; callers trim leading empty buckets
+ * for users whose history doesn't fill it yet.
+ */
+export type TrendGrain = 'week' | 'month' | 'quarter';
+
+export interface TrailingTrend {
+  /** Repo granularity to query before folding into slots. */
+  bucket: SpendBucket;
+  from: Date;
+  to: Date;
+  slots: TrendSlot[];
+}
+
+export function trailingTrendBuckets(
+  grain: TrendGrain,
+  count: number,
+  now = new Date(),
+): TrailingTrend {
+  const slots: TrendSlot[] = [];
+
+  if (grain === 'week') {
+    const thisWeek = startOfWeekMon(now);
+    for (let i = count - 1; i >= 0; i--) {
+      const from = addDays(thisWeek, -7 * i);
+      const to = endOfDay(addDays(from, 6));
+      slots.push({ from, to, label: `${from.getMonth() + 1}/${from.getDate()}` });
+    }
+    return { bucket: 'day', from: slots[0].from, to: slots[slots.length - 1].to, slots };
+  }
+
+  if (grain === 'month') {
+    for (let i = count - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      slots.push({
+        from: new Date(d.getFullYear(), d.getMonth(), 1),
+        to: endOfDay(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
+        label: MONTHS_ABBR[d.getMonth()],
+      });
+    }
+    return { bucket: 'month', from: slots[0].from, to: slots[slots.length - 1].to, slots };
+  }
+
+  // quarter
+  const curQ = Math.floor(now.getMonth() / 3);
+  for (let i = count - 1; i >= 0; i--) {
+    const abs = now.getFullYear() * 4 + curQ - i;
+    const qy = Math.floor(abs / 4);
+    const q = ((abs % 4) + 4) % 4;
+    slots.push({
+      from: new Date(qy, q * 3, 1),
+      to: endOfDay(new Date(qy, q * 3 + 3, 0)),
+      label: `Q${q + 1}`,
+    });
+  }
+  return { bucket: 'month', from: slots[0].from, to: slots[slots.length - 1].to, slots };
+}
+
 // ─── Transaction filtering ────────────────────────────────────────────────────
 
 export function filterByRange(

@@ -20,13 +20,6 @@ import {
 } from 'react-native';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  interpolate,
-  Easing as ReEasing,
-} from 'react-native-reanimated';
 import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 'react-native-gesture-handler';
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
@@ -36,7 +29,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
-import { NumericKeypad, applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
+import { applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
+import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { Collapsible } from '../components/Collapsible';
 import { SheetPrimaryButton } from '../components/shared';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -568,9 +562,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     [subscribeDraft, getDraftSnapshot],
   );
   const [keypadH, setKeypadH] = useState(340);
-  // Reanimated drives the slide on the UI thread. The Done button moves via real
-  // layout (`bottom`) rather than a transform so its native hit-area tracks it.
-  const kbProgress = useSharedValue(0);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryLabelDraft, setCategoryLabelDraft] = useState('');
   const [categoryIconDraft, setCategoryIconDraft] = useState('tag');
@@ -737,16 +728,9 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   // (which runs a frame later) can tell "tapped empty space" from "switched rows".
   const editingKeyRef = useRef<string | null>(null);
 
-  // Drive the slide imperatively (Reanimated UI thread) the instant a gesture
-  // fires — never via a state effect, which would wait behind a full re-render
-  // and make the pad lag a few frames before it moves.
   const slideKeypad = useCallback((open: boolean) => {
     onKeypadOpenChange?.(open);
-    kbProgress.value = withTiming(open ? 1 : 0, {
-      duration: 280,
-      easing: ReEasing.out(ReEasing.cubic),
-    });
-  }, [kbProgress, onKeypadOpenChange]);
+  }, [onKeypadOpenChange]);
 
   const startAmountEdit = (key: string, value: number) => {
     const wasOpen = editingKeyRef.current !== null;
@@ -797,17 +781,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       if (editingKeyRef.current === keyAtTap) closeAmountEdit();
     });
   };
-
-  // Keypad surface — slides via transform (RN views hit-test fine under transform).
-  const keypadSurfaceStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: interpolate(kbProgress.value, [0, 1], [keypadH + KEYPAD_DONE_AREA + 40, 0]) }],
-  }));
-  // Done button — slides via real layout (`bottom`) so the native host's hit-area
-  // moves with it; fades alongside.
-  const keypadDoneStyle = useAnimatedStyle(() => ({
-    bottom: interpolate(kbProgress.value, [0, 1], [-KEYPAD_DONE_AREA, keypadH + 12]),
-    opacity: kbProgress.value,
-  }));
 
   const syncCategoryRecurringRule = (
     catId: string,
@@ -1484,8 +1457,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                               accessibilityRole="button"
                               accessibilityLabel={`Edit ${sub.label} category`}
                             >
-                              <View style={[styles.rowIcon, { backgroundColor: groupColor }]}>
-                                <Icon name={sub.icon} size={15} color="#FBF8FF" stroke={1.6} />
+                              <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
+                                <Icon name={sub.icon} size={15} color={groupColor} stroke={1.6} />
                               </View>
 	                              <View style={{ flex: 1, minWidth: 0 }}>
 	                                <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
@@ -1574,8 +1547,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                   activeOpacity={0.68}
                                   style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                                 >
-                                  <View style={[styles.rowIcon, { backgroundColor: groupColor }]}>
-                                    <Icon name={sub.icon} size={15} color="#FBF8FF" stroke={1.6} />
+                                  <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
+                                    <Icon name={sub.icon} size={15} color={groupColor} stroke={1.6} />
                                   </View>
 	                                  <View style={{ flex: 1, minWidth: 0 }}>
 	                                    <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
@@ -1645,8 +1618,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                 activeOpacity={0.68}
                                 style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                               >
-                                <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(bill.cat, categories, theme.dark) }]}>
-                                  <Icon name={bill.icon} size={15} color="#FBF8FF" stroke={1.6} />
+                                <View style={[styles.rowIcon, { backgroundColor: `${categoryGroupColor(bill.cat, categories, theme.dark)}26` }]}>
+                                  <Icon name={bill.icon} size={15} color={categoryGroupColor(bill.cat, categories, theme.dark)} stroke={1.6} />
                                 </View>
                                 <View style={{ flex: 1, minWidth: 0 }}>
                                   <Text style={[TYPE.body, { color: p.text }]}>{bill.name}</Text>
@@ -1731,35 +1704,14 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         </TapGestureHandler>
       </KeyboardAvoidingView>
 
-      {/* Custom numeric keypad — stands in for the system keyboard while editing
-          a category amount inline. The surface slides on a native-driven transform;
-          the Done pill rides a separate, untransformed layer so its full hit-area
-          stays put (a transform offsets native host hit-testing). */}
-      <Reanimated.View
-        pointerEvents={editingKey ? 'box-none' : 'none'}
-        onLayout={e => setKeypadH(e.nativeEvent.layout.height)}
-        style={[styles.keypadOverlay, keypadSurfaceStyle]}
-      >
-        <BlurView
-          intensity={theme.dark ? 80 : 100}
-          tint={theme.dark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-          style={[styles.keypadSurface, { borderTopColor: stickyBorderColor }]}
-        >
-          <View style={{ paddingBottom: insets.bottom + 6, paddingTop: 8 }}>
-            <NumericKeypad onKey={handleKeypadKey} theme={theme} />
-          </View>
-        </BlurView>
-      </Reanimated.View>
-
-      {/* Done button (native Liquid Glass) — slides up just above the pad. */}
-      <Reanimated.View
-        pointerEvents={editingKey ? 'box-none' : 'none'}
-        style={[styles.keypadDoneFloat, keypadDoneStyle]}
-      >
-        <View style={styles.keypadDoneWrap} pointerEvents={editingKey ? 'auto' : 'none'}>
-          <SheetPrimaryButton label="Done" onPress={closeAmountEdit} theme={theme} />
-        </View>
-      </Reanimated.View>
+      <PopupNumericKeypad
+        visible={editingKey !== null}
+        theme={theme}
+        borderColor={stickyBorderColor}
+        onHeightChange={setKeypadH}
+        onKey={handleKeypadKey}
+        onDone={closeAmountEdit}
+      />
 
       <CategoryEditSheet
         theme={theme}
@@ -1939,7 +1891,6 @@ function CategoryEditSheet({
   const [activeNumField, setActiveNumField] = useState<NumField | null>(null);
   const [numDraft, setNumDraft] = useState('');
   const [sheetKbH, setSheetKbH] = useState(300);
-  const sheetKbProgress = useSharedValue(0);
   const sheetScrollRef = useRef<ScrollView>(null);
   const sheetScrollY = useRef(0);
   const fieldRowRefs: Record<NumField, React.RefObject<View | null>> = {
@@ -1961,14 +1912,17 @@ function CategoryEditSheet({
     });
   };
 
-  const activateNumField = (field: NumField, currentDisplay: string) => {
+  const activateNumFieldNow = (field: NumField, currentDisplay: string) => {
     if (activeNumField && activeNumField !== field) commitNumField(activeNumField);
     const raw = currentDisplay.replace(/[$,\s]/g, '');
     setNumDraft(raw);
     setActiveNumField(field);
-    sheetKbProgress.value = withTiming(1, { duration: 260, easing: ReEasing.out(ReEasing.cubic) });
     // Scroll after the keypad has risen enough to know its final height.
     setTimeout(() => scrollFieldIntoView(fieldRowRefs[field], sheetKbH), 180);
+  };
+  const activateNumField = (field: NumField, currentDisplay: string) => {
+    Keyboard.dismiss();
+    requestAnimationFrame(() => activateNumFieldNow(field, currentDisplay));
   };
   const commitNumField = (field: NumField = activeNumField!) => {
     if (!field) return;
@@ -1979,21 +1933,12 @@ function CategoryEditSheet({
     else { setGoalSavedDisplay(formatted); onGoalSavedChange(formatted); }
   };
   const closeNumKeypad = () => {
-    sheetKbProgress.value = withTiming(0, { duration: 190, easing: ReEasing.out(ReEasing.cubic) });
     commitNumField();
     setActiveNumField(null);
   };
   const handleSheetKey = useCallback((k: KeypadKey) => {
     setNumDraft(prev => applyKeypadKey(prev, k));
   }, []);
-
-  const sheetKbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: interpolate(sheetKbProgress.value, [0, 1], [sheetKbH + 60, 0]) }],
-  }));
-  const sheetDoneStyle = useAnimatedStyle(() => ({
-    opacity: sheetKbProgress.value,
-    bottom: interpolate(sheetKbProgress.value, [0, 1], [-60, sheetKbH + 8]),
-  }));
 
   // Keep the sheet's top/hero/segmented spacing constant across all groups so
   // switching to Savings only appends the goal fields at the bottom — nothing
@@ -2104,6 +2049,7 @@ function CategoryEditSheet({
                 scrollEnabled={activeNumField !== null}
                 scrollEventThrottle={16}
                 onScroll={e => { sheetScrollY.current = e.nativeEvent.contentOffset.y; }}
+                onScrollBeginDrag={() => { if (activeNumField) closeNumKeypad(); }}
 	                keyboardShouldPersistTaps="handled"
 	              >
 	              {/* Hero — tap circle to open native popup menu */}
@@ -2170,6 +2116,7 @@ function CategoryEditSheet({
                       onLabelChange(next);
                       if (!iconManuallySet.current) onIconChange(inferCategoryIcon(next));
                     }}
+                    onFocus={() => { if (activeNumField) closeNumKeypad(); }}
                     placeholder="Category name"
                     placeholderTextColor={theme.textTer}
                     autoFocus={isAddMode}
@@ -2252,6 +2199,7 @@ function CategoryEditSheet({
                     value={notes}
                     accessibilityLabel="Category notes"
                     onChangeText={onNotesChange}
+                    onFocus={() => { if (activeNumField) closeNumKeypad(); }}
                     placeholder=""
                     placeholderTextColor={theme.textTer}
                     keyboardAppearance={keyboardAppearance}
@@ -2359,30 +2307,15 @@ function CategoryEditSheet({
               </View>
               </ScrollView>
 
-              {/* Sheet numeric keypad — slides up from the bottom of the sheet */}
-              <Reanimated.View
-                pointerEvents={activeNumField ? 'box-none' : 'none'}
-                onLayout={e => setSheetKbH(e.nativeEvent.layout.height)}
-                style={[styles.sheetKbOverlay, sheetKbStyle]}
-              >
-                <BlurView
-                  intensity={theme.dark ? 80 : 100}
-                  tint={theme.dark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-                  style={[styles.keypadSurface, { borderTopColor: theme.hairline }]}
-                >
-                  <View style={{ paddingBottom: insets.bottom + 6, paddingTop: 8 }}>
-                    <NumericKeypad onKey={handleSheetKey} theme={theme} />
-                  </View>
-                </BlurView>
-              </Reanimated.View>
-              <Reanimated.View
-                pointerEvents={activeNumField ? 'box-none' : 'none'}
-                style={[styles.sheetKbDone, sheetDoneStyle]}
-              >
-                <View style={styles.keypadDoneWrap} pointerEvents={activeNumField ? 'auto' : 'none'}>
-                  <SheetPrimaryButton label="Done" onPress={closeNumKeypad} theme={theme} />
-                </View>
-              </Reanimated.View>
+              <PopupNumericKeypad
+                visible={activeNumField !== null}
+                theme={theme}
+                borderColor={theme.hairline}
+                onHeightChange={setSheetKbH}
+                onKey={handleSheetKey}
+                onDone={closeNumKeypad}
+                zIndex={20}
+              />
             </View>
             </TouchableWithoutFeedback>
           </RNHostView>
@@ -2635,39 +2568,6 @@ const styles = StyleSheet.create({
     height: 17,
     borderRadius: 1,
     marginLeft: 1,
-  },
-  keypadOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 40,
-  },
-  keypadDoneFloat: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 41,
-  },
-  keypadDoneWrap: {
-    paddingHorizontal: 16,
-  },
-  keypadSurface: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 8,
-  },
-  sheetKbOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 20,
-  },
-  sheetKbDone: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    zIndex: 21,
   },
   // Fixes date picker row height — prevents Host from expanding when a picker
   // appears (it would shift layout otherwise since matchContents auto-sizes).

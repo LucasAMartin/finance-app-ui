@@ -22,6 +22,8 @@ export interface GlassCircleButtonProps {
   /** Optional Liquid Glass tint. Use when glass should follow a theme color. */
   glassTint?: string;
   accessibilityLabel?: string;
+  /** Pin the SwiftUI Host's color scheme to match the app theme when it differs from the system setting. */
+  colorScheme?: 'light' | 'dark';
 }
 
 /**
@@ -38,7 +40,7 @@ export interface GlassCircleButtonProps {
  */
 export const GlassCircleButton = React.forwardRef<View, GlassCircleButtonProps>(
   function GlassCircleButton(
-    { onPress, systemImage, size = 36, iconSize = 16, iconColor, glassTint, accessibilityLabel },
+    { onPress, systemImage, size = 36, iconSize = 16, iconColor, glassTint, accessibilityLabel, colorScheme },
     ref,
   ) {
     return (
@@ -50,7 +52,7 @@ export const GlassCircleButton = React.forwardRef<View, GlassCircleButtonProps>(
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >
-        <Host matchContents ignoreSafeArea="all">
+        <Host matchContents ignoreSafeArea="all" colorScheme={colorScheme}>
           <GlassEffectContainer>
             <Button
               onPress={onPress}
@@ -156,6 +158,14 @@ export interface ScreenExitButtonProps {
   accessibilityLabel?: string;
   /** Optional wrapper style — e.g. EXIT_FLOAT_STYLE to float it top-left. */
   style?: StyleProp<ViewStyle>;
+  /**
+   * Force the non-glass fallback even on iOS 26+. The glass button mounts its
+   * own SwiftUI `Host` (a `UIHostingController`); inside an `@expo/ui`
+   * BottomSheet that host is created/torn down on every present/dismiss, which
+   * shows up as open latency and a frame-pause near the end of the close
+   * animation. Sheets pass `glass={false}` to avoid that.
+   */
+  glass?: boolean;
 }
 
 export function ScreenExitButton({
@@ -165,9 +175,10 @@ export function ScreenExitButton({
   fallbackBg,
   accessibilityLabel,
   style,
+  glass = true,
 }: ScreenExitButtonProps) {
   const a11y = accessibilityLabel ?? (variant === 'back' ? 'Back' : 'Close');
-  const inner = SUPPORTS_GLASS ? (
+  const inner = SUPPORTS_GLASS && glass ? (
     <GlassCircleButton
       onPress={onPress}
       systemImage={variant === 'back' ? 'chevron.left' : 'xmark'}

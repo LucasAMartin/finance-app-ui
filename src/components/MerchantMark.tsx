@@ -18,7 +18,7 @@ export function MerchantMark({
   catIcon = 'tag',
   color,
   size = 32,
-  iconColor = '#FBF8FF',
+  iconColor,
   iconSize,
   logoEnabled = true,
 }: MerchantMarkProps) {
@@ -31,6 +31,13 @@ export function MerchantMark({
   }, [logo?.logoUrl, merchant]);
 
   const showLogo = Boolean(logo?.logoUrl && !imageFailed);
+  // Inner padding so the contained logo breathes inside the circle.
+  const logoPad = Math.round(size * 0.16);
+  // Tinted disc: 15% alpha background, group color glyph. Logo mode fills with the
+  // server-sampled logo background (so a brand's solid colored tile melts into the
+  // disc); null/undefined → a white backing so the image reads cleanly.
+  const bgColor = showLogo ? (logo!.bgColor ?? 'rgba(255,255,255,0.96)') : `${color}26`;
+  const glyphColor = iconColor ?? color;
 
   return (
     <View
@@ -40,24 +47,28 @@ export function MerchantMark({
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: showLogo ? 'rgba(255,255,255,0.96)' : color,
+          backgroundColor: bgColor,
         },
       ]}
       accessibilityElementsHidden
       importantForAccessibility="no"
     >
       {showLogo ? (
+        // Render the resolver's logoUrl verbatim. `contain` + inner padding keeps
+        // the full logo visible inside the circular disc without cropping edges
+        // and preserves aspect ratio. On load failure (e.g. fallback=404) we fall
+        // back to the neutral category glyph.
         <Image
           source={{ uri: logo!.logoUrl! }}
-          resizeMode="cover"
+          resizeMode="contain"
           onError={() => {
             setImageFailed(true);
             invalidateMerchantLogo(merchant);
           }}
-          style={{ width: size * 1.16, height: size * 1.16 }}
+          style={{ width: size - logoPad * 2, height: size - logoPad * 2 }}
         />
       ) : (
-        <Icon name={catIcon} size={iconSize ?? size * 0.47} color={iconColor} stroke={1.6} />
+        <Icon name={catIcon} size={iconSize ?? size * 0.47} color={glyphColor} stroke={1.6} />
       )}
     </View>
   );

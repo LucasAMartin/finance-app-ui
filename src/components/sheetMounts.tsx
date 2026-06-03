@@ -3,7 +3,6 @@ import { useTheme } from '../ThemeProvider';
 import { VoiceSheet, type SavedExpenseInfo } from './VoiceSheet';
 import { TxSheet } from './TxSheet';
 import { BillSheet } from './BillSheet';
-import { RecurringSheet } from './RecurringSheet';
 import type { Bill, Transaction } from '../repositories/types';
 
 // Each sheet owns its own visibility/data state inside a leaf mount, exposed via
@@ -81,19 +80,4 @@ export const BillSheetMount = forwardRef<BillSheetHandle, {}>(function BillSheet
   }), []);
 
   return <BillSheet bill={bill} theme={theme} onClose={() => setBill(null)} />;
-});
-
-export interface RecurringSheetHandle {
-  open: () => void;
-}
-
-export const RecurringSheetMount = forwardRef<RecurringSheetHandle, {}>(function RecurringSheetMount(_props, ref) {
-  const { theme } = useTheme();
-  const [visible, setVisible] = useState(false);
-
-  useImperativeHandle(ref, () => ({
-    open: () => setVisible(true),
-  }), []);
-
-  return <RecurringSheet theme={theme} visible={visible} onClose={() => setVisible(false)} />;
 });

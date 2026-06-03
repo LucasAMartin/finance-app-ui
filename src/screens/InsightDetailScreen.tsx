@@ -18,13 +18,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
 
-import { Theme, GROUP_COLORS } from '../theme';
+import { Theme, GROUP_COLORS, overText } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import { makeP, makeScrim, DARK_TEXT_SHADOW, MEDIA } from '../wallpaperPalette';
 import { RADIUS } from '../radius';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
 import { SpendChart } from '../components/charts/SpendChart';
+import { TrendBars } from '../components/charts/TrendBars';
 import { MerchantMark } from '../components/MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { Money } from '../components/shared';
@@ -40,6 +41,10 @@ import {
   generateDateOptions,
   derivePeriodRanges,
   spendSeriesToBuckets,
+  trailingTrendBuckets,
+  foldTrendSeries,
+  type TrendGrain,
+  type TrendSlot,
 } from '../selectors/spending';
 import { buildSavedMetric } from '../selectors/savings';
 import { TYPE } from '../typography';
@@ -59,6 +64,14 @@ const TF_TO_PERIOD: Record<Timeframe, Period> = {
   '1M': 'Month',
   '1Y': 'Year',
 };
+
+// Trends detail switches the bar grain (rolling window of whole past periods),
+// not the within-period timeframe the spending/savings details use.
+const TREND_GRAINS: { id: TrendGrain; label: string }[] = [
+  { id: 'week', label: 'Weekly' },
+  { id: 'month', label: 'Monthly' },
+  { id: 'quarter', label: 'Quarterly' },
+];
 
 type SortOrder = 'date-desc' | 'amount-desc';
 const SORT_OPTIONS: { id: SortOrder; label: string }[] = [
@@ -86,7 +99,7 @@ function money(n: number, decimals = 0): string {
 }
 
 export interface InsightDetailTarget {
-  kind?: 'spending' | 'savings';
+  kind?: 'spending' | 'savings' | 'trends';
   title: string;
   subtitle?: string;
   icon?: string;
@@ -128,7 +141,12 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   if (target) last.current = target;
   const t = last.current;
   const isSavingsDetail = t?.kind === 'savings';
+  const isTrendsDetail = t?.kind === 'trends';
   const savingsTint = t?.accentColor ?? GROUP_COLORS.savings.dark;
+  // The hero is always a dark stage, so signal colors use their on-dark variants
+  // (the base ember reads too dark/saturated against it). Ember = spending up,
+  // savings teal = spending down.
+  const overTint = overText(true);
 
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -211,8 +229,11 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   // ── Chart series ──────────────────────────────────────────────────
   // Aggregated in the data layer (GROUP BY) — independent of search and never
   // loads the full transaction set just to plot the line.
+  // While hidden, retain the last computed series instead of returning [] so the
+  // chart doesn't blank out during the slide-out animation. Mirrors `last.current`.
+  const lineSeriesRef = useRef<number[]>([]);
   const lineSeries = useMemo(() => {
-    if (!visible) return [];
+    if (!visible) return lineSeriesRef.current;
     const points = transactionsRepo.getSpendSeries({
       from: ranges.current.from.toISOString(),
       to: ranges.current.to.toISOString(),
@@ -220,30 +241,127 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
     });
     return spendSeriesToBuckets(points, period, ranges.current.from, ranges.current.to);
   }, [transactionsRepo, ranges, period, visible, repoVersion]);
+  if (visible) lineSeriesRef.current = lineSeries;
 
   const cumulativeSeries = useMemo(() => {
     let s = 0;
     return lineSeries.map(v => (s += v));
   }, [lineSeries]);
+
+  // ── Spending-trends detail: rolling period-over-period ─────────────
+  // A trailing window of whole past periods (weekly / monthly / quarterly)
+  // ending now, so the bars read as a *trajectory* — the question the cumulative
+  // Spent chart can't answer. Leading empty buckets (history shorter than the
+  // window) are trimmed so the chart never opens on a row of zeros.
+  const [trendGrain, setTrendGrain] = useState<TrendGrain>('month');
+  const trend = useMemo(() => {
+    if (!isTrendsDetail) return { values: [] as number[], slots: [] as TrendSlot[] };
+    const count = trendGrain === 'week' ? 8 : 6;
+    const cfg = trailingTrendBuckets(trendGrain, count, now);
+    const points = transactionsRepo.getSpendSeries({
+      from: cfg.from.toISOString(),
+      to: cfg.to.toISOString(),
+      bucket: cfg.bucket,
+    });
+    const values = foldTrendSeries(points, cfg.slots);
+    let startIdx = 0;
+    while (startIdx < values.length - 4 && values[startIdx] === 0) startIdx++;
+    return { values: values.slice(startIdx), slots: cfg.slots.slice(startIdx) };
+  }, [isTrendsDetail, trendGrain, now, transactionsRepo, repoVersion]);
+
+  const trendValues = trend.values;
+  const trendSlots = trend.slots;
+  const trendLabels = trendSlots.map(s => s.label);
+
+  // Current (in-progress) period = the last slot, whose end is still in the
+  // future. Dimmed in the chart and held out of the average/trajectory so a
+  // half-finished period never reads as a real dip.
+  const trendPartialIdx =
+    trendSlots.length > 0 &&
+    trendSlots[trendSlots.length - 1].to.getTime() > now.getTime()
+      ? trendSlots.length - 1
+      : null;
+  const completedVals = trendValues.filter((_, i) => i !== trendPartialIdx);
+  const trendAvg = completedVals.length
+    ? completedVals.reduce((a, b) => a + b, 0) / completedVals.length
+    : trendValues.length
+      ? trendValues.reduce((a, b) => a + b, 0) / trendValues.length
+      : 0;
+
+  const grainNoun =
+    trendGrain === 'week' ? 'week' : trendGrain === 'month' ? 'month' : 'quarter';
+  const grainAdj =
+    trendGrain === 'week' ? 'Weekly' : trendGrain === 'month' ? 'Monthly' : 'Quarterly';
+  const trendWindowLabel = `Last ${trendValues.length} ${grainNoun}s`;
+
+  // Trajectory stat: the most recent *completed* period vs the average of the
+  // ones before it. Completed-only keeps the partial current period out of it.
+  const trendStat = useMemo(() => {
+    if (completedVals.length < 2) return null;
+    const lastIdx = trendPartialIdx !== null ? trendSlots.length - 2 : trendSlots.length - 1;
+    const lastSlot = trendSlots[lastIdx];
+    const last = completedVals[completedVals.length - 1];
+    const prior = completedVals.slice(0, -1);
+    const priorAvg = prior.reduce((a, b) => a + b, 0) / prior.length;
+    if (priorAvg <= 0) return null;
+    const pct = Math.round(((last - priorAvg) / priorAvg) * 100);
+    if (pct === 0) return null;
+    // Axis label is the compact tick (e.g. "May"); use it verbatim so the
+    // eyebrow unambiguously names which completed period the stat describes,
+    // rather than the generic "last month" which reads as the current partial one.
+    const periodLabel = lastSlot?.label ?? grainNoun;
+    return { pct: Math.abs(pct), up: pct > 0, periodLabel };
+  }, [completedVals, trendPartialIdx, trendSlots, grainNoun]);
+
+  // Fuller label for a scrubbed trend bar than its compact axis tick.
+  const trendScrubLabel = (i: number): string => {
+    const s = trendSlots[i];
+    if (!s) return '';
+    if (trendGrain === 'week')
+      return `Week of ${s.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    if (trendGrain === 'month')
+      return s.from.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    return `Q${Math.floor(s.from.getMonth() / 3) + 1} ${s.from.getFullYear()}`;
+  };
+
   const activeSeries = isSavingsDetail
     ? savedMetric.cumulativeSeries
-    : cumulativeSeries;
+    : isTrendsDetail
+      ? trendValues
+      : cumulativeSeries;
 
   // ── Scrub ─────────────────────────────────────────────────────────
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
   useEffect(() => setScrubIdx(null), [activeSeries]);
 
   // Period total comes from the aggregate summary, not a reduce over rows.
+  // Same retention as lineSeries: keep the last total so the hero amount holds
+  // steady through the slide-out instead of snapping to $0.00.
+  const totalRef = useRef(0);
   const total = useMemo(() => {
-    if (!visible) return 0;
+    if (!visible) return totalRef.current;
     return transactionsRepo.getSummary({
       from: ranges.current.from.toISOString(),
       to: ranges.current.to.toISOString(),
     }).expenseTotal;
   }, [transactionsRepo, ranges, visible, repoVersion]);
-  const activeTotal = isSavingsDetail ? savedMetric.total : total;
+  if (visible) totalRef.current = total;
+  const activeTotal = isSavingsDetail
+    ? savedMetric.total
+    : isTrendsDetail
+      ? trendAvg
+      : total;
   const heroAmount =
     scrubIdx != null ? (activeSeries[scrubIdx] ?? activeTotal) : activeTotal;
+  // Trends resting label calls out the average cadence; while scrubbing a bar it
+  // reverts to "Spent" since the headline is then that bucket's actual spend.
+  const heroLeadLabel = isTrendsDetail
+    ? scrubIdx != null
+      ? 'Spent'
+      : `${grainAdj} average`
+    : isSavingsDetail
+      ? 'Saved'
+      : 'Spent';
 
   const scrubDateLabel = (idx: number): string => {
     if (period === 'Year') {
@@ -255,7 +373,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   };
 
   const metricDisplay = money(heroAmount, heroAmount < 100 ? 2 : 0);
-  const heroSubLabel = scrubIdx != null ? scrubDateLabel(scrubIdx) : dateLabel;
+  const heroSubLabel = isTrendsDetail
+    ? scrubIdx != null
+      ? trendScrubLabel(scrubIdx)
+      : trendWindowLabel
+    : scrubIdx != null
+      ? scrubDateLabel(scrubIdx)
+      : dateLabel;
   const savedIntentionalText = money(
     savedMetric.intentional,
     savedMetric.intentional < 100 ? 2 : 0,
@@ -266,13 +390,18 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   // Only the visible window is loaded; more pages stream in on scroll. The
   // chart/total above are driven by aggregates, so they stay correct even
   // though the list below is partial.
+  // For trends the list shows the most recent period in the window (the current
+  // week/month/quarter); the chart above carries the cross-period comparison, so
+  // the list stays a focused "what's in this period" rather than refetching as
+  // you scrub. Spending/savings keep the selected period's full range.
+  const listSlot = isTrendsDetail ? trendSlots[trendSlots.length - 1] : null;
   const listScope = useMemo<TransactionSummaryQuery>(() => ({
-    from: ranges.current.from.toISOString(),
-    to: ranges.current.to.toISOString(),
+    from: (listSlot ? listSlot.from : ranges.current.from).toISOString(),
+    to: (listSlot ? listSlot.to : ranges.current.to).toISOString(),
     categoryIds: isSavingsDetail ? savedMetric.categoryIds : undefined,
     merchantQuery: query.trim() || undefined,
     searchCategoryIds,
-  }), [ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
+  }), [listSlot, ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
 
   const [rows, setRows] = useState<Transaction[]>([]);
   const [nextCursor, setNextCursor] = useState<TransactionCursor | undefined>();
@@ -314,7 +443,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   }, [rows]);
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
 
-  const lineColor = isSavingsDetail ? savingsTint : 'rgba(242,244,245,0.82)';
+  const lineColor = isSavingsDetail ? savingsTint : 'rgba(242,244,245,0.95)';
 
   const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
 
@@ -407,30 +536,72 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
             ListHeaderComponent={
               <View style={styles.headerStack}>
                 <View style={styles.hero}>
+                  {/* Guaranteed dark backing behind the metric + chart, scrolling
+                      with them. The page scrim alone can't be trusted over a
+                      bright or busy wallpaper, so this localized gradient holds
+                      the bars and labels at AA contrast on any wallpaper, then
+                      fades out at the bottom so there's no hard band edge. */}
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={['rgba(3,5,8,0.3)', 'rgba(3,5,8,0.3)', 'rgba(3,5,8,0)']}
+                    locations={[0, 0.85, 1]}
+                    style={styles.heroBacking}
+                  />
                   <View style={styles.metricHeroTop}>
-                    <Text style={[TYPE.labelSm, { color: pW.textTer }]}>
-                      {isSavingsDetail ? 'Saved' : 'Spent'}
+                    <Text style={[TYPE.labelSm, { color: pW.textSec }, DARK_TEXT_SHADOW]}>
+                      {heroLeadLabel}
                     </Text>
-                    <Text style={[TYPE.labelSm, { color: pW.textTer }]}>
+                    <Text style={[TYPE.labelSm, { color: pW.textTer }, DARK_TEXT_SHADOW]}>
                       ·
                     </Text>
-                    <Text style={[TYPE.labelSm, { color: pW.textTer }]}>
-                      {heroSubLabel}
-                    </Text>
+                    {isTrendsDetail && trendStat ? (
+                      <View style={styles.trendStatInline}>
+                        <Icon
+                          name={trendStat.up ? 'chevUp' : 'chevDown'}
+                          size={10}
+                          color={trendStat.up ? overTint : savingsTint}
+                          stroke={2.6}
+                        />
+                        <Text style={[TYPE.labelSm, { color: trendStat.up ? overTint : savingsTint }, DARK_TEXT_SHADOW]}>
+                          {trendStat.pct}% in {trendStat.periodLabel}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={[TYPE.labelSm, { color: pW.textSec }, DARK_TEXT_SHADOW]}>
+                        {heroSubLabel}
+                      </Text>
+                    )}
                   </View>
-                  <Text style={[styles.metricHeroAmount, { color: pW.text }]}>{metricDisplay}</Text>
+                  <Text style={[styles.metricHeroAmount, { color: pW.text }, DARK_TEXT_SHADOW]}>{metricDisplay}</Text>
                   <View style={styles.heroChart}>
-                    <SpendChart
-                      data={activeSeries}
-                      width={CHART_W}
-                      height={CHART_H}
-                      color={lineColor}
-                      fillColor={isSavingsDetail ? savingsTint : undefined}
-                      ringColor="#08060e"
-                      strokeWidth={2.5}
-                      verticalInset={DETAIL_CHART_INSET_Y}
-                      onScrub={setScrubIdx}
-                    />
+                    {isTrendsDetail ? (
+                      <TrendBars
+                        values={trendValues}
+                        labels={trendLabels}
+                        width={CHART_W}
+                        height={CHART_H}
+                        selectedIdx={scrubIdx}
+                        partialIdx={trendPartialIdx}
+                        onScrub={setScrubIdx}
+                        onTap={(idx) => setScrubIdx(prev => prev === idx ? null : idx)}
+                        barColor="rgba(242,244,245,0.58)"
+                        selectedColor="rgba(242,244,245,1)"
+                        labelColor={pW.textSec}
+                        selectedLabelColor={pW.text}
+                      />
+                    ) : (
+                      <SpendChart
+                        data={activeSeries}
+                        width={CHART_W}
+                        height={CHART_H}
+                        color={lineColor}
+                        fillColor={isSavingsDetail ? savingsTint : undefined}
+                        ringColor="#08060e"
+                        strokeWidth={2.5}
+                        verticalInset={DETAIL_CHART_INSET_Y}
+                        onScrub={setScrubIdx}
+                      />
+                    )}
                   </View>
                   {isSavingsDetail ? (
                     <Text style={[styles.savedComposition, { color: pW.textTer }]}>
@@ -449,11 +620,25 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                     generic overflow. */}
                 <View style={styles.pickerRow}>
                   <SegmentedControl
-                    values={TIMEFRAMES as unknown as string[]}
-                    selectedIndex={TIMEFRAMES.indexOf(timeframe)}
+                    values={
+                      isTrendsDetail
+                        ? TREND_GRAINS.map(g => g.label)
+                        : (TIMEFRAMES as unknown as string[])
+                    }
+                    selectedIndex={
+                      isTrendsDetail
+                        ? TREND_GRAINS.findIndex(g => g.id === trendGrain)
+                        : TIMEFRAMES.indexOf(timeframe)
+                    }
                     onChange={(e) => {
-                      const next = TIMEFRAMES[e.nativeEvent.selectedSegmentIndex];
-                      if (next) setTimeframe(next);
+                      const i = e.nativeEvent.selectedSegmentIndex;
+                      if (isTrendsDetail) {
+                        const g = TREND_GRAINS[i];
+                        if (g) setTrendGrain(g.id);
+                      } else {
+                        const next = TIMEFRAMES[i];
+                        if (next) setTimeframe(next);
+                      }
                     }}
                     tintColor={theme.accent.dot}
                     appearance={theme.dark ? 'dark' : 'light'}
@@ -474,31 +659,35 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                     style={styles.pickerSeg}
                   />
 
-                  {/* Date — labeled chevron menu, identical to the Insights pattern */}
-                  <Host ignoreSafeArea="all" style={{ width: 132, height: 36 }}>
-                    <Menu
-                      label={
-                        <View style={styles.dateLabel}>
-                          <Text
-                            style={[styles.dateLabelText, { color: pW.text }, DARK_TEXT_SHADOW]}
-                            numberOfLines={1}
-                          >
-                            {dateLabel}
-                          </Text>
-                          <Icon name="chevDown" size={13} color={pW.text} stroke={2.2} />
-                        </View>
-                      }
-                    >
-                      {dateOptions.map((opt, idx) => (
-                        <SwiftButton
-                          key={`date-${idx}`}
-                          systemImage={idx === dateIdx ? 'checkmark' : undefined}
-                          onPress={() => setDateIdxByPeriod(prev => ({ ...prev, [period]: idx }))}
-                          label={opt}
-                        />
-                      ))}
-                    </Menu>
-                  </Host>
+                  {/* Date — labeled chevron menu, identical to the Insights
+                      pattern. Hidden for trends, whose window is always the
+                      rolling stretch ending now. */}
+                  {!isTrendsDetail && (
+                    <Host ignoreSafeArea="all" style={{ width: 132, height: 36 }}>
+                      <Menu
+                        label={
+                          <View style={styles.dateLabel}>
+                            <Text
+                              style={[styles.dateLabelText, { color: pW.text }, DARK_TEXT_SHADOW]}
+                              numberOfLines={1}
+                            >
+                              {dateLabel}
+                            </Text>
+                            <Icon name="chevDown" size={13} color={pW.text} stroke={2.2} />
+                          </View>
+                        }
+                      >
+                        {dateOptions.map((opt, idx) => (
+                          <SwiftButton
+                            key={`date-${idx}`}
+                            systemImage={idx === dateIdx ? 'checkmark' : undefined}
+                            onPress={() => setDateIdxByPeriod(prev => ({ ...prev, [period]: idx }))}
+                            label={opt}
+                          />
+                        ))}
+                      </Menu>
+                    </Host>
+                  )}
 
                   {/* Sort — its own visible control */}
                   <Host ignoreSafeArea="all" style={{ width: 36, height: 36 }}>
@@ -719,6 +908,16 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 4,
   },
+  // Bleeds to the screen edges (negating the CHART_PAD gutter) and extends up
+  // under the blurred header so its solid band has no visible top edge; the
+  // gradient itself fades the bottom into the page scrim.
+  heroBacking: {
+    position: 'absolute',
+    top: -120,
+    left: -CHART_PAD,
+    right: -CHART_PAD,
+    bottom: -150,
+  },
   metricHeroTop: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -736,6 +935,11 @@ const styles = StyleSheet.create({
     ...TYPE.bodySm,
     marginTop: 4,
     lineHeight: 20,
+  },
+  trendStatInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
 
   // Period picker row

@@ -302,16 +302,16 @@ interface Props {
   onOpenDrawer: () => void;
   onAddVoice: (source: SourceRect) => void;
   onAddManual: (source: SourceRect) => void;
-  onAddRecurring: () => void;
   onLogIncome: (source: SourceRect) => void;
   onOpenTheme: () => void;
   onOpenTx: (tx: Transaction) => void;
+  onPrepareTx?: (tx: Transaction) => void;
   onDeleteTx: (tx: Transaction) => void;
   onOpenBill: (bill: Bill) => void;
   morphResetToken?: number;
 }
 
-export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onAddRecurring, onLogIncome, onOpenTheme, onOpenTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
+export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   // Morph sources — all measured at press time from the circle (radius 28).
   const voiceMorph  = useMorphSource(28);
@@ -792,7 +792,6 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
               p={pWallpaper}
               shadow={shadow}
               onEditTheme={handleEditTheme}
-              onAddRecurring={onAddRecurring}
               containerStyle={quickActionMorphStyle('more')}
             />
           </View>
@@ -830,6 +829,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                 ) : visibleUpcomingBills.map((b, i) => {
                   const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
                   const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
+                  const billIconColor = categoryGroupColor(b.cat, categories, theme.dark);
                   return (
                     <SwipeBillRow
                       key={b.id}
@@ -848,10 +848,13 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                         accessible
                         accessibilityLabel={a11y}
                       >
-                        <View style={[styles.rowIcon, { backgroundColor: categoryGroupColor(b.cat, categories, theme.dark) }]}
-                          accessibilityElementsHidden importantForAccessibility="no">
-                          <Icon name={b.icon} size={16} color="#FBF8FF" stroke={1.6} />
-                        </View>
+                        <MerchantMark
+                          merchant={b.merchant}
+                          catIcon={b.icon}
+                          color={billIconColor}
+                          size={36}
+                          iconSize={16}
+                        />
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <Text style={[styles.rowTitle, { color: p.text }]}>{b.name}</Text>
                           <Text style={[styles.rowSub, { color: p.textSec }]}>
@@ -898,7 +901,9 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
                           onClose={handleSwipeClose}
                         >
                           <TxRow tx={tx}
-                            onPress={() => onOpenTx(tx)} last={i === arr.length - 1}
+                            onPress={() => onOpenTx(tx)}
+                            onPrepare={onPrepareTx ? () => onPrepareTx(tx) : undefined}
+                            last={i === arr.length - 1}
                             dark={theme.dark} p={p} cats={cats} categories={categories} />
                         </SwipeTxRow>
                       ))}
@@ -1083,10 +1088,11 @@ function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
 
 // ── TxRow ─────────────────────────────────────────────────────────
 const TxRow = React.memo(function TxRow({
-  tx, onPress, last, dark, p, cats, categories,
+  tx, onPress, onPrepare, last, dark, p, cats, categories,
 }: {
   tx: Transaction;
   onPress: () => void;
+  onPrepare?: () => void;
   last: boolean;
   dark: boolean;
   p: P;
@@ -1097,6 +1103,7 @@ const TxRow = React.memo(function TxRow({
   const a11yLabel = `${tx.merchant}, ${cat?.label ?? 'transaction'}, ${tx.time}, $${fmtAmount(tx.amount)}`;
   return (
     <GHTouchableOpacity
+      onPressIn={onPrepare}
       onPress={onPress}
       activeOpacity={0.6}
       style={[styles.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}
@@ -1124,13 +1131,12 @@ const TxRow = React.memo(function TxRow({
 // SwiftUI Menu but without the SwiftUI Host lifecycle bug that broke
 // off-screen menus on app foreground.
 function MoreMenuButton({
-  theme, p, shadow, onEditTheme, onAddRecurring, containerStyle,
+  theme, p, shadow, onEditTheme, containerStyle,
 }: {
   theme: Theme;
   p: P;
   shadow?: object;
   onEditTheme: () => void;
-  onAddRecurring: () => void;
   containerStyle?: any;
 }) {
   const colors = quickActionColors(theme, p);
@@ -1140,12 +1146,10 @@ function MoreMenuButton({
       themeVariant={theme.dark ? 'dark' : 'light'}
       actions={[
         { id: 'theme',     title: 'Edit theme',             image: 'paintbrush',                       imageColor: colors.menuImageColor },
-        { id: 'recurring', title: 'Add recurring expense',  image: 'arrow.triangle.2.circlepath',      imageColor: colors.menuImageColor },
       ]}
       onPressAction={({ nativeEvent }) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         if      (nativeEvent.event === 'theme')     onEditTheme();
-        else if (nativeEvent.event === 'recurring') onAddRecurring();
       }}
       style={styles.qa}
     >

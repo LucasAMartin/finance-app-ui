@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Pressable, TextInput, StyleSheet,
-  Animated, Easing, KeyboardAvoidingView, Platform, Linking,
+  Animated, Easing, Keyboard, Linking,
   type TextStyle,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -11,6 +11,8 @@ import { Icon } from './Icon';
 import { GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
+import { PopupNumericKeypad } from './PopupNumericKeypad';
+import { applyKeypadKey } from './NumericKeypad';
 import { TYPE } from '../typography';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
@@ -49,12 +51,16 @@ const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
 // SwiftUI's .infinity can't cross the bridge (serializes to null), so a width
 // larger than any phone lets the segmented control greedily fill its host.
 const PICKER_FILL_WIDTH = 10000;
-const KEY_ROWS: string[][] = [
-  ['1', '2', '3'],
-  ['4', '5', '6'],
-  ['7', '8', '9'],
-  ['clear', '0', 'del'],
-];
+
+// "today" / "yesterday" / "Jun 2" — the glanceable date under the amount hero.
+function relativeDateLabel(d: Date): string {
+  const now = new Date();
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d);
+}
 
 // Recurring cadence offered on the expense screen. 'never' = a one-off expense.
 type RepeatValue = 'never' | 'weekly' | 'monthly' | 'annual';
@@ -95,7 +101,8 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   const darkScheme = theme.dark ? 'dark' : 'light';
 
   const [mode, setMode] = useState<Mode>(initialMode === 'manual' ? 'manual' : 'idle');
-  const [manualAmt, setManualAmt] = useState('0.00');
+  const [keypadOpen, setKeypadOpen] = useState(false);
+  const [manualAmt, setManualAmt] = useState('0');
   const [manualCat, setManualCat] = useState('groceries');
   const [manualMerchant, setManualMerchant] = useState('');
   const [manualNote, setManualNote] = useState('');
@@ -108,6 +115,20 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   useEffect(() => { transcriptRef.current = voice.transcript; }, [voice.transcript]);
 
   const cancelVoiceResultRef = useRef(false);
+
+  // Auto-opening the pad is delayed so the user reads the full manual screen
+  // first and registers the keypad as a popup that slid up over it (a direct
+  // tap on the amount still opens it instantly — no delay there).
+  const KEYPAD_OPEN_DELAY = 480;
+  const keypadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openKeypadSoon = () => {
+    if (keypadTimerRef.current) clearTimeout(keypadTimerRef.current);
+    keypadTimerRef.current = setTimeout(() => setKeypadOpen(true), KEYPAD_OPEN_DELAY);
+  };
+  const cancelKeypadOpen = () => {
+    if (keypadTimerRef.current) clearTimeout(keypadTimerRef.current);
+    keypadTimerRef.current = null;
+  };
 
   const ringAnims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
   const ringLoops = useRef<(Animated.CompositeAnimation | null)[]>([null, null, null]);
@@ -136,7 +157,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
   // Reset when opened.
   useEffect(() => {
-    setManualAmt('0.00');
+    setManualAmt('0');
     setManualCat(categories[0]?.id ?? 'groceries');
     setManualMerchant('');
     setManualNote('');
@@ -144,7 +165,9 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     setManualRepeat('never');
     setHeardTranscript('');
     voice.reset();
-    return () => { voice.abort(); stopRings(); };
+    // Landing straight in manual mode: same delayed pad reveal as the toggle.
+    if (initialMode === 'manual') openKeypadSoon();
+    return () => { voice.abort(); stopRings(); cancelKeypadOpen(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -163,7 +186,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     const finalText = transcriptRef.current.trim();
     if (mode === 'listening' && finalText) {
       const result = parseVoiceExpense(finalText);
-      setManualAmt(result.amount > 0 ? result.amount.toFixed(2) : '0.00');
+      setManualAmt(result.amount > 0 ? result.amount.toFixed(2) : '0');
       setManualCat(cats[result.cat] ? result.cat : categories[0]?.id ?? 'groceries');
       setManualMerchant(result.merchant);
       setManualNote('');
@@ -180,28 +203,24 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     voice.abort();
     stopRings();
     setMode('manual');
+    // Tapping into Manual is an intent to type — surface the pad, but let the
+    // screen settle for a beat first so the slide-up reads as a popup.
+    openKeypadSoon();
   };
 
   const switchToVoice = () => {
     setHeardTranscript('');
+    cancelKeypadOpen();
+    setKeypadOpen(false);
     setMode('idle');
-  };
-
-  const press = (k: string) => {
-    Haptics.selectionAsync().catch(() => {});
-    if (k === 'clear') { setManualAmt('0.00'); return; }
-    setManualAmt(a => {
-      const cents = Math.round(parseFloat(a || '0') * 100) || 0;
-      let next: number;
-      if (k === 'del') next = Math.floor(cents / 10);
-      else next = cents * 10 + parseInt(k, 10);
-      next = Math.min(next, 99_999_999);
-      return (next / 100).toFixed(2);
-    });
   };
 
   const amountValue = parseFloat(manualAmt);
   const canSave = Number.isFinite(amountValue) && amountValue > 0;
+  const openKeypadAfterKeyboardDismiss = () => {
+    Keyboard.dismiss();
+    requestAnimationFrame(() => setKeypadOpen(true));
+  };
 
   const commit = () => {
     const amount = parseFloat(manualAmt);
@@ -253,11 +272,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={[S.root, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
+    <View style={[S.root, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
         {/* Header */}
         <View style={S.header}>
           <Host colorScheme={darkScheme} matchContents ignoreSafeArea="all" style={S.backBtnHost}>
@@ -394,16 +409,27 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
           {/* ── MANUAL ── */}
           {mode === 'manual' && (
             <View style={[S.manualRoot, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-              <View style={S.manualAmountWrap}>
+              <Pressable
+                onPress={openKeypadAfterKeyboardDismiss}
+                style={[
+                  S.manualAmountWrap,
+                  keypadOpen && { borderColor: theme.accent.dot + '55' },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Edit amount"
+              >
                 <View style={S.manualAmountRow}>
-                  <Text style={[S.manualAmountSign, { color: theme.textSec }]}>$</Text>
+                  <Text style={[S.manualAmountSign, { color: canSave ? theme.textSec : theme.textTer }]}>$</Text>
                   <AmountText
-                    value={manualAmt}
+                    value={manualAmt || '0'}
                     color={canSave ? theme.text : theme.textTer}
                     textStyle={S.manualAmountValue}
                   />
                 </View>
-              </View>
+                <Text style={[TYPE.caption, S.amountSubline, { color: theme.textTer }]} numberOfLines={1}>
+                  {cats[manualCat]?.label ?? 'Expense'} · {relativeDateLabel(manualDate)}
+                </Text>
+              </Pressable>
 
               {heardTranscript ? (
                 <View style={S.heardRow}>
@@ -420,8 +446,11 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                   <TextInput
                     value={manualMerchant} onChangeText={setManualMerchant}
                     placeholder="Where?" placeholderTextColor={theme.textTer}
-                    style={[S.fieldInput, { color: theme.text, flex: 1 }]}
                     keyboardAppearance={darkScheme}
+                    returnKeyType="done"
+                    selectTextOnFocus
+                    style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+                    onFocus={() => { if (keypadOpen) setKeypadOpen(false); }}
                   />
                 </View>
                 <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
@@ -429,8 +458,11 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                   <TextInput
                     value={manualNote} onChangeText={setManualNote}
                     placeholder="Optional" placeholderTextColor={theme.textTer}
-                    style={[S.fieldInput, { color: theme.text, flex: 1 }]}
                     keyboardAppearance={darkScheme}
+                    returnKeyType="done"
+                    selectTextOnFocus
+                    style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+                    onFocus={() => { if (keypadOpen) setKeypadOpen(false); }}
                   />
                 </View>
                 <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
@@ -485,23 +517,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 />
               </View>
 
-              <View style={S.keypad}>
-                {KEY_ROWS.map((row, ri) => (
-                  <View key={ri} style={S.keyRow}>
-                    {row.map(k => (
-                      <KeyButton key={k} theme={theme} onPress={() => press(k)} label={k === 'del' ? 'Delete' : k === 'clear' ? 'Clear' : k}>
-                        {k === 'del' ? (
-                          <Icon name="backspace" size={20} color={theme.text} stroke={1.5} />
-                        ) : k === 'clear' ? (
-                          <Text style={[TYPE.body, { fontWeight: '600', color: theme.textSec }]}>Clear</Text>
-                        ) : (
-                          <Text style={[TYPE.headline, { fontWeight: '500', color: theme.text }]}>{k}</Text>
-                        )}
-                      </KeyButton>
-                    ))}
-                  </View>
-                ))}
-              </View>
+              <View style={{ flex: 1 }} />
 
               <SheetPrimaryButton
                 label="Save expense"
@@ -513,8 +529,16 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
             </View>
           )}
         </View>
+
+        {mode === 'manual' && (
+          <PopupNumericKeypad
+            visible={keypadOpen}
+            theme={theme}
+            onKey={(key) => setManualAmt(prev => applyKeypadKey(prev, key))}
+            onDone={() => setKeypadOpen(false)}
+          />
+        )}
       </View>
-    </KeyboardAvoidingView>
   );
 }
 
@@ -728,40 +752,6 @@ function AmountText({ value, color, textStyle }: { value: string; color: string;
   );
 }
 
-// ─── Key button ───────────────────────────────────────────────────────────────
-
-function KeyButton({ theme, label, onPress, children }: {
-  theme: Theme; label: string; onPress: () => void; children: React.ReactNode;
-}) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const pressed = useRef(new Animated.Value(0)).current;
-
-  const setPressed = (active: boolean) => {
-    Animated.spring(scale, { toValue: active ? 0.92 : 1, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
-    Animated.timing(pressed, { toValue: active ? 1 : 0, duration: active ? 60 : 160, useNativeDriver: false }).start();
-  };
-
-  const backgroundColor = pressed.interpolate({ inputRange: [0, 1], outputRange: [theme.chipBg, theme.sep] });
-
-  return (
-    <Animated.View style={[S.keyCell, { transform: [{ scale }] }]}>
-      <Pressable
-        onPressIn={() => { Haptics.selectionAsync().catch(() => {}); setPressed(true); }}
-        onPressOut={() => setPressed(false)}
-        onPress={onPress}
-        pointerEvents="box-only"
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        style={{ flex: 1 }}
-      >
-        <Animated.View style={[S.keyFace, { backgroundColor }]}>
-          {children}
-        </Animated.View>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
@@ -815,21 +805,32 @@ const S = StyleSheet.create({
   transcriptLive: { fontSize: 26, fontWeight: '600', letterSpacing: -0.5, lineHeight: 33, textAlign: 'center' },
   errorActions: { flexDirection: 'row', alignItems: 'center', gap: 20 },
 
-  // Manual layout
-  manualRoot: { flex: 1, paddingHorizontal: 20, paddingTop: 4 },
-  manualAmountWrap: { alignItems: 'center', paddingVertical: 12, marginBottom: 2 },
+  // Manual layout. With the keypad now summoned on demand, the form reclaims the
+  // vertical budget the pad used to hold — so the groups can breathe with a real
+  // rhythm: a generous amount hero, comfortable field rows, then a flex spacer
+  // that floats Save to the bottom.
+  manualRoot: { flex: 1, paddingHorizontal: 20, paddingTop: 8 },
+  manualAmountWrap: {
+    alignItems: 'center',
+    paddingVertical: 22,
+    marginBottom: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
   manualAmountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' },
   manualAmountSign: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, marginRight: 3 },
   manualAmountValue: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, fontVariant: ['tabular-nums'] },
   amountChars: { flexDirection: 'row', alignItems: 'flex-end' },
+  amountSubline: { marginTop: 6 },
   heardRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, marginTop: -4, marginBottom: 12, paddingHorizontal: 16,
+    gap: 8, marginTop: -12, marginBottom: 16, paddingHorizontal: 16,
   },
-  fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
+  fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 16 },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 12, paddingHorizontal: 16, gap: 12, minHeight: 46,
+    paddingVertical: 14, paddingHorizontal: 16, gap: 12, minHeight: 54,
   },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
   categoryPanel: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
@@ -837,15 +838,8 @@ const S = StyleSheet.create({
   categoryGroupHost: { width: '100%', height: 42 },
   subcategoryRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth,
   },
   subcatMenuTrigger: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1 },
   subcatMenuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
-  // Keypad fills the slack below the form and shrinks to whatever space is left
-  // so the screen never needs to scroll. maxHeight keeps keys from ballooning on
-  // tall devices; it's free to shrink below that on short ones.
-  keypad: { flex: 1, gap: 8, marginBottom: 8, maxHeight: 268 },
-  keyRow: { flex: 1, flexDirection: 'row', gap: 8 },
-  keyCell: { flex: 1 },
-  keyFace: { flex: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
 });

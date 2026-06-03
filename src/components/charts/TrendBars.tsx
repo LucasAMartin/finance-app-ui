@@ -26,6 +26,8 @@ interface BarProps {
   rx: number;
   baseY: number;
   fill: string;
+  /** <1 dims an in-progress (partial) period so its short bar doesn't misread. */
+  fillOpacity: number;
   index: number;
   /** New identity whenever the series changes → replays the grow. */
   playKey: object;
@@ -35,7 +37,7 @@ interface BarProps {
 // index without violating hook rules (a shared per-index loop can't). Animates
 // the rect's height/y (which react-native-svg drives on the UI thread) rather
 // than a scaleY transform, which animatedProps doesn't propagate for SVG.
-function Bar({ x, width, fullHeight, rx, baseY, fill, index, playKey }: BarProps) {
+function Bar({ x, width, fullHeight, rx, baseY, fill, fillOpacity, index, playKey }: BarProps) {
   const grow = useSharedValue(0);
   useEffect(() => {
     grow.value = 0;
@@ -59,6 +61,7 @@ function Bar({ x, width, fullHeight, rx, baseY, fill, index, playKey }: BarProps
       height={fullHeight}
       rx={rx}
       fill={fill}
+      fillOpacity={fillOpacity}
       animatedProps={animatedProps}
     />
   );
@@ -76,8 +79,13 @@ interface Props {
   selectedColor: string;
   labelColor: string;
   selectedLabelColor: string;
+  /** Index of an in-progress (partial) period, dimmed so its short bar reads as
+   *  "not done yet" rather than a real dip. */
+  partialIdx?: number | null;
   /** Fires with the active bar index while scrubbing, `null` on release. */
   onScrub?: (index: number | null) => void;
+  /** Fires on a discrete tap; parent handles toggle (same index → deselect). */
+  onTap?: (index: number) => void;
 }
 
 // Compact bar chart for the Insights "Spending trends" half-tile. Carries the
@@ -95,7 +103,9 @@ export function TrendBars({
   selectedColor,
   labelColor,
   selectedLabelColor,
+  partialIdx,
   onScrub,
+  onTap,
 }: Props) {
   const padT = 6;
   const padB = 16;
@@ -120,9 +130,23 @@ export function TrendBars({
 
   const tick = () => Haptics.selectionAsync();
   const emit = (idx: number | null) => onScrub?.(idx);
+  const emitTap = (idx: number) => onTap?.(idx);
 
   const { band } = geo;
   const lastIdx = useSharedValue(-1);
+
+  const tap = useMemo(
+    () =>
+      Gesture.Tap()
+        .onEnd((e) => {
+          'worklet';
+          const i = Math.max(0, Math.min(n - 1, Math.floor(e.x / band)));
+          runOnJS(tick)();
+          runOnJS(emitTap)(i);
+        }),
+    [band, n],
+  );
+
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -154,6 +178,9 @@ export function TrendBars({
     [band, n, lastIdx],
   );
 
+  // Tap wins on quick touch; pan takes over after the long-press threshold.
+  const gesture = useMemo(() => Gesture.Race(tap, pan), [tap, pan]);
+
   if (n === 0 || width <= 0 || height <= 0) {
     return <Svg width={Math.max(0, width)} height={Math.max(0, height)} />;
   }
@@ -161,7 +188,7 @@ export function TrendBars({
   const rx = Math.min(4, geo.barW / 2);
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={gesture}>
       <Svg width={width} height={height}>
         {geo.bars.map((b, i) => (
           <Bar
@@ -172,6 +199,7 @@ export function TrendBars({
             rx={rx}
             baseY={geo.baseY}
             fill={i === selectedIdx ? selectedColor : barColor}
+            fillOpacity={i === partialIdx && i !== selectedIdx ? 0.5 : 1}
             index={i}
             playKey={playKey}
           />

@@ -1,113 +1,44 @@
 import { useEffect } from 'react';
 import { useRepositories, useRepositoryItem } from './repositories/RepositoryProvider';
-import type { MerchantLogo, MerchantLogosRepo, MerchantLogoStatus, Transaction } from './repositories/types';
+import type { MerchantLogo, MerchantLogosRepo, Transaction } from './repositories/types';
+import {
+  ERROR_RETRY_MS,
+  RESOLVED_SOURCE,
+  addMs,
+  isExpired,
+  isLookupableMerchantName,
+  isSafeLogoUrl,
+  merchantLogoKey,
+  planLogoEntry,
+  shouldResolve,
+  type ResolveResponse,
+} from './merchantLogoPolicy';
+
+export {
+  isLookupableMerchantName,
+  isSafeLogoUrl,
+  merchantLogoKey,
+  redactLogoUrl,
+  type MerchantLogoResolveResponse,
+} from './merchantLogoPolicy';
 
 const ENDPOINT = process.env.EXPO_PUBLIC_MERCHANT_LOGO_ENDPOINT
   ?? 'https://logo-api-ten.vercel.app/api/merchant-logo/resolve';
 const APP_KEY = process.env.EXPO_PUBLIC_MERCHANT_LOGO_APP_KEY;
 const COUNTRY_CODE = (process.env.EXPO_PUBLIC_MERCHANT_LOGO_COUNTRY_CODE ?? 'US').trim().toUpperCase();
-const ENDPOINT_ORIGIN = new URL(ENDPOINT).origin;
 
-const RESOLVED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const ERROR_RETRY_MS = 24 * 60 * 60 * 1000;
 const inflight = new Map<string, Promise<void>>();
-const NON_MERCHANT_NAMES = new Set([
-  'bill',
-  'bills',
-  'dining',
-  'entertainment',
-  'expense',
-  'food',
-  'gas',
-  'groceries',
-  'grocery',
-  'housing',
-  'income',
-  'manual expense',
-  'note',
-  'rent',
-  'shopping',
-  'subscription',
-  'transport',
-  'transportation',
-  'unknown',
-  'utilities',
-  'utility',
-]);
-
-type ResolveResponse = {
-  status: MerchantLogoStatus;
-  merchantKey?: string;
-  domain?: string;
-  logoUrl?: string;
-  retryAfter?: string;
-  lastCheckedAt?: string;
-  source?: string;
-};
-
-export function merchantLogoKey(merchant: string): string {
-  return merchant.trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-export function isLookupableMerchantName(merchant: string): boolean {
-  const key = merchantLogoKey(merchant);
-  if (key.length < 2) return false;
-  if (NON_MERCHANT_NAMES.has(key)) return false;
-  if (!/[a-z0-9]/i.test(key)) return false;
-  return true;
-}
 
 export function transactionUsesMerchantLogo(tx: Transaction): boolean {
   const source = tx.meta?.merchantSource;
   if (source === 'fallback' || source === 'note') return false;
-  if (source === 'user' || source === 'voice' || source === 'recurring') {
-    return isLookupableMerchantName(tx.merchant);
-  }
   return isLookupableMerchantName(tx.merchant);
-}
-
-function isSafeLogoUrl(value?: string): value is string {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:') return false;
-    if (url.origin !== ENDPOINT_ORIGIN) return false;
-    // Any Brandfetch URL, or any URL carrying a `c` query parameter, is treated
-    // as credential-bearing. Never cache or render it.
-    if (url.hostname.includes('brandfetch.io')) return false;
-    if (url.searchParams.has('c')) return false;
-    if (url.pathname.startsWith('/api/merchant-logo/image/')) {
-      return url.searchParams.has('exp')
-        && url.searchParams.has('token')
-        && url.searchParams.has('sig');
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function addMs(iso: string, ms: number) {
-  return new Date(new Date(iso).getTime() + ms).toISOString();
-}
-
-function shouldResolve(entry: MerchantLogo | undefined, now = new Date()): boolean {
-  if (!entry) return true;
-  if (entry.status === 'resolved') {
-    return !entry.logoUrl || now.getTime() - new Date(entry.lastCheckedAt).getTime() > RESOLVED_TTL_MS;
-  }
-  if (entry.retryAfter) {
-    return new Date(entry.retryAfter).getTime() <= now.getTime();
-  }
-  return entry.status === 'error';
-}
-
-function isExpired(entry: MerchantLogo, now = new Date()): boolean {
-  return now.getTime() - new Date(entry.lastCheckedAt).getTime() > RESOLVED_TTL_MS;
 }
 
 async function fetchMerchantLogo(merchant: string): Promise<ResolveResponse> {
   if (!APP_KEY) throw new Error('merchant_logo_key_missing');
+  // The resolver country-ranks results server-side, so US merchants always send
+  // countryCode: "US". Keep the body minimal and compatible with the resolver.
   const body: { merchant: string; countryCode?: string } = { merchant };
   if (/^[A-Z]{2}$/.test(COUNTRY_CODE)) body.countryCode = COUNTRY_CODE;
   const res = await fetch(ENDPOINT, {
@@ -120,7 +51,8 @@ async function fetchMerchantLogo(merchant: string): Promise<ResolveResponse> {
   });
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data?.error ?? 'merchant_logo_request_failed');
+    // 401 (bad x-app-key), 422 (invalid merchant/countryCode), 429 (rate limit).
+    throw new Error(data?.error ?? `merchant_logo_request_failed_${res.status}`);
   }
   return data;
 }
@@ -137,33 +69,17 @@ async function resolveAndCacheMerchantLogo(
     const now = new Date().toISOString();
     try {
       const data = await fetchMerchantLogo(merchant);
-      const checkedAt = data.lastCheckedAt ?? now;
-      const status = data.status;
-      const resolvedLogo = status === 'resolved' && isSafeLogoUrl(data.logoUrl);
-      repo.create({
-        id: key,
-        merchantKey: key,
-        displayName: merchant.trim(),
-        domain: resolvedLogo ? data.domain : undefined,
-        logoUrl: resolvedLogo ? data.logoUrl : undefined,
-        status: resolvedLogo ? 'resolved' : status === 'not_found' ? 'not_found' : 'error',
-        source: data.source,
-        lastCheckedAt: checkedAt,
-        retryAfter: status === 'not_found'
-          ? data.retryAfter
-          : status === 'error' || !resolvedLogo
-            ? addMs(checkedAt, ERROR_RETRY_MS)
-            : undefined,
-        failureCount: status === 'resolved' && resolvedLogo ? 0 : (current?.failureCount ?? 0) + 1,
-        meta: data.merchantKey && data.merchantKey !== key ? { providerMerchantKey: data.merchantKey } : undefined,
-      });
+      repo.create(planLogoEntry(merchant, key, data, current, now));
     } catch (err) {
+      // Network/HTTP failure: short backoff so we retry within ERROR_RETRY_MS.
+      // Never log the resolved URL (it carries the publishable token); only the
+      // error message is recorded.
       repo.create({
         id: key,
         merchantKey: key,
         displayName: merchant.trim(),
         status: 'error',
-        source: 'brandfetch-search-logo',
+        source: RESOLVED_SOURCE,
         lastCheckedAt: now,
         retryAfter: addMs(now, ERROR_RETRY_MS),
         failureCount: (current?.failureCount ?? 0) + 1,
@@ -185,13 +101,16 @@ export function useMerchantLogo(merchant: string, enabled = true): MerchantLogo 
 
   useEffect(() => {
     if (!canLookup || !key) return;
+    // Migration: any previously cached URL that is no longer a safe Logo.dev CDN
+    // URL (e.g. legacy Brandfetch / app-proxy entries) is invalidated to an error
+    // with backoff so it re-resolves through the new resolver.
     if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
       merchantLogosRepo.create({
         id: key,
         merchantKey: key,
         displayName: merchant.trim(),
         status: 'error',
-        source: entry.source ?? 'brandfetch-search-logo',
+        source: entry.source ?? RESOLVED_SOURCE,
         lastCheckedAt: new Date().toISOString(),
         retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
         failureCount: entry.failureCount + 1,

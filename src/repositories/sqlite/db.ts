@@ -12,7 +12,7 @@ import { shiftedSeedDate } from '../transactionDates';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 5;
+const DB_VERSION = 7;
 
 let db: SQLiteDatabase | null = null;
 
@@ -247,6 +247,15 @@ function migrate(database: SQLiteDatabase) {
         CREATE INDEX IF NOT EXISTS idx_transactions_category_merchant_occurred_id
         ON transactions (category, merchant, occurred_at DESC, id DESC);
       `);
+    }
+    // v6 was a one-time merchant_logos cache flush for the Brandfetch → Logo.dev
+    // resolver migration. Removed after it ran on the only device; the version
+    // number is retained so schema/device versions stay consistent.
+    if (version < 7) {
+      // Resolver now returns a server-sampled `bgColor` per logo; add the column.
+      // (A one-time cache flush ran here too for the only device, now removed; the
+      // column add stays — the repo reads/writes bg_color, so it must exist.)
+      database.execSync('ALTER TABLE merchant_logos ADD COLUMN bg_color TEXT');
     }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });

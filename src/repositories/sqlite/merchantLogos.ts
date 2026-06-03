@@ -7,6 +7,7 @@ interface MerchantLogoRow {
   display_name: string | null;
   domain: string | null;
   logo_url: string | null;
+  bg_color: string | null;
   status: MerchantLogo['status'];
   source: string | null;
   last_checked_at: string;
@@ -21,6 +22,7 @@ const fromRow = (row: MerchantLogoRow): MerchantLogo => ({
   displayName: row.display_name ?? undefined,
   domain: row.domain ?? undefined,
   logoUrl: row.logo_url ?? undefined,
+  bgColor: row.bg_color,
   status: row.status,
   source: row.source ?? undefined,
   lastCheckedAt: row.last_checked_at,
@@ -38,11 +40,12 @@ export class SQLiteMerchantLogosRepo extends SQLiteRepository<MerchantLogo, Upse
 
   create(input: UpsertMerchantLogoInput): MerchantLogo {
     getDb().runSync(
-      'INSERT OR REPLACE INTO merchant_logos (merchant_key, display_name, domain, logo_url, status, source, last_checked_at, retry_after, failure_count, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO merchant_logos (merchant_key, display_name, domain, logo_url, bg_color, status, source, last_checked_at, retry_after, failure_count, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       input.merchantKey,
       input.displayName ?? null,
       input.domain ?? null,
       input.logoUrl ?? null,
+      input.bgColor ?? null,
       input.status,
       input.source ?? null,
       input.lastCheckedAt,
@@ -63,6 +66,7 @@ export class SQLiteMerchantLogosRepo extends SQLiteRepository<MerchantLogo, Upse
       displayName: patch.displayName ?? current.displayName,
       domain: patch.domain ?? current.domain,
       logoUrl: patch.logoUrl ?? current.logoUrl,
+      bgColor: patch.bgColor !== undefined ? patch.bgColor : current.bgColor,
       status: patch.status ?? current.status,
       source: patch.source ?? current.source,
       lastCheckedAt: patch.lastCheckedAt ?? current.lastCheckedAt,

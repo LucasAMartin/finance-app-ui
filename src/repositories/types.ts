@@ -129,6 +129,9 @@ export interface MerchantLogo {
   displayName?: string;
   domain?: string;
   logoUrl?: string;
+  /** Server-sampled logo background color (#rrggbb), or null/undefined when the
+   *  logo reads cleanest on the default white disc. */
+  bgColor?: string | null;
   status: MerchantLogoStatus;
   source?: string;
   lastCheckedAt: string;
@@ -143,6 +146,7 @@ export interface UpsertMerchantLogoInput {
   displayName?: string;
   domain?: string;
   logoUrl?: string;
+  bgColor?: string | null;
   status: MerchantLogoStatus;
   source?: string;
   lastCheckedAt: string;

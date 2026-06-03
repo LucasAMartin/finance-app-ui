@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
 import {
@@ -14,9 +14,11 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import type { Bill } from '../repositories/types';
 import { advanceDueDate } from '../selectors/finance';
-import { Icon } from './Icon';
+import { MerchantMark } from './MerchantMark';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
 import { Money, SheetPrimaryButton, SheetTextButton } from './shared';
+import { PopupNumericKeypad } from './PopupNumericKeypad';
+import { applyKeypadKey } from './NumericKeypad';
 import { TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 
@@ -48,10 +50,14 @@ export function BillSheet({
   const b = lastBill.current;
 
   const [editAmt, setEditAmt] = useState('');
+  const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
 
   useEffect(() => {
     if (bill !== null) {
       setEditAmt(bill.amount.toFixed(2));
+      setAmountKeypadOpen(false);
+    } else {
+      setAmountKeypadOpen(false);
     }
   }, [bill]);
 
@@ -82,6 +88,7 @@ export function BillSheet({
         meta: { ...rule.meta, partialPaid: undefined },
       });
     }
+    setAmountKeypadOpen(false);
     onClose();
   };
 
@@ -105,6 +112,7 @@ export function BillSheet({
     recurringRulesRepo.update(ruleId, {
       meta: { ...rule.meta, partialPaid: existing + amount },
     });
+    setAmountKeypadOpen(false);
     onClose();
   };
 
@@ -136,10 +144,14 @@ export function BillSheet({
                   />
 
                   <View style={S.hero}>
-                    <View style={[S.catCircle, { backgroundColor: `${groupColor}30` }]}>
-                      <Icon name={b.icon} size={24} color={groupColor} stroke={1.5} />
-                    </View>
-                    <Text style={[S.merchant, { color: theme.text }]}>{b.merchant}</Text>
+                    <MerchantMark
+                      merchant={b.merchant}
+                      catIcon={b.icon}
+                      color={groupColor}
+                      size={52}
+                      iconSize={24}
+                    />
+                    <Text style={[S.merchant, { color: theme.text, marginTop: 12 }]}>{b.merchant}</Text>
                     <Text style={[S.metaLine, { color: theme.textSec }]} numberOfLines={1}>
                       {cat?.label}
                       {cat?.label ? <Text style={{ color: theme.textTer }}> · </Text> : null}
@@ -152,16 +164,20 @@ export function BillSheet({
                   </View>
 
                   <View style={[S.amtCard, { backgroundColor: theme.chipBg }]}>
-                    <View style={S.amtRow}>
+                    <Pressable
+                      onPress={() => setAmountKeypadOpen(true)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit amount paid"
+                      style={S.amtRow}
+                    >
                       <Text style={[S.amtLabel, { color: theme.textSec }]}>Amount paid</Text>
-                      <TextInput
-                        value={editAmt}
-                        onChangeText={setEditAmt}
-                        keyboardType="decimal-pad"
-                        selectTextOnFocus
-                        style={[S.amtInput, { color: theme.text }]}
-                      />
-                    </View>
+                      <View style={S.amtDisplay}>
+                        <Text style={[S.amtSign, { color: theme.textSec }]}>$</Text>
+                        <Text style={[S.amtValue, { color: editAmt ? theme.text : theme.textTer }]}>
+                          {editAmt || '0.00'}
+                        </Text>
+                      </View>
+                    </Pressable>
                   </View>
 
                   <SheetPrimaryButton
@@ -178,6 +194,12 @@ export function BillSheet({
                   />
                 </>
               )}
+              <PopupNumericKeypad
+                visible={amountKeypadOpen}
+                theme={theme}
+                onKey={(key) => setEditAmt(prev => applyKeypadKey(prev, key))}
+                onDone={() => setAmountKeypadOpen(false)}
+              />
             </View>
           </RNHostView>
         </Group>
@@ -196,14 +218,6 @@ const S = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
     paddingHorizontal: 20,
-  },
-  catCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
   },
   merchant: {
     ...TYPE.headline,
@@ -232,12 +246,19 @@ const S = StyleSheet.create({
     ...TYPE.body,
     flexShrink: 0,
   },
-  amtInput: {
-    ...TYPE.subsectionTitle,
-    fontWeight: '500',
-    textAlign: 'right',
-    padding: 0,
+  amtDisplay: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'flex-end',
+  },
+  amtSign: {
+    ...TYPE.subsectionTitle,
+    marginRight: 4,
+  },
+  amtValue: {
+    ...TYPE.subsectionTitle,
+    textAlign: 'right',
   },
   primaryBtn: {
     marginHorizontal: 20,
