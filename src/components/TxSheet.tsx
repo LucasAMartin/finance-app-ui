@@ -7,6 +7,7 @@ import {
   BottomSheetTextInput,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import Animated, { useAnimatedReaction, useSharedValue, runOnJS, FadeIn, FadeOut } from 'react-native-reanimated';
 import { Button as SwiftButton, DatePicker, Host, Menu } from '@expo/ui/swift-ui';
 import { datePickerStyle, environment } from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
@@ -25,6 +26,7 @@ const EXPANDED_INDEX = 1;
 // content top padding).
 const SHEET_CHROME = 44;
 const DATE_PICKER_EXPANDED_HEIGHT = 236;
+type SheetPhase = 'closed' | 'presenting' | 'open' | 'dismissing';
 
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
@@ -64,12 +66,14 @@ const formatOccurredAt = (d: Date) =>
 export function TxSheet({
   tx,
   visible,
+  openRequestId,
   theme,
   onClose,
   onDeleted,
 }: {
   tx: Transaction | null;
   visible: boolean;
+  openRequestId: number;
   theme: Theme;
   onClose: () => void;
   onDeleted?: (tx: Transaction) => void;
@@ -80,9 +84,20 @@ export function TxSheet({
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
   const sheetRef = useRef<BottomSheetModal>(null);
-  const presentedRef = useRef(false);
+  const presentedRef = useRef(false);   // sheet is up (presented, not dismissed)
+  const phaseRef = useRef<SheetPhase>('closed');
+  const pendingReopenRef = useRef(false);
+  const visibleRef = useRef(visible);
+  const txRef = useRef<Transaction | null>(tx);
+  // gorhom writes the live sheet position here (0 = compact, 1 = expanded). We
+  // switch content off this single continuous source instead of the discrete
+  // onAnimate/onChange callbacks, which raced and left stale content on manual
+  // swipes between detents.
+  const animatedIndex = useSharedValue(COMPACT_INDEX);
   const lastTx = useRef<Transaction | null>(null);
   const sheetHeightRef = useRef(0);
+  visibleRef.current = visible;
+  txRef.current = tx;
   if (tx) lastTx.current = tx;
   const t = lastTx.current;
 
@@ -118,20 +133,45 @@ export function TxSheet({
   const visibleContentH = (isExpanded ? EXPANDED_FRACTION : COMPACT_FRACTION) * winH - SHEET_CHROME;
   const deferredContentReady = tx !== null && deferredTxId === tx.id;
 
-  // Drive present/dismiss from the `visible` prop. The `presentedRef` guard is
-  // essential: calling `dismiss()` on a modal that was never presented (e.g. the
-  // initial visible=false render) puts gorhom into a stuck DISMISSING status,
-  // after which it silently refuses to render on the next `present()`. So only
-  // dismiss a sheet we actually presented, and only present one not already up.
+  const presentSheet = useCallback(() => {
+    if (!txRef.current) return;
+    pendingReopenRef.current = false;
+    presentedRef.current = true;
+    phaseRef.current = 'presenting';
+    animatedIndex.value = COMPACT_INDEX;
+    setSheetIndex(COMPACT_INDEX);
+    sheetRef.current?.present();
+  }, [animatedIndex]);
+
+  // Keep the modal instance stable. `openRequestId` is incremented only by the
+  // imperative open() call; prepare() may update tx on press-down but must not
+  // queue a modal reopen while a swipe/close is still dismissing.
   useEffect(() => {
-    if (visible && !presentedRef.current) {
-      presentedRef.current = true;
-      sheetRef.current?.present();
-    } else if (!visible && presentedRef.current) {
-      presentedRef.current = false;
-      sheetRef.current?.dismiss();
+    if (visible) {
+      if (!txRef.current) return;
+      if (phaseRef.current === 'dismissing') {
+        pendingReopenRef.current = true;
+        return;
+      }
+      if (!presentedRef.current) {
+        presentSheet();
+        return;
+      }
+      animatedIndex.value = COMPACT_INDEX;
+      setSheetIndex(COMPACT_INDEX);
+      sheetRef.current?.snapToIndex(COMPACT_INDEX);
+      return;
     }
-  }, [visible]);
+
+    pendingReopenRef.current = false;
+    if (!presentedRef.current) {
+      phaseRef.current = 'closed';
+      return;
+    }
+    presentedRef.current = false;
+    phaseRef.current = 'dismissing';
+    sheetRef.current?.dismiss();
+  }, [animatedIndex, openRequestId, presentSheet, visible]);
 
   useEffect(() => {
     if (!isExpanded && amountKeypadOpen) setAmountKeypadOpen(false);
@@ -214,21 +254,37 @@ export function TxSheet({
     if (index < EXPANDED_INDEX) setAmountKeypadOpen(false);
   }, []);
 
-  // Swap compact↔edit content (and resize the content box) the moment the
-  // animation *starts* — `onChange` only fires once the sheet has fully
-  // settled, which made the edit UI appear well after the sheet finished
-  // growing. `toIndex` is -1 while dismissing; clamp so we don't thrash.
-  const handleSheetAnimate = useCallback((_from: number, to: number) => {
-    if (to >= COMPACT_INDEX) applySheetIndex(to);
-  }, [applySheetIndex]);
+  // Switch content the moment the sheet passes the midpoint between detents, in
+  // either direction — driven by the continuous animated position so it tracks
+  // manual swipes reliably and reacts mid-animation (not only on settle).
+  useAnimatedReaction(
+    () => (animatedIndex.value >= 0.5 ? EXPANDED_INDEX : COMPACT_INDEX),
+    (next, prev) => {
+      if (next !== prev) runOnJS(applySheetIndex)(next);
+    },
+    [applySheetIndex],
+  );
 
-  // Fires after the dismiss animation completes (swipe or programmatic). Clear
-  // the presented flag here so the visible→false effect doesn't fire a second,
-  // status-corrupting dismiss(), then sync the parent's `visible` state.
+  const handleSheetChange = useCallback((index: number) => {
+    phaseRef.current = index >= COMPACT_INDEX ? 'open' : 'dismissing';
+  }, []);
+
+  // Fires after a dismiss fully completes (swipe or programmatic). If a new
+  // transaction arrived while dismissing, present it now instead of letting the
+  // old close callback flip the parent back to hidden.
   const handleModalDismiss = useCallback(() => {
     presentedRef.current = false;
+    phaseRef.current = 'closed';
+    if (pendingReopenRef.current && visibleRef.current && txRef.current) {
+      presentSheet();
+      return;
+    }
+    pendingReopenRef.current = false;
     onClose();
-  }, [onClose]);
+  }, [onClose, presentSheet]);
+
+  const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
+  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface }), [theme.surface]);
 
   const expandToEdit = useCallback(() => {
     sheetRef.current?.snapToIndex(EXPANDED_INDEX);
@@ -264,15 +320,15 @@ export function TxSheet({
       snapPoints={SNAP_POINTS}
       enableDynamicSizing={false}
       enablePanDownToClose
-      onAnimate={handleSheetAnimate}
-      onChange={applySheetIndex}
+      animatedIndex={animatedIndex}
+      onChange={handleSheetChange}
       // Close on `onDismiss` (fires AFTER the dismiss animation completes), so
       // no React commit lands on top of the running dismiss — this is what kept
       // swipe-to-close stuttering on the old SwiftUI sheet.
       onDismiss={handleModalDismiss}
       backdropComponent={renderBackdrop}
-      handleIndicatorStyle={{ backgroundColor: theme.textTer }}
-      backgroundStyle={{ backgroundColor: theme.surface }}
+      handleIndicatorStyle={handleIndicatorStyle}
+      backgroundStyle={backgroundStyle}
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
     >
@@ -305,43 +361,52 @@ export function TxSheet({
                 cats={cats}
                 categories={categories}
               />
-              {!isExpanded ? (
-                <View>
-                  <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
-                  <Pressable
-                    onPress={expandToEdit}
-                    pointerEvents="box-only"
-                    style={S.expandHint}
-                    accessibilityRole="button"
-                    accessibilityLabel="Edit transaction"
-                  >
-                    <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
-                    <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <EditSection
-                  theme={theme}
-                  editCat={editCat}
-                  setEditCat={setEditCat}
-                  editMerchant={editMerchant}
-                  setEditMerchant={setEditMerchant}
-                  editNote={editNote}
-                  setEditNote={setEditNote}
-                  editAmt={editAmt}
-                  setEditAmt={setEditAmt}
-                  onOpenAmountKeypad={openAmountKeypad}
-                  onDismissAmountKeypad={() => setAmountKeypadOpen(false)}
-                  editOccurredAt={editOccurredAt}
-                  datePickerInlineOpen={datePickerInlineOpen}
-                  onToggleDatePicker={() => setDatePickerInlineOpen(v => !v)}
-                  onDateChange={setEditOccurredAt}
-                  cats={cats}
-                  categories={categories}
-                  onSave={saveEdit}
-                  onDelete={deleteTx}
-                />
-              )}
+              {/* Cross-fade the differing lower section on detent change; the
+                  hero above stays put, so the swap reads as a soft dissolve
+                  rather than a hard cut. Keyed so enter/exit fire on switch. */}
+              <Animated.View
+                key={isExpanded ? 'edit' : 'compact'}
+                entering={FadeIn.duration(120)}
+                exiting={FadeOut.duration(120)}
+              >
+                {!isExpanded ? (
+                  <View>
+                    <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
+                    <Pressable
+                      onPress={expandToEdit}
+                      pointerEvents="box-only"
+                      style={S.expandHint}
+                      accessibilityRole="button"
+                      accessibilityLabel="Edit transaction"
+                    >
+                      <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
+                      <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <EditSection
+                    theme={theme}
+                    editCat={editCat}
+                    setEditCat={setEditCat}
+                    editMerchant={editMerchant}
+                    setEditMerchant={setEditMerchant}
+                    editNote={editNote}
+                    setEditNote={setEditNote}
+                    editAmt={editAmt}
+                    setEditAmt={setEditAmt}
+                    onOpenAmountKeypad={openAmountKeypad}
+                    onDismissAmountKeypad={() => setAmountKeypadOpen(false)}
+                    editOccurredAt={editOccurredAt}
+                    datePickerInlineOpen={datePickerInlineOpen}
+                    onToggleDatePicker={() => setDatePickerInlineOpen(v => !v)}
+                    onDateChange={setEditOccurredAt}
+                    cats={cats}
+                    categories={categories}
+                    onSave={saveEdit}
+                    onDelete={deleteTx}
+                  />
+                )}
+              </Animated.View>
             </View>
           </>
         )}

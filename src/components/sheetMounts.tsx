@@ -47,12 +47,14 @@ export const TxSheetMount = forwardRef<TxSheetHandle, {
   const { theme } = useTheme();
   const [tx, setTx] = useState<Transaction | null>(null);
   const [visible, setVisible] = useState(false);
+  const [openRequestId, setOpenRequestId] = useState(0);
 
   useImperativeHandle(ref, () => ({
     prepare: (next) => setTx(next),
     open: (next) => {
       setTx(next);
       setVisible(true);
+      setOpenRequestId(id => id + 1);
     },
   }), []);
 
@@ -60,6 +62,7 @@ export const TxSheetMount = forwardRef<TxSheetHandle, {
     <TxSheet
       tx={tx}
       visible={visible}
+      openRequestId={openRequestId}
       theme={theme}
       onClose={() => setVisible(false)}
       onDeleted={onDeleted}
