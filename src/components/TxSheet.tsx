@@ -16,10 +16,11 @@ import type { Category, GroupKey, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { MerchantMark } from './MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
-import { Money, SheetPrimaryButton } from './shared';
+import { Money, SheetPrimaryButton, SheetTextButton } from './shared';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
-import { Theme, catPastel, GROUP_COLORS, OVER_DOT } from '../theme';
+import { Theme, catPastel, GROUP_COLORS } from '../theme';
 import { TYPE } from '../typography';
+import { LAYOUT } from '../spacing';
 
 const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
 const GROUP_LABELS: Record<GroupKey, string> = {
@@ -512,13 +513,13 @@ function EditSection({
         theme={theme}
         style={S.saveBtn}
       />
-      <Pressable
+      <SheetTextButton
+        label="Delete transaction"
         onPress={onDelete}
-        pointerEvents="box-only"
+        theme={theme}
+        tone="danger"
         style={S.deleteBtn}
-      >
-        <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete transaction</Text>
-      </Pressable>
+      />
     </View>
   );
 }
@@ -526,7 +527,7 @@ function EditSection({
 const S = StyleSheet.create({
   content: {
     flex: 1,
-    paddingTop: 16,
+    paddingTop: 20,
   },
   hero: {
     alignItems: 'center',
@@ -587,13 +588,13 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 8,
     paddingVertical: 16,
   },
   expandHintText: { ...TYPE.captionEm },
   editSection: {
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 20,
     paddingBottom: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     marginTop: 4,
@@ -612,7 +613,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 50,
-    paddingVertical: 11,
+    paddingVertical: LAYOUT.rowPadY,
     paddingHorizontal: 16,
     gap: 12,
   },
@@ -657,7 +658,7 @@ const S = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: LAYOUT.rowPadY,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   subcatMenuTrigger: {
@@ -675,12 +676,9 @@ const S = StyleSheet.create({
   },
   saveBtn: {
     marginTop: 28,
-    paddingVertical: 16,
-    borderRadius: 16,
     alignItems: 'center',
   },
   deleteBtn: {
-    paddingVertical: 16,
     alignItems: 'center',
   },
 });

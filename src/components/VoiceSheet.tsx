@@ -7,6 +7,7 @@ import { ScreenExitButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
+import { LAYOUT } from '../spacing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
@@ -742,7 +743,7 @@ const S = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 20,
     paddingBottom: 12,
   },
   headerBtn: {
@@ -752,7 +753,7 @@ const S = StyleSheet.create({
   },
   voiceCenter: {
     alignItems: 'center',
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 16,
   },
@@ -848,7 +849,7 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 11,
+    paddingVertical: LAYOUT.rowPadY,
     paddingHorizontal: 16,
     gap: 12,
   },
@@ -901,7 +902,7 @@ const S = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   subcatMenuTrigger: {
@@ -921,10 +922,10 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     borderRadius: 10,
     borderWidth: 1,
-    gap: 5,
+    gap: 8,
     marginBottom: 4,
   },
   groupHeaderIcon: {
@@ -942,7 +943,7 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 7,
+    paddingHorizontal: 8,
     borderRadius: 8,
     marginBottom: 3,
   },
@@ -957,8 +958,8 @@ const S = StyleSheet.create({
     flexGrow: 1,
   },
   keyFace: {
-    paddingVertical: 11,
-    borderRadius: 13,
+    paddingVertical: 12,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -966,7 +967,7 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 8,
     marginTop: -2,
     marginBottom: 12,
     paddingHorizontal: 16,

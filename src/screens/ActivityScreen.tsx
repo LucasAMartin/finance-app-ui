@@ -2041,7 +2041,7 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 8,
   },
   filterBadge: {
     width: 16, height: 16, borderRadius: 8,
@@ -2051,7 +2051,7 @@ const S = StyleSheet.create({
   filterPill: {
     flexDirection: 'row', alignItems: 'center',
     paddingLeft: 12, paddingRight: 8, paddingVertical: 8,
-    borderRadius: 100, gap: 5,
+    borderRadius: 100, gap: 8,
   },
   filterPillText: {
     ...TYPE.caption,
@@ -2072,7 +2072,7 @@ const S = StyleSheet.create({
   },
   // Rows
   nameRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
   },
   billIcon: {
     width: 36, height: 36, borderRadius: 18, borderWidth: 1.5,

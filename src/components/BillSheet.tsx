@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
 import {
@@ -16,8 +16,9 @@ import type { Bill } from '../repositories/types';
 import { advanceDueDate } from '../selectors/finance';
 import { Icon } from './Icon';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
-import { Money, SheetPrimaryButton } from './shared';
+import { Money, SheetPrimaryButton, SheetTextButton } from './shared';
 import { TYPE } from '../typography';
+import { LAYOUT } from '../spacing';
 
 const DETENT: PresentationDetent = { fraction: 0.52 };
 
@@ -169,13 +170,12 @@ export function BillSheet({
                     theme={theme}
                     style={S.primaryBtn}
                   />
-                  <Pressable
+                  <SheetTextButton
+                    label="Mark partially paid"
                     onPress={markPartiallyPaid}
-                    pointerEvents="box-only"
-                    style={({ pressed }) => [S.secondaryBtn, { opacity: pressed ? 0.5 : 1 }]}
-                  >
-                    <Text style={[S.secondaryBtnText, { color: theme.textSec }]}>Mark partially paid</Text>
-                  </Pressable>
+                    theme={theme}
+                    style={S.secondaryBtn}
+                  />
                 </>
               )}
             </View>
@@ -189,7 +189,7 @@ export function BillSheet({
 const S = StyleSheet.create({
   content: {
     flex: 1,
-    paddingTop: 16,
+    paddingTop: 20,
   },
   hero: {
     alignItems: 'center',
@@ -225,7 +225,7 @@ const S = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 50,
     paddingHorizontal: 16,
-    paddingVertical: 11,
+    paddingVertical: LAYOUT.rowPadY,
     gap: 12,
   },
   amtLabel: {
@@ -245,13 +245,8 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 16,
-    paddingVertical: 15,
   },
   secondaryBtn: {
-    paddingVertical: 16,
     alignItems: 'center',
-  },
-  secondaryBtnText: {
-    ...TYPE.subsectionTitle,
   },
 });

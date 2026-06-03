@@ -18,6 +18,7 @@ import { Swipeable, TouchableOpacity as GHTouchableOpacity } from 'react-native-
 import { useTheme } from '../ThemeProvider';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Link, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
@@ -138,14 +139,17 @@ function HeroAmount({ value, prefix, color, shadow }: { value: number; prefix: s
 // ── Quick-action tile ─────────────────────────────────────────────
 // All colors adapt dark/light via the adaptive palette. Every tile shares the
 // same soft, slightly-opaque fill (neutral black tint in dark, like the cards).
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 const QuickAction = React.forwardRef<View, {
   icon: string;
   // SF Symbol shown by the native glass button on iOS 26+ (falls back to `icon`).
   glassSymbol: SFSymbol;
   label: string;
-  onPress: () => void;
+  onPress?: () => void;
   onPrepare?: () => void;
   containerStyle?: any;
+  href?: Href;
   // Fire on finger-down instead of finger-up. RN's onPress waits for release and,
   // inside a ScrollView, for scroll arbitration — that gap is the perceived lag.
   // onPressIn fires immediately, so the action feels instant. Use for actions
@@ -155,19 +159,55 @@ const QuickAction = React.forwardRef<View, {
   p: P;
   shadow?: object;
 }>(function QuickAction(
-  { icon, glassSymbol, label, onPress, onPrepare, containerStyle, instant, theme, p, shadow },
+  { icon, glassSymbol, label, onPress, onPrepare, containerStyle, href, instant, theme, p, shadow },
   ref,
 ) {
   const colors = quickActionColors(theme, p);
   const fire = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onPress();
+    onPress?.();
   };
   const prepare = () => {
     onPrepare?.();
   };
+  const pressIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    prepare();
+  };
+  const routedTileStyle = StyleSheet.flatten([styles.qa, containerStyle]);
 
   if (SUPPORTS_GLASS) {
+    if (href) {
+      return (
+        <Link href={href} asChild>
+          <Link.Trigger>
+            <AnimatedPressable
+              onPressIn={pressIn}
+              style={routedTileStyle}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+            >
+              <View style={styles.qaInner}>
+                <Link.AppleZoom>
+                  <View ref={ref} collapsable={false} style={{ width: 56, height: 56 }}>
+                    <GlassCircleIcon
+                      systemImage={glassSymbol}
+                      size={56}
+                      iconSize={22}
+                      iconColor={colors.iconFg}
+                      glassTint={colors.glassTint}
+                    />
+                  </View>
+                </Link.AppleZoom>
+                <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>{label}</Text>
+              </View>
+            </AnimatedPressable>
+          </Link.Trigger>
+        </Link>
+      );
+    }
+
     // Native interactive Liquid Glass button (iOS 26+). The morph ref lands on
     // the glass circle's wrapping View so a transform still grows from it.
     return (
@@ -189,23 +229,60 @@ const QuickAction = React.forwardRef<View, {
     );
   }
 
-  return (
-    <Animated.View style={[styles.qa, containerStyle]}>
-      <Pressable
-        onPressIn={instant ? fire : prepare}
-        onPress={instant ? undefined : fire}
-        style={({ pressed }) => [styles.qaInner, { opacity: pressed ? 0.7 : 1 }]}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-      >
-        {/* ref is on the circle so a container transform grows from the circle
-            itself (not the icon+label column). */}
+  const trigger = (
+    <Pressable
+      onPressIn={href ? pressIn : instant ? fire : prepare}
+      onPress={href || instant ? undefined : fire}
+      style={({ pressed }) => [styles.qaInner, { opacity: pressed ? 0.7 : 1 }]}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      {/* ref is on the circle so a container transform grows from the circle
+          itself (not the icon+label column). */}
+      {href ? (
+        <Link.AppleZoom>
+          <View ref={ref} collapsable={false} style={[styles.qaCircle, { backgroundColor: colors.circleBg, borderColor: colors.circleBorder }]}>
+            <Icon name={icon} size={20} color={colors.iconFg} stroke={1.7} />
+          </View>
+        </Link.AppleZoom>
+      ) : (
         <View ref={ref} collapsable={false} style={[styles.qaCircle, { backgroundColor: colors.circleBg, borderColor: colors.circleBorder }]}>
           <Icon name={icon} size={20} color={colors.iconFg} stroke={1.7} />
         </View>
-        <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>{label}</Text>
-      </Pressable>
+      )}
+      <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>{label}</Text>
+    </Pressable>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} asChild>
+        <Link.Trigger>
+          <AnimatedPressable
+            onPressIn={pressIn}
+            style={routedTileStyle}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+          >
+            <View style={styles.qaInner}>
+              <Link.AppleZoom>
+                <View ref={ref} collapsable={false} style={[styles.qaCircle, { backgroundColor: colors.circleBg, borderColor: colors.circleBorder }]}>
+                  <Icon name={icon} size={20} color={colors.iconFg} stroke={1.7} />
+                </View>
+              </Link.AppleZoom>
+              <Text style={[styles.qaLabel, { color: colors.labelFg }, shadow]}>{label}</Text>
+            </View>
+          </AnimatedPressable>
+        </Link.Trigger>
+      </Link>
+    );
+  }
+
+  return (
+    <Animated.View style={[styles.qa, containerStyle]}>
+      {trigger}
     </Animated.View>
   );
 });
@@ -408,19 +485,19 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   }, [heroMorphAnim, morphResetToken]);
 
   const prepareVoiceFromHero = useCallback(() => {
-    voiceMorph.prefetch();
     prepareHeroMorphReaction('voice');
-  }, [prepareHeroMorphReaction, voiceMorph]);
+    requestAnimationFrame(startHeroMorphReaction);
+  }, [prepareHeroMorphReaction, startHeroMorphReaction]);
 
   const prepareManualFromHero = useCallback(() => {
-    manualMorph.prefetch();
     prepareHeroMorphReaction('manual');
-  }, [manualMorph, prepareHeroMorphReaction]);
+    requestAnimationFrame(startHeroMorphReaction);
+  }, [prepareHeroMorphReaction, startHeroMorphReaction]);
 
   const prepareIncomeFromHero = useCallback(() => {
-    incomeMorph.prefetch();
     prepareHeroMorphReaction('income');
-  }, [incomeMorph, prepareHeroMorphReaction]);
+    requestAnimationFrame(startHeroMorphReaction);
+  }, [prepareHeroMorphReaction, startHeroMorphReaction]);
 
   const openVoiceFromHero = useCallback(() => {
     voiceMorph.measure(source => {
@@ -495,28 +572,7 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
   };
 
   const quickActionMorphStyle = (key: HeroAction | 'more') => {
-    if (!heroMorphAction) return undefined;
-    const isActive = key === heroMorphAction;
-    return {
-      opacity: heroMorphAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [1, isActive ? 0.14 : 0.90],
-      }),
-      transform: [
-        {
-          translateY: heroMorphAnim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, isActive ? 0 : 2],
-          }),
-        },
-        {
-          scale: heroMorphAnim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [1, isActive ? 0.98 : 0.9],
-          }),
-        },
-      ],
-    };
+    return undefined;
   };
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
@@ -728,9 +784,9 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
           {/* Three capture modes (voice / manual / income) plus a More menu */}
           {/* for less-frequent options — all share the same soft button fill. */}
           <View style={styles.quickRow}>
-            <QuickAction ref={voiceMorph.ref}  icon="mic"    glassSymbol="mic.fill"             label="Voice"  onPrepare={prepareVoiceFromHero}  onPress={openVoiceFromHero}  theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('voice')} />
-            <QuickAction ref={manualMorph.ref} icon="keypad" glassSymbol="square.grid.3x3.fill" label="Manual" onPrepare={prepareManualFromHero} onPress={openManualFromHero} theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('manual')} />
-            <QuickAction ref={incomeMorph.ref} icon="plus"   glassSymbol="plus"                 label="Income" onPrepare={prepareIncomeFromHero} onPress={openIncomeFromHero} theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('income')} />
+            <QuickAction ref={voiceMorph.ref}  icon="mic"    glassSymbol="mic.fill"             label="Voice"  onPrepare={prepareVoiceFromHero}  href="/expense?mode=voice"  theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('voice')} />
+            <QuickAction ref={manualMorph.ref} icon="keypad" glassSymbol="square.grid.3x3.fill" label="Manual" onPrepare={prepareManualFromHero} href="/expense?mode=manual" theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('manual')} />
+            <QuickAction ref={incomeMorph.ref} icon="plus"   glassSymbol="plus"                 label="Income" onPrepare={prepareIncomeFromHero} href="/income"               theme={theme} p={pWallpaper} shadow={shadow} containerStyle={quickActionMorphStyle('income')} />
             <MoreMenuButton
               theme={theme}
               p={pWallpaper}

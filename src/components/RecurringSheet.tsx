@@ -11,6 +11,7 @@ import { Icon } from './Icon';
 import { ScreenExitButton, EXIT_BTN_SIZE } from './GlassButton';
 import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
+import { LAYOUT } from '../spacing';
 
 const DETENT: PresentationDetent = { fraction: 0.72 };
 
@@ -120,7 +121,7 @@ export function RecurringSheet({ theme, visible, onClose }: Props) {
                   tint={theme.textSec}
                   fallbackBg={theme.chipBg}
                 />
-                <Text style={[TYPE.sectionTitle, { color: theme.text, flex: 1, textAlign: 'center' }]}>Recurring expense</Text>
+                <Text style={[TYPE.pageTitle, { color: theme.text, flex: 1, textAlign: 'center' }]}>Recurring expense</Text>
                 <View style={{ width: EXIT_BTN_SIZE }} />
               </View>
 
@@ -284,7 +285,7 @@ const S = StyleSheet.create({
     marginBottom: 16,
   },
   fieldCard: {
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
   },
   fieldRow: {
@@ -294,6 +295,7 @@ const S = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
     paddingHorizontal: 16,
+    paddingVertical: LAYOUT.rowPadY,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   input: {
@@ -314,7 +316,7 @@ const S = StyleSheet.create({
     paddingVertical: 0,
   },
   optionRow: {
-    minHeight: 48,
+    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -328,14 +330,14 @@ const S = StyleSheet.create({
   },
   categoryGrid: {
     flexDirection: 'row',
-    gap: 7,
+    gap: 8,
   },
   groupHeader: {
     minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 8,
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 8,
@@ -347,16 +349,16 @@ const S = StyleSheet.create({
     minHeight: 28,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 8,
     borderRadius: 8,
-    paddingHorizontal: 7,
+    paddingHorizontal: 8,
     marginBottom: 2,
   },
   saveBtn: {
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 16,
-    paddingVertical: 15,
+    paddingVertical: 16,
     marginTop: 22,
   },
 });

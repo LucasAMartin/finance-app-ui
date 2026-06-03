@@ -67,6 +67,7 @@ import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
+import { SheetPrimaryButton } from '../components/shared';
 import type { InsightDetailTarget } from './InsightDetailScreen';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -536,24 +537,15 @@ function InsightBottomSheet({
                   ) : null}
 
                   {d.filter && (
-                    <Pressable
+                    <SheetPrimaryButton
+                      label="View matching transactions"
                       onPress={() => {
                         onClose();
                         onViewActivity(d.filter!);
                       }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`View matching transactions for ${d.title}`}
-                      style={({ pressed }) => [
-                        styles.insightSheetAction,
-                        {
-                          backgroundColor: pressed ? theme.textSec : theme.text,
-                        },
-                      ]}
-                    >
-                      <Text style={[TYPE.subsectionTitle, { color: theme.bg }]}>
-                        View matching transactions
-                      </Text>
-                    </Pressable>
+                      theme={theme}
+                      style={styles.insightSheetAction}
+                    />
                   )}
                 </>
               )}

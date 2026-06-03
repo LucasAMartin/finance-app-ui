@@ -10,10 +10,12 @@ import {
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { router, useFocusEffect } from 'expo-router';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
 import { useAppFonts, patchTextWithInter } from './src/fonts';
 import { RepositoryProvider, useRepositories } from './src/repositories/RepositoryProvider';
+import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
 import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
 
@@ -27,13 +29,8 @@ import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { TabBar } from './src/components/TabBar';
-import { type SavedExpenseInfo } from './src/components/ExpenseFlow';
-import { Toast } from './src/components/Toast';
 import { Drawer } from './src/components/Drawer';
 import type { SourceRect } from './src/components/ContainerTransform';
-import type { SavedIncomeInfo } from './src/components/IncomeFlow';
-import { IncomeMorphMount, type IncomeMorphHandle } from './src/components/IncomeMorphMount';
-import { ExpenseMorphMount, type ExpenseMorphHandle } from './src/components/ExpenseMorphMount';
 import {
   TxSheetMount, type TxSheetHandle,
   BillSheetMount, type BillSheetHandle,
@@ -77,9 +74,10 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
   );
 });
 
-function AppInner() {
+export function DashboardApp() {
   const { theme, dark } = useTheme();
-  const { transactionsRepo, incomeRepo } = useRepositories();
+  const { transactionsRepo } = useRepositories();
+  const { showToast } = useAppFeedback();
 
   // `screen` is only used for TabBar active state and pointerEvents.
   // The actual visual positions are driven imperatively via TX refs.
@@ -89,7 +87,6 @@ function AppInner() {
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
   const [activityFilterToken, setActivityFilterToken] = useState(0);
   const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
-  const [toast, setToast] = useState<{ message: string; onUndo: () => void } | null>(null);
   const [morphResetToken, setMorphResetToken] = useState(0);
 
   // The inline budget keypad asks us to hide the floating tab bar so the pad has
@@ -103,13 +100,6 @@ function AppInner() {
     }).start();
   }, [tabBarAnim]);
 
-  // Every sheet/morph owns its own open state inside a leaf mount, poked via these
-  // refs. Opening one re-renders only that mount — not App and its four mounted
-  // screens — so there's no whole-tree re-render between press and present.
-  // (The mounts stay hoisted to App level so their SwiftUI BottomSheet hosts
-  // aren't siblings of HomeScreen's menu hosts, which caused those to drift.)
-  const incomeMorphRef = useRef<IncomeMorphHandle>(null);
-  const expenseMorphRef = useRef<ExpenseMorphHandle>(null);
   const txSheetRef = useRef<TxSheetHandle>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
   const recurringRef = useRef<RecurringSheetHandle>(null);
@@ -118,39 +108,25 @@ function AppInner() {
   const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
   const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
   const openRecurring = useCallback(() => recurringRef.current?.open(), []);
-  const openIncomeMorph = useCallback((source: SourceRect) => {
-    incomeMorphRef.current?.open(source);
+  const openIncomeRoute = useCallback((_source?: SourceRect) => {
+    router.push('/income');
+  }, []);
+  const openVoiceExpense = useCallback((_source?: SourceRect) => {
+    router.push('/expense?mode=voice');
+  }, []);
+  const openManualExpense = useCallback((_source?: SourceRect) => {
+    router.push('/expense?mode=manual');
   }, []);
   const resetHomeMorphReaction = useCallback(() => {
     setMorphResetToken(t => t + 1);
   }, []);
 
-  const handleSaved = useCallback((info: SavedExpenseInfo) => {
-    setToast({
-      message: `Added $${info.amount.toFixed(2)} to ${info.catLabel}`,
-      onUndo: () => transactionsRepo.delete(info.id),
-    });
-  }, [transactionsRepo]);
-
-  const handleIncomeSaved = useCallback((info: SavedIncomeInfo) => {
-    setToast({
-      message: `Added $${info.amount.toFixed(2)} from ${info.source}`,
-      onUndo: () => incomeRepo.delete(info.id),
-    });
-  }, [incomeRepo]);
+  useFocusEffect(resetHomeMorphReaction);
 
   const handleDeleteTx = useCallback((tx: Transaction) => {
     transactionsRepo.delete(tx.id);
-    setToast({
-      message: 'Transaction deleted',
-      onUndo: () => transactionsRepo.create(txToCreateInput(tx)),
-    });
-  }, [transactionsRepo]);
-
-  const runToastUndo = useCallback(() => {
-    toast?.onUndo();
-    setToast(null);
-  }, [toast]);
+    showToast('Transaction deleted', () => transactionsRepo.create(txToCreateInput(tx)));
+  }, [showToast, transactionsRepo]);
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -233,12 +209,8 @@ function AppInner() {
   }, [closeDrawer, navigate]);
 
   const openInsights = useCallback(() => navigate('insights'), [navigate]);
-  const openVoiceExpense = useCallback((source: SourceRect) => expenseMorphRef.current?.open('voice', source, 'mic'), []);
-  const openManualExpense = useCallback((source: SourceRect) => expenseMorphRef.current?.open('manual', source, 'keypad'), []);
   const openTheme = useCallback(() => setThemeOpen(true), []);
-  const openBudgetIncome = useCallback((node: View) => {
-    node.measureInWindow((x, y, w, h) => incomeMorphRef.current?.open({ x, y, width: w, height: h, radius: 8 }));
-  }, []);
+  const openBudgetIncome = useCallback((_node: View) => router.push('/income'), []);
   const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
   const closeInsight = useCallback(() => setInsightTarget(null), []);
@@ -258,7 +230,7 @@ function AppInner() {
       onAddVoice={openVoiceExpense}
       onAddManual={openManualExpense}
       onAddRecurring={openRecurring}
-      onLogIncome={openIncomeMorph}
+      onLogIncome={openIncomeRoute}
       onOpenTheme={openTheme}
       onOpenTx={openTx}
       onDeleteTx={handleDeleteTx}
@@ -271,7 +243,7 @@ function AppInner() {
     navigateToActivity,
     openBill,
     openDrawer,
-    openIncomeMorph,
+    openIncomeRoute,
     openInsights,
     openManualExpense,
     openRecurring,
@@ -379,16 +351,6 @@ function AppInner() {
           />
         </View>
 
-        <IncomeMorphMount
-          ref={incomeMorphRef}
-          onSaved={handleIncomeSaved}
-          onCloseStart={resetHomeMorphReaction}
-        />
-        <ExpenseMorphMount
-          ref={expenseMorphRef}
-          onSaved={handleSaved}
-          onCloseStart={resetHomeMorphReaction}
-        />
         <RecurringSheetMount ref={recurringRef} />
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
         <BillSheetMount ref={billSheetRef} />
@@ -406,12 +368,6 @@ function AppInner() {
           onClose={closeInsight}
         />
 
-        <Toast
-          theme={theme}
-          message={toast?.message ?? null}
-          onAction={runToastUndo}
-          onDismiss={() => setToast(null)}
-        />
       </View>
     </>
   );
@@ -426,7 +382,9 @@ export default function App() {
       <RepositoryProvider>
         <ThemeProvider defaultDark={true} defaultAccent="ink" defaultCardStyle="flat">
           <SafeAreaProvider>
-            <AppInner />
+            <AppFeedbackProvider>
+              <DashboardApp />
+            </AppFeedbackProvider>
           </SafeAreaProvider>
         </ThemeProvider>
       </RepositoryProvider>

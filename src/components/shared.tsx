@@ -5,6 +5,8 @@ import { Host, Button as SwiftButton, Text as SwiftText, GlassEffectContainer } 
 import { frame, glassEffect, foregroundStyle, font, contentShape, shapes, disabled as disabledModifier } from '@expo/ui/swift-ui/modifiers';
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
+import { LAYOUT } from '../spacing';
+import { OVER_DOT } from '../theme';
 import { SUPPORTS_GLASS } from './GlassButton';
 
 // ── Money display ──────────────────────────────────────────────
@@ -142,6 +144,40 @@ export function SectionHeader({ title, actionLabel, onAction, theme }: SectionHe
   );
 }
 
+interface SheetTextButtonProps {
+  label: string;
+  onPress: () => void;
+  theme: Theme;
+  tone?: 'accent' | 'danger';
+  style?: any;
+}
+
+export function SheetTextButton({
+  label,
+  onPress,
+  theme,
+  tone = 'accent',
+  style,
+}: SheetTextButtonProps) {
+  const color = tone === 'danger' ? OVER_DOT : theme.accent.dot;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      pointerEvents="box-only"
+      hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+      style={({ pressed }) => [
+        styles.sheetTextBtn,
+        { opacity: pressed ? 0.56 : 1 },
+        style,
+      ]}
+    >
+      <Text style={[TYPE.subsectionTitle, { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 interface SheetPrimaryButtonProps {
   label: string;
   onPress: () => void;
@@ -256,6 +292,12 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     marginBottom: 12,
     paddingHorizontal: 2,
+  },
+  sheetTextBtn: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: LAYOUT.rowPadY + 4,
   },
   sheetPrimaryBtn: {
     borderRadius: 16,

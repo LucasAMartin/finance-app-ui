@@ -2693,7 +2693,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 50,
-    paddingVertical: 11,
+    paddingVertical: 12,
     paddingHorizontal: 16,
     gap: 12,
   },

@@ -484,7 +484,7 @@ const S = StyleSheet.create({
   fieldCard: { borderRadius: 14, overflow: 'hidden' },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    minHeight: 50, paddingVertical: 11, paddingHorizontal: 16, gap: 12,
+    minHeight: 50, paddingVertical: 12, paddingHorizontal: 16, gap: 12,
   },
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', padding: 0 },

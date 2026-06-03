@@ -824,7 +824,7 @@ const S = StyleSheet.create({
   amountChars: { flexDirection: 'row', alignItems: 'flex-end' },
   heardRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, marginTop: -4, marginBottom: 12, paddingHorizontal: 16,
+    gap: 8, marginTop: -4, marginBottom: 12, paddingHorizontal: 16,
   },
   fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
   fieldRow: {
@@ -837,7 +837,7 @@ const S = StyleSheet.create({
   categoryGroupHost: { width: '100%', height: 42 },
   subcategoryRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth,
   },
   subcatMenuTrigger: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1 },
   subcatMenuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
@@ -847,5 +847,5 @@ const S = StyleSheet.create({
   keypad: { flex: 1, gap: 8, marginBottom: 8, maxHeight: 268 },
   keyRow: { flex: 1, flexDirection: 'row', gap: 8 },
   keyCell: { flex: 1 },
-  keyFace: { flex: 1, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  keyFace: { flex: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
 });
