@@ -297,7 +297,6 @@ const fmtAmount = (n: number) =>
 
 interface Props {
   theme: Theme;
-  onViewInsights: () => void;
   onViewActivity: (filter?: ActivityInitialFilter) => void;
   onOpenDrawer: () => void;
   onAddVoice: (source: SourceRect) => void;
@@ -311,7 +310,7 @@ interface Props {
   morphResetToken?: number;
 }
 
-export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
+export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   // Morph sources — all measured at press time from the circle (radius 28).
   const voiceMorph  = useMorphSource(28);
@@ -803,9 +802,6 @@ export function HomeScreen({ theme, onViewInsights, onViewActivity, onOpenDrawer
             <SectionCard dark={theme.dark}>
               <View style={styles.sectionHead}>
                 <Text style={[styles.ledgerLabel, { color: p.text }]}>Spending</Text>
-                <TouchableOpacity onPress={onViewInsights} activeOpacity={0.6} delayPressIn={0}>
-                  <Text style={[styles.ledgerAction, { color: p.text }]}>Insights</Text>
-                </TouchableOpacity>
               </View>
               {loading ? (
                 <CategorySkeleton dark={theme.dark} />

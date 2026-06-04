@@ -44,28 +44,27 @@ import type { Bill, Category, GroupKey, Income, RecurringRule, SpendGroup, Spend
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
 import {
-  BottomSheet,
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+  type BottomSheetBackdropProps,
+} from '@gorhom/bottom-sheet';
+import {
   Button as SwiftButton,
   DatePicker,
-  Group,
   Menu,
   Picker,
   Text as SwiftText,
   Host,
-  RNHostView,
 } from '@expo/ui/swift-ui';
 import {
-  background,
   datePickerStyle,
   tint,
   pickerStyle,
   tag,
   fixedSize,
-  ignoreSafeArea,
-  presentationDetents,
-  presentationDragIndicator,
   environment,
-  type PresentationDetent,
 } from '@expo/ui/swift-ui/modifiers';
 import { useTheme } from '../ThemeProvider';
 
@@ -92,9 +91,6 @@ const RECURRING_CADENCES: { value: CategoryRecurringCadence; label: string }[] =
   { value: 'customMonthly', label: 'Custom monthly' },
 ];
 
-const INCOME_DETENT: PresentationDetent = 'large';
-const CAT_DETENT: PresentationDetent = 'large';
-const CAT_DETENTS: PresentationDetent[] = [CAT_DETENT];
 const CURRENT_MONTH = '2026-05';
 // Height reserved above the keypad surface for the floating Done button.
 const KEYPAD_DONE_AREA = 76;
@@ -918,7 +914,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setBudgets(b => ({ ...b, [bKey(gKey, label)]: budget ?? 0 }));
     setDuplicateNameError(false);
     setCategoryFormError('');
-    setAddingForGroup(null);
     return true;
   };
 
@@ -982,12 +977,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setCategoryFormError('');
   };
 
-  const saveCategoryEdit = () => {
-    if (!editingCategory) return;
+  const saveCategoryEdit = (): boolean => {
+    if (!editingCategory) return false;
     const label = categoryLabelDraft.trim();
     if (!label) {
       setCategoryFormError('Category name is required');
-      return;
+      return false;
     }
     const duplicate = categories.some(cat => (
       cat.id !== editingCategory.id &&
@@ -997,7 +992,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     if (duplicate) {
       setDuplicateNameError(true);
       setCategoryFormError('A category with this name already exists');
-      return;
+      return false;
     }
     setDuplicateNameError(false);
     const actualGroup: GroupKey = categoryGroupDraft;
@@ -1005,11 +1000,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     const goalSaved = parseAmountDraft(categoryGoalSaved);
     if (categoryGroupDraft === 'savings' && goalTarget !== null && goalSaved !== null && goalTarget > 0 && goalSaved > goalTarget) {
       setCategoryFormError('Saved amount cannot be greater than the target');
-      return;
+      return false;
     }
     if (categoryGroupDraft === 'savings' && goalSaved !== null && goalSaved > 0 && (!goalTarget || goalTarget <= 0)) {
       setCategoryFormError('Add a target before entering saved so far');
-      return;
+      return false;
     }
     setCategoryFormError('');
     const nextMeta: Record<string, unknown> = { ...(editingCategory.meta ?? {}) };
@@ -1086,7 +1081,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       categoryRecurringDate,
       categoryRecurringCadence,
     );
-    setEditingCategory(null); // drafts reset after sheet fully dismisses via onIsPresentedChange → onClose
+    return true;
   };
 
   const deleteEditingCategory = () => {
@@ -1742,12 +1737,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         onGoalDeadlineChange={setCategoryGoalDeadline}
         onNotesChange={(v) => { setCategoryNotes(v); if (categoryFormError) setCategoryFormError(''); }}
         onClose={() => { closeCategoryEditor(); setAddingForGroup(null); }}
-        onRequestClose={() => { setEditingCategory(null); setAddingForGroup(null); }}
         onSave={saveCategoryEdit}
         onDelete={deleteEditingCategory}
         onAddNew={(lbl, icn, grp, bgt, rec, recDate, recCadence, gt, gs, gd) => {
           return addSub(grp, lbl, icn, bgt, rec, recDate, recCadence, gt, gs, gd);
-          // addSub calls setAddingForGroup(null); onIsPresentedChange → onClose resets drafts after dismiss
+          // The sheet owns dismissal; parent drafts reset after native onDismiss.
         }}
       />
 
@@ -1816,7 +1810,7 @@ function CategoryEditSheet({
   budget, recurring, recurringDate, recurringCadence, goalDeadline, nameError, formError, notes,
   onLabelChange, onIconChange, onGroupChange, onGoalTargetChange, onGoalSavedChange,
   onBudgetChange, onRecurringChange, onRecurringDateChange, onRecurringCadenceChange, onGoalDeadlineChange, onNotesChange,
-  onClose, onRequestClose, onSave, onDelete, onAddNew,
+  onClose, onSave, onDelete, onAddNew,
 }: {
   theme: Theme;
   category: Category | null;
@@ -1846,12 +1840,14 @@ function CategoryEditSheet({
   onGoalDeadlineChange: (v: string) => void;
   onNotesChange: (v: string) => void;
   onClose: () => void;
-  onRequestClose: () => void;
-  onSave: () => void;
+  onSave: () => boolean;
   onDelete: () => void;
   onAddNew: (label: string, icon: string, group: GroupKey, budget?: number, recurring?: boolean, recurringDate?: string, recurringCadence?: CategoryRecurringCadence, goalTarget?: number, goalSaved?: number, goalDeadline?: string) => boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const sheetRef = useRef<BottomSheetModal>(null);
+  const presentedRef = useRef(false);
+  const shouldPresent = category !== null || addingForGroup !== null;
   const isAddMode = addingForGroup !== null && category === null;
   const iconManuallySet = useRef(false);
   const showGoalFields = group === 'savings';
@@ -1864,6 +1860,19 @@ function CategoryEditSheet({
   const [goalSavedDisplay, setGoalSavedDisplay] = useState('');
   const [deadlineDate, setDeadlineDate] = useState<Date | null>(null);
   const [recurringDateVal, setRecurringDateVal] = useState<Date | null>(null);
+  useEffect(() => {
+    if (shouldPresent) {
+      if (!presentedRef.current) {
+        presentedRef.current = true;
+        sheetRef.current?.present();
+      }
+    } else {
+      if (presentedRef.current) {
+        presentedRef.current = false;
+        sheetRef.current?.dismiss();
+      }
+    }
+  }, [shouldPresent]);
   useEffect(() => {
     if (category !== null || addingForGroup !== null) {
       iconManuallySet.current = false;
@@ -1939,6 +1948,11 @@ function CategoryEditSheet({
   const handleSheetKey = useCallback((k: KeypadKey) => {
     setNumDraft(prev => applyKeypadKey(prev, k));
   }, []);
+  const requestDismiss = () => {
+    Keyboard.dismiss();
+    if (activeNumField) closeNumKeypad();
+    onClose();
+  };
 
   // Keep the sheet's top/hero/segmented spacing constant across all groups so
   // switching to Savings only appends the goal fields at the bottom — nothing
@@ -1994,334 +2008,348 @@ function CategoryEditSheet({
       );
       if (!added) return;
     } else {
-      onSave();
+      const saved = onSave();
+      if (!saved) return;
     }
+    requestDismiss();
   };
 
+  const handleDismiss = useCallback(() => {
+    presentedRef.current = false;
+    Keyboard.dismiss();
+    if (activeNumField) closeNumKeypad();
+    onClose();
+  }, [activeNumField, closeNumKeypad, onClose]);
+
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  ), []);
+
+  const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
+  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
+
   return (
-    <Host
-      colorScheme={theme.dark ? 'dark' : 'light'}
-      ignoreSafeArea="keyboard"
-      style={{ width: 0, height: 0, position: 'absolute' }}
+    <BottomSheetModal
+      ref={sheetRef}
+      index={0}
+      snapPoints={['92%']}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      onDismiss={handleDismiss}
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={handleIndicatorStyle}
+      backgroundStyle={backgroundStyle}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
     >
-      <BottomSheet
-        isPresented={category !== null || addingForGroup !== null}
-        onIsPresentedChange={(v) => { if (!v) onClose(); }}
-      >
-        <Group modifiers={[
-          presentationDetents(CAT_DETENTS),
-          presentationDragIndicator('visible'),
-          environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-          background(theme.surface),
-          ignoreSafeArea({ regions: 'keyboard', edges: 'bottom' }),
-        ]}>
-          <RNHostView>
-            <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); if (activeNumField) closeNumKeypad(); }} accessible={false}>
-            <View style={[styles.categorySheet, {
-              backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
-            }]}>
-              {/* Floating close — matches every other sheet's top-left placement */}
-              <ScreenExitButton
-                variant="close"
-                onPress={onRequestClose}
-                tint={theme.textSec}
-                fallbackBg={theme.chipBg}
-                accessibilityLabel="Close category editor"
-                style={EXIT_FLOAT_STYLE}
-              />
-              <ScrollView
-                ref={sheetScrollRef}
-                style={styles.categorySheetScroll}
-                contentContainerStyle={[
-                  styles.categorySheetContent,
-                  {
-                    paddingTop: sheetTopPadding,
-                    // While editing, pad far past the keypad so the content is
-                    // genuinely taller than the frame — that's the only thing that
-                    // creates scroll range to lift a bottom field above the pad.
-                    paddingBottom: activeNumField
-                      ? sheetKbH + KEYPAD_DONE_AREA + 200
-                      : sheetBottomPadding,
-                    minHeight: '100%',
-                  },
-                ]}
-                showsVerticalScrollIndicator={false}
-                scrollEnabled={activeNumField !== null}
-                scrollEventThrottle={16}
-                onScroll={e => { sheetScrollY.current = e.nativeEvent.contentOffset.y; }}
-                onScrollBeginDrag={() => { if (activeNumField) closeNumKeypad(); }}
-	                keyboardShouldPersistTaps="handled"
-	              >
-	              {/* Hero — tap circle to open native popup menu */}
-	              <View style={[styles.catHero, compactSheet && styles.catHeroCompact]}>
-                <Host ignoreSafeArea="all" style={{ width: 52, height: 52 }}>
-                  <Menu
-                    label={
-                      <View
-                        style={{ width: 52, height: 52 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Choose category icon"
-                      >
-                        <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
-                          <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
-                        </View>
-                        <View style={[styles.iconPickerBadge, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
-                          <Icon name="chevDown" size={7} color="rgba(0,0,0,0.55)" stroke={2.4} />
-                        </View>
-                      </View>
-                    }
+      <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); if (activeNumField) closeNumKeypad(); }} accessible={false}>
+      <View style={[styles.categorySheet, {
+        backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
+      }]}>
+        {/* Floating close — matches every other sheet's top-left placement */}
+        <ScreenExitButton
+          variant="close"
+          onPress={requestDismiss}
+          tint={theme.textSec}
+          fallbackBg={theme.chipBg}
+          accessibilityLabel="Close category editor"
+          style={EXIT_FLOAT_STYLE}
+        />
+        <BottomSheetScrollView
+          ref={sheetScrollRef}
+          style={styles.categorySheetScroll}
+          contentContainerStyle={[
+            styles.categorySheetContent,
+            {
+              paddingTop: sheetTopPadding,
+              // While editing, pad far past the keypad so the content is
+              // genuinely taller than the frame — that's the only thing that
+              // creates scroll range to lift a bottom field above the pad.
+              paddingBottom: activeNumField
+                ? sheetKbH + KEYPAD_DONE_AREA + 200
+                : sheetBottomPadding,
+              minHeight: '100%',
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={activeNumField !== null}
+          onScroll={e => { sheetScrollY.current = e.nativeEvent.contentOffset.y; }}
+          onScrollBeginDrag={() => { if (activeNumField) closeNumKeypad(); }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Hero — tap circle to open native popup menu */}
+          <View style={[styles.catHero, compactSheet && styles.catHeroCompact]}>
+            <Host ignoreSafeArea="all" style={{ width: 52, height: 52 }}>
+              <Menu
+                label={
+                  <View
+                    style={{ width: 52, height: 52 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose category icon"
                   >
-                    {CATEGORY_ICON_OPTIONS.map(opt => (
-                      <SwiftButton
-                        key={opt}
-                        systemImage={opt === icon ? 'checkmark' : undefined}
-                        onPress={() => {
-                          iconManuallySet.current = true;
-                          onIconChange(opt);
-                        }}
-                        label={ICON_DISPLAY_NAMES[opt] ?? opt}
-                      />
-                    ))}
-                  </Menu>
-                </Host>
-                <Text style={[TYPE.headline, { color: theme.text, textAlign: 'center', marginTop: compactSheet ? 4 : 8 }]} numberOfLines={1}>
-                  {label.trim() || (isAddMode ? 'New category' : category?.label ?? 'Category')}
-                </Text>
-              </View>
-
-              {/* Group — segmented control */}
-              <SegmentedControl
-                values={GROUP_OPTIONS.map(o => o.label)}
-                selectedIndex={selectedGroupIdx >= 0 ? selectedGroupIdx : 0}
-                onChange={(e) => {
-                  const opt = GROUP_OPTIONS[e.nativeEvent.selectedSegmentIndex];
-                  if (opt) onGroupChange(opt.value);
-                }}
-                tintColor={theme.accent.dot}
-                appearance={theme.dark ? 'dark' : 'light'}
-                backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
-                fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
-                activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
-                style={[styles.catGroupSegmented, compactSheet && styles.catGroupSegmentedCompact]}
-              />
-
-              {/* Primary field card: Name, Budget, Recurring, Notes */}
-              <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 8 : 12 }]}>
-                <View style={[fieldRowStyle, sep]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
-                  <TextInput
-                    value={label}
-                    accessibilityLabel="Category name"
-                    onChangeText={(next) => {
-                      onLabelChange(next);
-                      if (!iconManuallySet.current) onIconChange(inferCategoryIcon(next));
+                    <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
+                      <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
+                    </View>
+                    <View style={[styles.iconPickerBadge, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
+                      <Icon name="chevDown" size={7} color="rgba(0,0,0,0.55)" stroke={2.4} />
+                    </View>
+                  </View>
+                }
+              >
+                {CATEGORY_ICON_OPTIONS.map(opt => (
+                  <SwiftButton
+                    key={opt}
+                    systemImage={opt === icon ? 'checkmark' : undefined}
+                    onPress={() => {
+                      iconManuallySet.current = true;
+                      onIconChange(opt);
                     }}
-                    onFocus={() => { if (activeNumField) closeNumKeypad(); }}
-                    placeholder="Category name"
-                    placeholderTextColor={theme.textTer}
-                    autoFocus={isAddMode}
-                    keyboardAppearance={keyboardAppearance}
-                    returnKeyType="done"
-                    selectTextOnFocus
-                    style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
+                    label={ICON_DISPLAY_NAMES[opt] ?? opt}
                   />
+                ))}
+              </Menu>
+            </Host>
+            <Text style={[TYPE.headline, { color: theme.text, textAlign: 'center', marginTop: compactSheet ? 4 : 8 }]} numberOfLines={1}>
+              {label.trim() || (isAddMode ? 'New category' : category?.label ?? 'Category')}
+            </Text>
+          </View>
+
+          {/* Group — segmented control */}
+          <SegmentedControl
+            values={GROUP_OPTIONS.map(o => o.label)}
+            selectedIndex={selectedGroupIdx >= 0 ? selectedGroupIdx : 0}
+            onChange={(e) => {
+              const opt = GROUP_OPTIONS[e.nativeEvent.selectedSegmentIndex];
+              if (opt) onGroupChange(opt.value);
+            }}
+            tintColor={theme.accent.dot}
+            appearance={theme.dark ? 'dark' : 'light'}
+            backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
+            fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
+            activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
+            style={[styles.catGroupSegmented, compactSheet && styles.catGroupSegmentedCompact]}
+          />
+
+          {/* Primary field card: Name, Budget, Recurring, Notes */}
+          <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 8 : 12 }]}>
+            <View style={[fieldRowStyle, sep]}>
+              <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
+              <BottomSheetTextInput
+                value={label}
+                accessibilityLabel="Category name"
+                onChangeText={(next) => {
+                  onLabelChange(next);
+                  if (!iconManuallySet.current) onIconChange(inferCategoryIcon(next));
+                }}
+                onFocus={() => { if (activeNumField) closeNumKeypad(); }}
+                placeholder="Category name"
+                placeholderTextColor={theme.textTer}
+                autoFocus={isAddMode}
+                keyboardAppearance={keyboardAppearance}
+                returnKeyType="done"
+                selectTextOnFocus
+                style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
+              />
+            </View>
+            <View ref={fieldRowRefs.budget} style={[fieldRowStyle, sep]}>
+              <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Monthly budget</Text>
+              <SheetNumericField
+                displayValue={budgetDisplay}
+                draft={activeNumField === 'budget' ? numDraft : ''}
+                active={activeNumField === 'budget'}
+                placeholder="$0"
+                color={theme.text}
+                accentColor={theme.accent.dot}
+                underlineColor={theme.hairline}
+                onActivate={() => activateNumField('budget', budgetDisplay)}
+              />
+            </View>
+            <View style={[fieldRowStyle, recurring ? sep : {}]}>
+              <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Recurring</Text>
+              <Switch
+                value={recurring}
+                accessibilityLabel="Recurring expense"
+                onValueChange={onRecurringChange}
+                trackColor={{ false: theme.hairline, true: theme.accent.dot }}
+                thumbColor="#FBF8FF"
+              />
+            </View>
+            {recurring && (
+              <>
+                <View style={[fieldRowStyle, sep]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
+                  <Host matchContents ignoreSafeArea="all">
+                    <Picker
+                      selection={recurringCadence}
+                      onSelectionChange={(val) => onRecurringCadenceChange(val as CategoryRecurringCadence)}
+                      modifiers={[
+                        pickerStyle('menu'),
+                        tint(theme.text),
+                        fixedSize({ horizontal: true, vertical: false }),
+                      ]}
+                    >
+                      {RECURRING_CADENCES.map(item => (
+                        <SwiftText key={item.value} modifiers={[tag(item.value)]}>{item.label}</SwiftText>
+                      ))}
+                    </Picker>
+                  </Host>
                 </View>
-                <View ref={fieldRowRefs.budget} style={[fieldRowStyle, sep]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Monthly budget</Text>
+                <View style={[fieldRowStyle, sep, styles.catFieldRowFixed]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Next payment</Text>
+                  {recurringDateVal ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
+                        <DatePicker
+                          selection={recurringDateVal}
+                          onDateChange={(d) => { setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }}
+                          displayedComponents={['date']}
+                          modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
+                        />
+                      </Host>
+                      <Pressable onPress={() => { setRecurringDateVal(null); onRecurringDateChange(''); }} pointerEvents="box-only" hitSlop={8}>
+                        <Icon name="close" size={11} color={theme.textTer} stroke={2} />
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable onPress={() => { const d = new Date(); d.setMonth(d.getMonth() + 1); setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only">
+                      <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </>
+            )}
+            <View style={fieldRowStyle}>
+              <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Notes</Text>
+              <BottomSheetTextInput
+                value={notes}
+                accessibilityLabel="Category notes"
+                onChangeText={onNotesChange}
+                onFocus={() => { if (activeNumField) closeNumKeypad(); }}
+                placeholder=""
+                placeholderTextColor={theme.textTer}
+                keyboardAppearance={keyboardAppearance}
+                returnKeyType="done"
+                selectTextOnFocus
+                style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
+              />
+            </View>
+          </View>
+          {showCategoryError && (
+            <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 8 }]}>
+              {categoryValidationError}
+            </Text>
+          )}
+
+          {/* Goal fields — compact date pickers, no inline expansion */}
+          {showGoalFields && (
+            <>
+              <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 10 : 14 }]}>
+                <View ref={fieldRowRefs.target} style={[fieldRowStyle, sep]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target</Text>
                   <SheetNumericField
-                    displayValue={budgetDisplay}
-                    draft={activeNumField === 'budget' ? numDraft : ''}
-                    active={activeNumField === 'budget'}
+                    displayValue={goalTargetDisplay}
+                    draft={activeNumField === 'target' ? numDraft : ''}
+                    active={activeNumField === 'target'}
                     placeholder="$0"
                     color={theme.text}
                     accentColor={theme.accent.dot}
                     underlineColor={theme.hairline}
-                    onActivate={() => activateNumField('budget', budgetDisplay)}
+                    onActivate={() => activateNumField('target', goalTargetDisplay)}
                   />
                 </View>
-                <View style={[fieldRowStyle, recurring ? sep : {}]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Recurring</Text>
-                  <Switch
-                    value={recurring}
-                    accessibilityLabel="Recurring expense"
-                    onValueChange={onRecurringChange}
-                    trackColor={{ false: theme.hairline, true: theme.accent.dot }}
-                    thumbColor="#FBF8FF"
+                <View ref={fieldRowRefs.saved} style={[fieldRowStyle, sep]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Saved so far</Text>
+                  <SheetNumericField
+                    displayValue={goalSavedDisplay}
+                    draft={activeNumField === 'saved' ? numDraft : ''}
+                    active={activeNumField === 'saved'}
+                    placeholder="$0"
+                    color={theme.text}
+                    accentColor={theme.accent.dot}
+                    underlineColor={theme.hairline}
+                    onActivate={() => activateNumField('saved', goalSavedDisplay)}
                   />
                 </View>
-	                {recurring && (
-	                  <>
-	                    <View style={[fieldRowStyle, sep]}>
-	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
-	                      <Host matchContents ignoreSafeArea="all">
-	                        <Picker
-	                          selection={recurringCadence}
-	                          onSelectionChange={(val) => onRecurringCadenceChange(val as CategoryRecurringCadence)}
-	                          modifiers={[
-	                            pickerStyle('menu'),
-	                            tint(theme.text),
-	                            fixedSize({ horizontal: true, vertical: false }),
-	                          ]}
-	                        >
-	                          {RECURRING_CADENCES.map(item => (
-	                            <SwiftText key={item.value} modifiers={[tag(item.value)]}>{item.label}</SwiftText>
-	                          ))}
-	                        </Picker>
-	                      </Host>
-	                    </View>
-	                    <View style={[fieldRowStyle, sep, styles.catFieldRowFixed]}>
-	                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Next payment</Text>
-	                      {recurringDateVal ? (
-	                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-	                          <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
-	                            <DatePicker
-	                              selection={recurringDateVal}
-	                              onDateChange={(d) => { setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }}
-	                              displayedComponents={['date']}
-	                              modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
-	                            />
-	                          </Host>
-	                          <Pressable onPress={() => { setRecurringDateVal(null); onRecurringDateChange(''); }} pointerEvents="box-only" hitSlop={8}>
-	                            <Icon name="close" size={11} color={theme.textTer} stroke={2} />
-	                          </Pressable>
-	                        </View>
-	                      ) : (
-	                        <Pressable onPress={() => { const d = new Date(); d.setMonth(d.getMonth() + 1); setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only">
-	                          <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
-	                        </Pressable>
-	                      )}
-	                    </View>
-	                  </>
-	                )}
-                <View style={fieldRowStyle}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Notes</Text>
-                  <TextInput
-                    value={notes}
-                    accessibilityLabel="Category notes"
-                    onChangeText={onNotesChange}
-                    onFocus={() => { if (activeNumField) closeNumKeypad(); }}
-                    placeholder=""
-                    placeholderTextColor={theme.textTer}
-                    keyboardAppearance={keyboardAppearance}
-                    returnKeyType="done"
-                    selectTextOnFocus
-                    style={[styles.catFieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
-                  />
-                </View>
-              </View>
-	              {showCategoryError && (
-	                <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: 8 }]}>
-	                  {categoryValidationError}
-	                </Text>
-	              )}
-
-              {/* Goal fields — compact date pickers, no inline expansion */}
-              {showGoalFields && (
-                <>
-                  <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 10 : 14 }]}>
-                    <View ref={fieldRowRefs.target} style={[fieldRowStyle, sep]}>
-                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target</Text>
-                      <SheetNumericField
-                        displayValue={goalTargetDisplay}
-                        draft={activeNumField === 'target' ? numDraft : ''}
-                        active={activeNumField === 'target'}
-                        placeholder="$0"
-                        color={theme.text}
-                        accentColor={theme.accent.dot}
-                        underlineColor={theme.hairline}
-                        onActivate={() => activateNumField('target', goalTargetDisplay)}
-                      />
+                {/* Target date — fixed-height row so the picker never shifts layout */}
+                <View style={[fieldRowStyle, styles.catFieldRowFixed]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target date</Text>
+                  {deadlineDate ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
+                        <DatePicker
+                          selection={deadlineDate}
+                          onDateChange={(d) => { setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
+                          displayedComponents={['date']}
+                          modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
+                        />
+                      </Host>
+                      <Pressable onPress={() => { setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8}>
+                        <Icon name="close" size={11} color={theme.textTer} stroke={2} />
+                      </Pressable>
                     </View>
-                    <View ref={fieldRowRefs.saved} style={[fieldRowStyle, sep]}>
-                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Saved so far</Text>
-                      <SheetNumericField
-                        displayValue={goalSavedDisplay}
-                        draft={activeNumField === 'saved' ? numDraft : ''}
-                        active={activeNumField === 'saved'}
-                        placeholder="$0"
-                        color={theme.text}
-                        accentColor={theme.accent.dot}
-                        underlineColor={theme.hairline}
-                        onActivate={() => activateNumField('saved', goalSavedDisplay)}
-                      />
-                    </View>
-                    {/* Target date — fixed-height row so the picker never shifts layout */}
-                    <View style={[fieldRowStyle, styles.catFieldRowFixed]}>
-                      <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target date</Text>
-                      {deadlineDate ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
-                            <DatePicker
-                              selection={deadlineDate}
-                              onDateChange={(d) => { setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
-                              displayedComponents={['date']}
-                              modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
-                            />
-                          </Host>
-                          <Pressable onPress={() => { setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8}>
-                            <Icon name="close" size={11} color={theme.textTer} stroke={2} />
-                          </Pressable>
-                        </View>
-                      ) : (
-                        <Pressable onPress={() => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only">
-                          <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  </View>
-                  {rawGoalTarget > 0 && (
-                    <View style={[styles.categoryGoalPreview, { marginTop: compactSheet ? 8 : 10 }]}>
-                      <View style={[styles.goalTrack, { backgroundColor: theme.hairline }]}>
-                        <View style={{
-                          height: '100%', borderRadius: 3,
-                          width: `${goalPct}%` as any,
-                          backgroundColor: GROUP_COLORS.savings[theme.dark ? 'dark' : 'light'],
-                        }} />
-                      </View>
-                      <Text style={[TYPE.caption, { color: theme.textSec }]}>
-                        {goalPct}% · ${Math.max(0, rawGoalTarget - rawGoalSaved).toLocaleString()} to go
-                      </Text>
-                    </View>
+                  ) : (
+                    <Pressable onPress={() => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only">
+                      <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
+                    </Pressable>
                   )}
-                </>
-              )}
-
-              <View style={styles.catSheetFooter}>
-                <SheetPrimaryButton
-                  label={isAddMode ? 'Add category' : 'Save category'}
-                  onPress={handleSave}
-                  theme={theme}
-                  disabled={!canSaveCategory}
-                />
-                {!isAddMode && (
-                  <Pressable
-                    onPress={onDelete}
-                    pointerEvents="box-only"
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete category"
-                    style={styles.categoryDeleteButton}
-                  >
-                    <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
-                  </Pressable>
-                )}
+                </View>
               </View>
-              </ScrollView>
+              {rawGoalTarget > 0 && (
+                <View style={[styles.categoryGoalPreview, { marginTop: compactSheet ? 8 : 10 }]}>
+                  <View style={[styles.goalTrack, { backgroundColor: theme.hairline }]}>
+                    <View style={{
+                      height: '100%', borderRadius: 3,
+                      width: `${goalPct}%` as any,
+                      backgroundColor: GROUP_COLORS.savings[theme.dark ? 'dark' : 'light'],
+                    }} />
+                  </View>
+                  <Text style={[TYPE.caption, { color: theme.textSec }]}>
+                    {goalPct}% · ${Math.max(0, rawGoalTarget - rawGoalSaved).toLocaleString()} to go
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
 
-              <PopupNumericKeypad
-                visible={activeNumField !== null}
-                theme={theme}
-                borderColor={theme.hairline}
-                onHeightChange={setSheetKbH}
-                onKey={handleSheetKey}
-                onDone={closeNumKeypad}
-                zIndex={20}
-              />
-            </View>
-            </TouchableWithoutFeedback>
-          </RNHostView>
-        </Group>
-      </BottomSheet>
-    </Host>
+          <View style={styles.catSheetFooter}>
+            <SheetPrimaryButton
+              label={isAddMode ? 'Add category' : 'Save category'}
+              onPress={handleSave}
+              theme={theme}
+              disabled={!canSaveCategory}
+            />
+            {!isAddMode && (
+              <Pressable
+                onPress={onDelete}
+                pointerEvents="box-only"
+                accessibilityRole="button"
+                accessibilityLabel="Delete category"
+                style={styles.categoryDeleteButton}
+              >
+                <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
+              </Pressable>
+            )}
+          </View>
+        </BottomSheetScrollView>
+
+        <PopupNumericKeypad
+          visible={activeNumField !== null}
+          theme={theme}
+          borderColor={theme.hairline}
+          onHeightChange={setSheetKbH}
+          onKey={handleSheetKey}
+          onDone={closeNumKeypad}
+          zIndex={20}
+        />
+      </View>
+      </TouchableWithoutFeedback>
+    </BottomSheetModal>
   );
 }
 

@@ -185,6 +185,8 @@ export interface TransactionQuery {
   searchCategoryIds?: string[];
   from?: string;
   to?: string;
+  minAmount?: number;
+  maxAmount?: number;
   sort?: TransactionSortOrder;
 }
 
@@ -199,6 +201,8 @@ export interface TransactionSummaryQuery {
   searchCategoryIds?: string[];
   from?: string;
   to?: string;
+  minAmount?: number;
+  maxAmount?: number;
 }
 
 export interface TransactionSummary {
@@ -223,6 +227,8 @@ export interface SpendSeriesQuery {
   categoryIds?: string[];
   merchantQuery?: string;
   searchCategoryIds?: string[];
+  minAmount?: number;
+  maxAmount?: number;
 }
 
 export interface SpendSeriesPoint {
@@ -252,6 +258,8 @@ export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, U
     categoryIds?: string[];
     merchantQuery?: string;
     searchCategoryIds?: string[];
+    minAmount?: number;
+    maxAmount?: number;
   }): CalendarMarkRow[];
 };
 export type IncomeRepo = Repository<Income>;

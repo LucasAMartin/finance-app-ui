@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Icon } from './Icon';
 import { useInvalidateMerchantLogo, useMerchantLogo } from '../merchantLogos';
 
@@ -60,7 +61,12 @@ export function MerchantMark({
         // back to the neutral category glyph.
         <Image
           source={{ uri: logo!.logoUrl! }}
-          resizeMode="contain"
+          contentFit="contain"
+          // expo-image keeps a persistent memory + disk cache keyed by URL, so a
+          // once-fetched logo loads instantly on later renders and across JS
+          // reloads — unlike RN's <Image>, whose memory cache is wiped on reload.
+          cachePolicy="memory-disk"
+          transition={120}
           onError={() => {
             setImageFailed(true);
             invalidateMerchantLogo(merchant);

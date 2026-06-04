@@ -205,7 +205,6 @@ export function DashboardApp() {
     else if (id === 'settings') setThemeOpen(true);
   }, [closeDrawer, navigate]);
 
-  const openInsights = useCallback(() => navigate('insights'), [navigate]);
   const openTheme = useCallback(() => setThemeOpen(true), []);
   const openBudgetIncome = useCallback((_node: View) => router.push('/income'), []);
   const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
@@ -221,7 +220,6 @@ export function DashboardApp() {
   const homeScreen = useMemo(() => (
     <MemoHomeScreen
       theme={theme}
-      onViewInsights={openInsights}
       onViewActivity={navigateToActivity}
       onOpenDrawer={openDrawer}
       onAddVoice={openVoiceExpense}
@@ -241,7 +239,6 @@ export function DashboardApp() {
     openBill,
     openDrawer,
     openIncomeRoute,
-    openInsights,
     openManualExpense,
     openTheme,
     openTx,

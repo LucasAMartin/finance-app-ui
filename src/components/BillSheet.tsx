@@ -1,14 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, Group, Host, RNHostView } from '@expo/ui/swift-ui';
 import {
-  background,
-  environment,
-  presentationDetents,
-  presentationDragIndicator,
-  type PresentationDetent,
-} from '@expo/ui/swift-ui/modifiers';
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  type BottomSheetBackdropProps,
+} from '@gorhom/bottom-sheet';
 import { Theme } from '../theme';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
@@ -22,7 +19,7 @@ import { applyKeypadKey } from './NumericKeypad';
 import { TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 
-const DETENT: PresentationDetent = { fraction: 0.52 };
+const SNAP_POINTS = ['52%'];
 
 const CADENCE_LABEL: Record<string, string> = {
   weekly: 'Weekly',
@@ -44,6 +41,8 @@ export function BillSheet({
   const categories = useRepositoryList(categoriesRepo);
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
+  const sheetRef = useRef<BottomSheetModal>(null);
+  const presentedRef = useRef(false);
 
   const lastBill = useRef<Bill | null>(null);
   if (bill) lastBill.current = bill;
@@ -60,6 +59,38 @@ export function BillSheet({
       setAmountKeypadOpen(false);
     }
   }, [bill]);
+
+  useEffect(() => {
+    if (bill !== null) {
+      if (!presentedRef.current) {
+        presentedRef.current = true;
+        sheetRef.current?.present();
+      }
+    } else {
+      if (presentedRef.current) {
+        presentedRef.current = false;
+        sheetRef.current?.dismiss();
+      }
+    }
+  }, [bill]);
+
+  const handleDismiss = useCallback(() => {
+    presentedRef.current = false;
+    onClose();
+  }, [onClose]);
+
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  ), []);
+
+  const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
+  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
 
   const ruleId = b?.id.startsWith('bill-') ? b.id.slice(5) : (b?.id ?? '');
   const rule = ruleId ? recurringRulesRepo.get(ruleId) : undefined;
@@ -117,100 +148,95 @@ export function BillSheet({
   };
 
   return (
-    <Host style={{ width: 0, height: 0, position: 'absolute' }}>
-      <BottomSheet
-        isPresented={bill !== null}
-        onIsPresentedChange={(v) => { if (!v) onClose(); }}
-      >
-        <Group modifiers={[
-          presentationDetents([DETENT]),
-          presentationDragIndicator('visible'),
-          environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-          background(theme.surface),
-        ]}>
-          <RNHostView>
-            <View style={[S.content, {
-              backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
-              paddingBottom: Math.max(insets.bottom, 16) + 12,
-            }]}>
-              {b && (
-                <>
-                  <ScreenExitButton
-                    variant="close"
-                    onPress={onClose}
-                    tint={theme.textSec}
-                    fallbackBg={theme.chipBg}
-                    style={EXIT_FLOAT_STYLE}
-                  />
+    <BottomSheetModal
+      ref={sheetRef}
+      index={0}
+      snapPoints={SNAP_POINTS}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      onDismiss={handleDismiss}
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={handleIndicatorStyle}
+      backgroundStyle={backgroundStyle}
+    >
+      <View style={[S.content, {
+        backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
+        paddingBottom: Math.max(insets.bottom, 16) + 12,
+      }]}>
+        {b && (
+          <>
+            <ScreenExitButton
+              variant="close"
+              onPress={onClose}
+              tint={theme.textSec}
+              fallbackBg={theme.chipBg}
+              style={EXIT_FLOAT_STYLE}
+            />
 
-                  <View style={S.hero}>
-                    <MerchantMark
-                      merchant={b.merchant}
-                      catIcon={b.icon}
-                      color={groupColor}
-                      size={52}
-                      iconSize={24}
-                    />
-                    <Text style={[S.merchant, { color: theme.text, marginTop: 12 }]}>{b.merchant}</Text>
-                    <Text style={[S.metaLine, { color: theme.textSec }]} numberOfLines={1}>
-                      {cat?.label}
-                      {cat?.label ? <Text style={{ color: theme.textTer }}> · </Text> : null}
-                      Due {b.dueDate}
-                      {rule ? <Text style={{ color: theme.textTer }}> · {CADENCE_LABEL[rule.cadence] ?? 'Recurring'}</Text> : null}
-                    </Text>
-                    <View style={{ marginTop: 16 }}>
-                      <Money value={b.amount} size={32} weight="600" prefix="$" theme={theme} />
-                    </View>
-                  </View>
-
-                  <View style={[S.amtCard, { backgroundColor: theme.chipBg }]}>
-                    <Pressable
-                      onPress={() => setAmountKeypadOpen(true)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Edit amount paid"
-                      style={S.amtRow}
-                    >
-                      <Text style={[S.amtLabel, { color: theme.textSec }]}>Amount paid</Text>
-                      <View style={S.amtDisplay}>
-                        <Text style={[S.amtSign, { color: theme.textSec }]}>$</Text>
-                        <Text style={[S.amtValue, { color: editAmt ? theme.text : theme.textTer }]}>
-                          {editAmt || '0.00'}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </View>
-
-                  <SheetPrimaryButton
-                    label="Mark as paid"
-                    onPress={markPaid}
-                    theme={theme}
-                    style={S.primaryBtn}
-                  />
-                  <SheetTextButton
-                    label="Mark partially paid"
-                    onPress={markPartiallyPaid}
-                    theme={theme}
-                    style={S.secondaryBtn}
-                  />
-                </>
-              )}
-              <PopupNumericKeypad
-                visible={amountKeypadOpen}
-                theme={theme}
-                onKey={(key) => setEditAmt(prev => applyKeypadKey(prev, key))}
-                onDone={() => setAmountKeypadOpen(false)}
+            <View style={S.hero}>
+              <MerchantMark
+                merchant={b.merchant}
+                catIcon={b.icon}
+                color={groupColor}
+                size={52}
+                iconSize={24}
               />
+              <Text style={[S.merchant, { color: theme.text, marginTop: 12 }]}>{b.merchant}</Text>
+              <Text style={[S.metaLine, { color: theme.textSec }]} numberOfLines={1}>
+                {cat?.label}
+                {cat?.label ? <Text style={{ color: theme.textTer }}> · </Text> : null}
+                Due {b.dueDate}
+                {rule ? <Text style={{ color: theme.textTer }}> · {CADENCE_LABEL[rule.cadence] ?? 'Recurring'}</Text> : null}
+              </Text>
+              <View style={{ marginTop: 16 }}>
+                <Money value={b.amount} size={32} weight="600" prefix="$" theme={theme} />
+              </View>
             </View>
-          </RNHostView>
-        </Group>
-      </BottomSheet>
-    </Host>
+
+            <View style={[S.amtCard, { backgroundColor: theme.chipBg }]}>
+              <Pressable
+                onPress={() => setAmountKeypadOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Edit amount paid"
+                style={S.amtRow}
+              >
+                <Text style={[S.amtLabel, { color: theme.textSec }]}>Amount paid</Text>
+                <View style={S.amtDisplay}>
+                  <Text style={[S.amtSign, { color: theme.textSec }]}>$</Text>
+                  <Text style={[S.amtValue, { color: editAmt ? theme.text : theme.textTer }]}>
+                    {editAmt || '0.00'}
+                  </Text>
+                </View>
+              </Pressable>
+            </View>
+
+            <SheetPrimaryButton
+              label="Mark as paid"
+              onPress={markPaid}
+              theme={theme}
+              style={S.primaryBtn}
+            />
+            <SheetTextButton
+              label="Mark partially paid"
+              onPress={markPartiallyPaid}
+              theme={theme}
+              style={S.secondaryBtn}
+            />
+          </>
+        )}
+        <PopupNumericKeypad
+          visible={amountKeypadOpen}
+          theme={theme}
+          onKey={(key) => setEditAmt(prev => applyKeypadKey(prev, key))}
+          onDone={() => setAmountKeypadOpen(false)}
+        />
+      </View>
+    </BottomSheetModal>
   );
 }
 
 const S = StyleSheet.create({
   content: {
-    flex: 1,
     paddingTop: 20,
   },
   hero: {

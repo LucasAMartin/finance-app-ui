@@ -102,7 +102,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
   const [mode, setMode] = useState<Mode>(initialMode === 'manual' ? 'manual' : 'idle');
   const [keypadOpen, setKeypadOpen] = useState(false);
-  const [manualAmt, setManualAmt] = useState('0');
+  const [manualAmt, setManualAmt] = useState('0.00');
   const [manualCat, setManualCat] = useState('groceries');
   const [manualMerchant, setManualMerchant] = useState('');
   const [manualNote, setManualNote] = useState('');
@@ -157,7 +157,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
   // Reset when opened.
   useEffect(() => {
-    setManualAmt('0');
+    setManualAmt('0.00');
     setManualCat(categories[0]?.id ?? 'groceries');
     setManualMerchant('');
     setManualNote('');
@@ -186,7 +186,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     const finalText = transcriptRef.current.trim();
     if (mode === 'listening' && finalText) {
       const result = parseVoiceExpense(finalText);
-      setManualAmt(result.amount > 0 ? result.amount.toFixed(2) : '0');
+      setManualAmt(result.amount > 0 ? result.amount.toFixed(2) : '0.00');
       setManualCat(cats[result.cat] ? result.cat : categories[0]?.id ?? 'groceries');
       setManualMerchant(result.merchant);
       setManualNote('');

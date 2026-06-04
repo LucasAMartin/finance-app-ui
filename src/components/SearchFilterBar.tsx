@@ -40,6 +40,8 @@ interface Props {
   onChangeQuery: (next: string) => void;
   /** Number of active scope filters; drives the filter button's tinted state + badge. */
   activeCount: number;
+  calendarActive?: boolean;
+  onOpenCalendar: () => void;
   onOpenFilter: () => void;
   placeholder?: string;
 }
@@ -52,7 +54,7 @@ interface Props {
  * the home-screen quick actions; it still opens the rich FilterSheet.
  */
 export function SearchFilterBar({
-  theme, p, query, onChangeQuery, activeCount, onOpenFilter, placeholder = 'Search transactions…',
+  theme, p, query, onChangeQuery, activeCount, calendarActive = false, onOpenCalendar, onOpenFilter, placeholder = 'Search transactions…',
 }: Props) {
   // Text lives on the native side so each keystroke renders on the UI thread
   // rather than round-tripping the bridge before the glyph appears. `onTextChange`
@@ -80,6 +82,8 @@ export function SearchFilterBar({
   const iconFgTer  = theme.dark ? (p.textTer as string) : 'rgba(14,12,24,0.35)';
   const filterIconColor = active ? (theme.dark ? theme.bg : theme.surface) : iconFg;
   const filterGlassTint = active ? theme.accent.dot : glassTint;
+  const calendarIconColor = calendarActive ? (theme.dark ? theme.bg : theme.surface) : iconFg;
+  const calendarGlassTint = calendarActive ? theme.accent.dot : glassTint;
 
   const colorScheme = theme.dark ? 'dark' : 'light';
 
@@ -124,6 +128,35 @@ export function SearchFilterBar({
           )}
         </HStack>
       </Host>
+
+      <View style={styles.filterWrap}>
+        {SUPPORTS_GLASS ? (
+          <GlassCircleButton
+            onPress={onOpenCalendar}
+            systemImage="calendar"
+            size={FILTER_SIZE}
+            iconSize={18}
+            iconColor={calendarIconColor}
+            glassTint={calendarGlassTint}
+            colorScheme={colorScheme}
+            accessibilityLabel={calendarActive ? 'Calendar, date selected' : 'Calendar'}
+          />
+        ) : (
+          <Host style={styles.filterHost} colorScheme={colorScheme}>
+            <Button
+              onPress={onOpenCalendar}
+              modifiers={[
+                buttonStyle('plain'),
+                frame({ width: FILTER_SIZE, height: FILTER_SIZE }),
+                background(calendarActive ? theme.accent.dot : fillColor),
+                clipShape('circle'),
+              ]}
+            >
+              <Image systemName="calendar" size={18} color={calendarIconColor} />
+            </Button>
+          </Host>
+        )}
+      </View>
 
       <View style={styles.filterWrap}>
         {SUPPORTS_GLASS ? (

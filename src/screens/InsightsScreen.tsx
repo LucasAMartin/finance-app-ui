@@ -12,14 +12,12 @@ import {
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheet, Button as SwiftButton, Group, Host, Menu, RNHostView } from '@expo/ui/swift-ui';
 import {
-  background,
-  environment,
-  presentationDetents,
-  presentationDragIndicator,
-  type PresentationDetent,
-} from '@expo/ui/swift-ui/modifiers';
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  type BottomSheetBackdropProps,
+} from '@gorhom/bottom-sheet';
+import { Button as SwiftButton, Host, Menu } from '@expo/ui/swift-ui';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 
 import { useTheme } from '../ThemeProvider';
@@ -62,6 +60,7 @@ import {
 } from '../selectors/spending';
 import { buildSavedMetric } from '../selectors/savings';
 import { Icon } from '../components/Icon';
+import { MerchantMark } from '../components/MerchantMark';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
@@ -390,160 +389,183 @@ function InsightBottomSheet({
   if (detail) lastDetail.current = detail;
   const d = lastDetail.current;
   const insets = useSafeAreaInsets();
+  const sheetRef = useRef<BottomSheetModal>(null);
+  const presentedRef = useRef(false);
   const metrics = d?.metrics?.slice(0, 3) ?? [];
   // Compare-style vizzes stack two bars and run taller; rows that also carry a
   // supporting stat strip need the extra room so nothing clips against the
   // fixed detent. Bare snapshots stay compact.
   const tall = metrics.length > 0 || d?.viz?.kind === 'compare';
-  const detent: PresentationDetent = { fraction: tall ? 0.54 : 0.46 };
+  const snapPoints = useMemo(() => [tall ? '54%' : '46%'], [tall]);
+
+  useEffect(() => {
+    if (detail !== null) {
+      if (!presentedRef.current) {
+        presentedRef.current = true;
+        sheetRef.current?.present();
+      }
+    } else {
+      if (presentedRef.current) {
+        presentedRef.current = false;
+        sheetRef.current?.dismiss();
+      }
+    }
+  }, [detail]);
+
+  const handleDismiss = useCallback(() => {
+    presentedRef.current = false;
+    onClose();
+  }, [onClose]);
+
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  ), []);
+
+  const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
+  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
 
   return (
-    <Host style={{ width: 0, height: 0, position: 'absolute' }}>
-      <BottomSheet
-        isPresented={detail !== null}
-        onIsPresentedChange={(v) => {
-          if (!v) onClose();
-        }}
+    <BottomSheetModal
+      ref={sheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      onDismiss={handleDismiss}
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={handleIndicatorStyle}
+      backgroundStyle={backgroundStyle}
+    >
+      <View
+        style={[
+          styles.insightSheetContent,
+          {
+            backgroundColor: theme.surface,
+            paddingBottom: Math.max(insets.bottom, 16) + 12,
+          },
+        ]}
       >
-        <Group
-          modifiers={[
-            presentationDetents([detent]),
-            presentationDragIndicator('visible'),
-            environment({
-              key: 'colorScheme',
-              value: theme.dark ? 'dark' : 'light',
-            }),
-            background(theme.surface),
-          ]}
-        >
-          <RNHostView>
-            <View
-              style={[
-                styles.insightSheetContent,
-                {
-                  backgroundColor: theme.surface,
-                  paddingBottom: Math.max(insets.bottom, 16) + 12,
-                },
-              ]}
-            >
-              {d && (
-                <>
-                  <ScreenExitButton
-                    variant="close"
-                    onPress={onClose}
-                    tint={theme.textSec}
-                    fallbackBg={theme.chipBg}
-                    style={EXIT_FLOAT_STYLE}
-                    accessibilityLabel="Close insight details"
-                  />
+        {d && (
+          <>
+            <ScreenExitButton
+              variant="close"
+              onPress={onClose}
+              tint={theme.textSec}
+              fallbackBg={theme.chipBg}
+              style={EXIT_FLOAT_STYLE}
+              accessibilityLabel="Close insight details"
+            />
 
-                  <View style={styles.insightSheetHero}>
-                    <View
-                      style={[
-                        styles.insightSheetMark,
-                        { backgroundColor: `${d.color}2B` },
-                      ]}
-                    >
-                      <Icon
-                        name={d.icon ?? 'tag'}
-                        size={24}
-                        color={d.color}
-                        stroke={1.7}
-                      />
-                    </View>
-                    <Text style={[TYPE.label, { color: theme.textTer }]}>
-                      {d.eyebrow}
-                    </Text>
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        TYPE.sectionTitle,
-                        { color: theme.text, marginTop: 4 },
-                      ]}
-                    >
-                      {d.title}
-                    </Text>
-                    <Text
-                      style={[
-                        TYPE.display,
-                        { color: theme.text, marginTop: 12 },
-                      ]}
-                    >
-                      {d.amount}
-                    </Text>
-                    <Text
-                      style={[
-                        TYPE.bodySm,
-                        { color: theme.textSec, marginTop: 4 },
-                      ]}
-                    >
-                      {d.description}
-                    </Text>
-                  </View>
-
-                  {d.viz ? (
-                    <View style={styles.insightVizWrap}>
-                      <SnapshotViz viz={d.viz} theme={theme} />
-                    </View>
-                  ) : null}
-
-                  {metrics.length > 0 ? (
-                    <View
-                      style={[
-                        styles.insightStatRow,
-                        { borderTopColor: theme.hairline },
-                      ]}
-                    >
-                      {metrics.map((m, i) => (
-                        <React.Fragment key={m.label}>
-                          {i > 0 ? (
-                            <View
-                              style={[
-                                styles.insightStatDiv,
-                                { backgroundColor: theme.hairline },
-                              ]}
-                            />
-                          ) : null}
-                          <View style={styles.insightStat}>
-                            <Text
-                              style={[TYPE.labelSm, { color: theme.textTer }]}
-                              numberOfLines={1}
-                            >
-                              {m.label}
-                            </Text>
-                            <Text
-                              style={[
-                                TYPE.subsectionTitle,
-                                { color: theme.text, marginTop: 5 },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {m.value}
-                            </Text>
-                          </View>
-                        </React.Fragment>
-                      ))}
-                    </View>
-                  ) : null}
-
-                  {d.filter && (
-                    <SheetPrimaryButton
-                      label="View matching transactions"
-                      onPress={() => {
-                        onClose();
-                        onViewActivity(d.filter!);
-                      }}
-                      theme={theme}
-                      style={styles.insightSheetAction}
-                    />
-                  )}
-                </>
-              )}
+            <View style={styles.insightSheetHero}>
+              <View
+                style={[
+                  styles.insightSheetMark,
+                  { backgroundColor: `${d.color}2B` },
+                ]}
+              >
+                <Icon
+                  name={d.icon ?? 'tag'}
+                  size={24}
+                  color={d.color}
+                  stroke={1.7}
+                />
+              </View>
+              <Text style={[TYPE.label, { color: theme.textTer }]}>
+                {d.eyebrow}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={[
+                  TYPE.sectionTitle,
+                  { color: theme.text, marginTop: 4 },
+                ]}
+              >
+                {d.title}
+              </Text>
+              <Text
+                style={[
+                  TYPE.display,
+                  { color: theme.text, marginTop: 12 },
+                ]}
+              >
+                {d.amount}
+              </Text>
+              <Text
+                style={[
+                  TYPE.bodySm,
+                  { color: theme.textSec, marginTop: 4 },
+                ]}
+              >
+                {d.description}
+              </Text>
             </View>
-          </RNHostView>
-        </Group>
-      </BottomSheet>
-    </Host>
+
+            {d.viz ? (
+              <View style={styles.insightVizWrap}>
+                <SnapshotViz viz={d.viz} theme={theme} />
+              </View>
+            ) : null}
+
+            {metrics.length > 0 ? (
+              <View
+                style={[
+                  styles.insightStatRow,
+                  { borderTopColor: theme.hairline },
+                ]}
+              >
+                {metrics.map((m, i) => (
+                  <React.Fragment key={m.label}>
+                    {i > 0 ? (
+                      <View
+                        style={[
+                          styles.insightStatDiv,
+                          { backgroundColor: theme.hairline },
+                        ]}
+                      />
+                    ) : null}
+                    <View style={styles.insightStat}>
+                      <Text
+                        style={[TYPE.labelSm, { color: theme.textTer }]}
+                        numberOfLines={1}
+                      >
+                        {m.label}
+                      </Text>
+                      <Text
+                        style={[
+                          TYPE.subsectionTitle,
+                          { color: theme.text, marginTop: 5 },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {m.value}
+                      </Text>
+                    </View>
+                  </React.Fragment>
+                ))}
+              </View>
+            ) : null}
+
+            {d.filter && (
+              <SheetPrimaryButton
+                label="View matching transactions"
+                onPress={() => {
+                  onClose();
+                  onViewActivity(d.filter!);
+                }}
+                theme={theme}
+                style={styles.insightSheetAction}
+              />
+            )}
+          </>
+        )}
+      </View>
+    </BottomSheetModal>
   );
 }
 
@@ -1571,16 +1593,16 @@ export function InsightsScreen({
                 }
                 accessibilityLabel={`Spent, ${spendDisplay.whole}`}
               >
-                <Text style={[TYPE.labelSm, { color: p.textTer }]}>Spent</Text>
+                <View style={styles.heroLabelRow}>
+                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>Spent</Text>
+                  <Text style={[TYPE.labelSm, { color: p.textTer }]}> · </Text>
+                  <Text style={[TYPE.labelSm, { color: p.textTer }]} numberOfLines={1}>
+                    {heroSubLabel}
+                  </Text>
+                </View>
                 <Text style={[styles.tileHeroAmount, { color: p.text }]}>
                   {spendDisplay.whole}
                   <Text style={{ color: p.textSec }}>{spendDisplay.cents}</Text>
-                </Text>
-                <Text
-                  style={[TYPE.bodySm, styles.heroSubLabel, { color: p.textTer }]}
-                  numberOfLines={1}
-                >
-                  {heroSubLabel}
                 </Text>
                 <View style={styles.heroChart}>
                   <SpendChart
@@ -1590,6 +1612,7 @@ export function InsightsScreen({
                     color={lineColor}
                     ringColor={theme.surface}
                     strokeWidth={2.5}
+                    verticalInset={28}
                     onScrub={setScrubIdx}
                   />
                 </View>
@@ -1791,16 +1814,25 @@ export function InsightsScreen({
                               },
                             ]}
                           >
-                            <View
-                              style={[styles.catIcon, { backgroundColor: `${it.color}26` }]}
-                            >
-                              <Icon
-                                name={it.icon}
-                                size={15}
+                            {whereTab === 1 ? (
+                              <MerchantMark
+                                merchant={it.label}
+                                catIcon={it.icon}
                                 color={it.color}
-                                stroke={1.8}
+                                size={32}
                               />
-                            </View>
+                            ) : (
+                              <View
+                                style={[styles.catIcon, { backgroundColor: `${it.color}26` }]}
+                              >
+                                <Icon
+                                  name={it.icon}
+                                  size={15}
+                                  color={it.color}
+                                  stroke={1.8}
+                                />
+                              </View>
+                            )}
                             <View style={styles.catMid}>
                               <View style={styles.catTopLine}>
                                 <Text
@@ -1939,10 +1971,10 @@ const styles = StyleSheet.create({
   tileHalf: { flex: 1, minHeight: Math.round(HALF_W) },
   tileWide: { minHeight: 56 },
   tileHeroAmount: { ...TYPE.display, lineHeight: 38, marginTop: 8 },
-  heroSubLabel: { marginTop: 2 },
+  heroLabelRow: { flexDirection: 'row', alignItems: 'center' },
   tileValue: { ...TYPE.headline, marginTop: 8 },
   tileValueSm: { ...TYPE.subsectionTitle, marginTop: 8 },
-  heroChart: { marginTop: 'auto', height: 150 },
+  heroChart: { flex: 1, maxHeight: 150, marginTop: 8 },
   tileMiniChart: { marginTop: 'auto', height: 40 },
   tileTrendChart: { marginTop: 'auto', height: 64 },
   bentoSection: { ...TYPE.sectionTitle, marginTop: 4 },

@@ -127,7 +127,7 @@ export function GlassCircleIcon({
 // circle, and shows a back chevron on pushed full-screen views or an X on
 // bottom sheets. Size/spacing are fixed here; only the tint adapts per surface.
 
-export const EXIT_BTN_SIZE = 36;
+export const EXIT_BTN_SIZE = 40;
 
 // Canonical tint for ScreenExitButton on wallpaper/frosted-glass surfaces.
 // Import this instead of hardcoding '#F2F4F5'.
@@ -135,7 +135,7 @@ export const EXIT_TINT_WALLPAPER = MEDIA.text;
 
 const exitStyles = StyleSheet.create({
   // Floating placement for sheets that don't host the button in a header row.
-  floatTopLeft: { position: 'absolute', top: 16, left: 20, zIndex: 1 },
+  floatTopLeft: { position: 'absolute', top: 12, left: 12, zIndex: 1 },
   fallback: {
     width: EXIT_BTN_SIZE,
     height: EXIT_BTN_SIZE,
@@ -183,7 +183,7 @@ export function ScreenExitButton({
       onPress={onPress}
       systemImage={variant === 'back' ? 'chevron.left' : 'xmark'}
       size={EXIT_BTN_SIZE}
-      iconSize={variant === 'back' ? 18 : 16}
+      iconSize={variant === 'back' ? 20 : 18}
       iconColor={tint}
       accessibilityLabel={a11y}
     />
@@ -196,7 +196,7 @@ export function ScreenExitButton({
       accessibilityLabel={a11y}
       style={[exitStyles.fallback, { backgroundColor: fallbackBg }]}
     >
-      <Icon name={variant === 'back' ? 'chevL' : 'close'} size={variant === 'back' ? 20 : 16} color={tint} stroke={2} />
+      <Icon name={variant === 'back' ? 'chevL' : 'close'} size={variant === 'back' ? 22 : 18} color={tint} stroke={2} />
     </Pressable>
   );
   return style ? <View style={style} pointerEvents="box-none">{inner}</View> : inner;

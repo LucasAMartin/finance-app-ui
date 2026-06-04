@@ -115,6 +115,8 @@ function matchesTxQuery(tx: Transaction, query: TransactionSummaryQuery): boolea
   if (query.categoryIds && query.categoryIds.length > 0 && !query.categoryIds.includes(tx.cat)) return false;
   if (query.from && (tx.occurredAt ?? '') < query.from) return false;
   if (query.to && (tx.occurredAt ?? '') > query.to) return false;
+  if (query.minAmount !== undefined && tx.amount < query.minAmount) return false;
+  if (query.maxAmount !== undefined && tx.amount > query.maxAmount) return false;
   const q = query.merchantQuery?.trim().toLowerCase();
   if (q) {
     const matchesMerchant = tx.merchant.toLowerCase().includes(q);
@@ -182,6 +184,8 @@ class InMemoryTransactionsRepo
     categoryIds?: string[];
     merchantQuery?: string;
     searchCategoryIds?: string[];
+    minAmount?: number;
+    maxAmount?: number;
   }) {
     return this.rows
       .filter(tx => matchesTxQuery(tx, query))

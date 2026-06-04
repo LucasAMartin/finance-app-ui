@@ -104,6 +104,14 @@ function appendBaseWhere(parts: string[], params: any[], query: TransactionSumma
     parts.push('occurred_at <= ?');
     params.push(query.to);
   }
+  if (query.minAmount !== undefined) {
+    parts.push('amount >= ?');
+    params.push(query.minAmount);
+  }
+  if (query.maxAmount !== undefined) {
+    parts.push('amount <= ?');
+    params.push(query.maxAmount);
+  }
 }
 
 function appendCursorWhere(parts: string[], params: any[], sort: TransactionSortOrder, cursor?: TransactionCursor) {
@@ -230,6 +238,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
       searchCategoryIds: query.searchCategoryIds,
       from: query.from,
       to: query.to,
+      minAmount: query.minAmount,
+      maxAmount: query.maxAmount,
     });
     // Income is excluded so the series matches the expense-only hero total.
     parts.push(`type != 'income'`);
@@ -255,6 +265,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     categoryIds?: string[];
     merchantQuery?: string;
     searchCategoryIds?: string[];
+    minAmount?: number;
+    maxAmount?: number;
   }): CalendarMarkRow[] {
     const from = new Date(query.year, query.month, 1).toISOString();
     const to = new Date(query.year, query.month + 1, 0, 23, 59, 59, 999).toISOString();
@@ -266,6 +278,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
       searchCategoryIds: query.searchCategoryIds,
       from,
       to,
+      minAmount: query.minAmount,
+      maxAmount: query.maxAmount,
     });
     return getDb()
       .getAllSync<{ occurred_at: string; cat: string }>(

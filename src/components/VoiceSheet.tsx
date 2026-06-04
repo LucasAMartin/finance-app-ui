@@ -1,6 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, Animated, Easing, Linking, type TextStyle } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, Animated, Easing, Linking, type TextStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetTextInput,
+  type BottomSheetBackdropProps,
+} from '@gorhom/bottom-sheet';
 import { Theme } from '../theme';
 import { Icon } from './Icon';
 import { ScreenExitButton, SUPPORTS_GLASS } from './GlassButton';
@@ -14,14 +20,15 @@ import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
-import { BottomSheet, Button, GlassEffectContainer, Group, Host, Image as SwiftImage, Menu, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
-import { background, frame, glassEffect, ignoreSafeArea, pickerStyle, presentationDetents, presentationDragIndicator, tag, tint, environment, type PresentationDetent } from '@expo/ui/swift-ui/modifiers';
+import { Button, GlassEffectContainer, Host, Image as SwiftImage, Menu, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
+import { frame, glassEffect, pickerStyle, tag, tint, environment } from '@expo/ui/swift-ui/modifiers';
 
 type Mode = 'idle' | 'listening' | 'manual';
 
-const VOICE_DETENT_DEFAULT: PresentationDetent = { fraction: 0.62 };
-const VOICE_DETENT_LARGE: PresentationDetent = 'large';
-const VOICE_DETENTS: PresentationDetent[] = [VOICE_DETENT_DEFAULT, VOICE_DETENT_LARGE];
+// Index 0 = voice/idle detent (62%), index 1 = manual/expanded detent (~92%)
+const SNAP_POINTS = ['62%', '92%'];
+const VOICE_INDEX = 0;
+const MANUAL_INDEX = 1;
 
 const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   needs: { label: 'Needs', icon: 'home' },
@@ -57,8 +64,9 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
   const categories = useRepositoryList(categoriesRepo);
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
+  const sheetRef = useRef<BottomSheetModal>(null);
+  const presentedRef = useRef(false);
 
-  const [detent, setDetent] = useState<PresentationDetent>(VOICE_DETENT_DEFAULT);
   const [mode, setMode] = useState<Mode>('idle');
   const [manualAmt, setManualAmt] = useState('0.00');
   const [manualCat, setManualCat] = useState('groceries');
@@ -110,12 +118,10 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
       setHeardTranscript('');
       voice.reset();
       if (initialMode === 'manual') {
-        setDetent(VOICE_DETENT_LARGE);
         setMode('manual');
       } else {
         // Open to a resting state that shows the example prompts; the mic goes
         // live only when the user taps it, never the instant the sheet appears.
-        setDetent(VOICE_DETENT_DEFAULT);
         setMode('idle');
       }
     } else {
@@ -125,6 +131,25 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
     }
     return () => { stopRings(); };
   }, [visible, categories]);
+
+  // Present/dismiss the gorhom sheet based on `visible`
+  useEffect(() => {
+    if (visible) {
+      if (!presentedRef.current) {
+        presentedRef.current = true;
+        sheetRef.current?.present();
+        // If opening in manual mode, snap to full size immediately
+        if (initialMode === 'manual') {
+          requestAnimationFrame(() => sheetRef.current?.snapToIndex(MANUAL_INDEX));
+        }
+      }
+    } else {
+      if (presentedRef.current) {
+        presentedRef.current = false;
+        sheetRef.current?.dismiss();
+      }
+    }
+  }, [visible, initialMode]);
 
   useEffect(() => {
     if (voice.listening) {
@@ -147,7 +172,7 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
       setManualMerchant(result.merchant);
       setManualNote('');
       setHeardTranscript(finalText);
-      setDetent(VOICE_DETENT_LARGE);
+      sheetRef.current?.snapToIndex(MANUAL_INDEX);
       setMode('manual');
     } else if (mode === 'listening') {
       setMode('idle');
@@ -168,13 +193,13 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
     voiceLevelAnim.setValue(0);
     stopRings();
     setMode('manual');
-    setDetent(VOICE_DETENT_LARGE);
+    sheetRef.current?.snapToIndex(MANUAL_INDEX);
   };
 
   const switchToVoice = () => {
     setHeardTranscript('');
     setMode('idle');
-    setDetent(VOICE_DETENT_DEFAULT);
+    sheetRef.current?.snapToIndex(VOICE_INDEX);
   };
 
   // Cents-first entry: every key shifts digits in from the right, the way
@@ -239,332 +264,350 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
     onClose();
   };
 
+  const handleDismiss = useCallback(() => {
+    presentedRef.current = false;
+    voice.abort();
+    onClose();
+  }, [onClose]);
+
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  ), []);
+
+  const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
+  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
+
   return (
-    <Host
-      colorScheme={theme.dark ? 'dark' : 'light'}
-      ignoreSafeArea="keyboard"
-      style={{ width: 0, height: 0, position: 'absolute' }}
+    <BottomSheetModal
+      ref={sheetRef}
+      index={VOICE_INDEX}
+      snapPoints={SNAP_POINTS}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      onDismiss={handleDismiss}
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={handleIndicatorStyle}
+      backgroundStyle={backgroundStyle}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
     >
-      <BottomSheet
-        isPresented={visible}
-        onIsPresentedChange={(v) => { if (!v) onClose(); }}
-      >
-        <Group modifiers={[
-          presentationDetents(VOICE_DETENTS, { selection: detent, onSelectionChange: setDetent }),
-          presentationDragIndicator('visible'),
-          environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-          background(theme.surface),
-          ignoreSafeArea({ regions: 'keyboard', edges: 'bottom' }),
-        ]}>
-          <RNHostView>
-            <View style={[S.sheet, {
-              backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
-            }]}>
-              {/* Header */}
-              <View style={S.sheetHeader}>
-                <ScreenExitButton
-                  variant="close"
-                  onPress={() => { voice.abort(); onClose(); }}
-                  tint={theme.textSec}
-                  fallbackBg={theme.chipBg}
-                  accessibilityLabel="Cancel"
-                />
-                <Text style={[TYPE.pageTitle, { color: theme.text }]}>New expense</Text>
-                <View style={S.headerBtn} />
-              </View>
+      <View style={[S.sheet, {
+        backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
+      }]}>
+        {/* Header */}
+        <View style={S.sheetHeader}>
+          <ScreenExitButton
+            variant="close"
+            onPress={() => { voice.abort(); onClose(); }}
+            tint={theme.textSec}
+            fallbackBg={theme.chipBg}
+            accessibilityLabel="Cancel"
+          />
+          <Text style={[TYPE.pageTitle, { color: theme.text }]}>New expense</Text>
+          <View style={S.headerBtn} />
+        </View>
 
-              {/* Plain View, not a ScrollView: the mic's interactive Liquid
-                  Glass needs a clean, uninterrupted press, but a scroll view's
-                  pan recognizer steals that gesture. Only the voice view ever
-                  scrolled (manual mode already didn't), and it's fixed/centered
-                  within the sheet detent, so nothing here needs to scroll. */}
-              <View style={[S.body, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-                <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}>
-                  <Host matchContents ignoreSafeArea="all">
-                    <Picker
-                      selection={mode === 'manual' ? 1 : 0}
-                      onSelectionChange={(val) => {
-                        if (Number(val) === 0) switchToVoice();
-                        else switchToManual();
-                      }}
-                      modifiers={[
-                        pickerStyle('segmented'),
-                        tint(theme.accent.dot),
-                        environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
-                      ]}
-                    >
-                      <SwiftText modifiers={[tag(0)]}>Voice</SwiftText>
-                      <SwiftText modifiers={[tag(1)]}>Manual</SwiftText>
-                    </Picker>
-                  </Host>
-                </View>
+        {/* Plain View, not a ScrollView: the mic's interactive Liquid
+            Glass needs a clean, uninterrupted press, but a scroll view's
+            pan recognizer steals that gesture. Only the voice view ever
+            scrolled (manual mode already didn't), and it's fixed/centered
+            within the sheet detent, so nothing here needs to scroll. */}
+        <View style={[S.body, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+          <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}>
+            <Host matchContents ignoreSafeArea="all">
+              <Picker
+                selection={mode === 'manual' ? 1 : 0}
+                onSelectionChange={(val) => {
+                  if (Number(val) === 0) switchToVoice();
+                  else switchToManual();
+                }}
+                modifiers={[
+                  pickerStyle('segmented'),
+                  tint(theme.accent.dot),
+                  environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' }),
+                ]}
+              >
+                <SwiftText modifiers={[tag(0)]}>Voice</SwiftText>
+                <SwiftText modifiers={[tag(1)]}>Manual</SwiftText>
+              </Picker>
+            </Host>
+          </View>
 
-                {/* IDLE / LISTENING */}
-                {(mode === 'idle' || mode === 'listening') && (
-                  <View style={S.voiceCenter}>
+          {/* IDLE / LISTENING */}
+          {(mode === 'idle' || mode === 'listening') && (
+            <View style={S.voiceCenter}>
 
-                    {/* Hint text or live transcript */}
-                    <View style={[S.topZone, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
-                      {mode === 'listening' ? (
-                        voice.transcript ? (
-                          <DictationText
-                            text={voice.transcript}
-                            baseColor={theme.textSec}
-                            highlightColor={theme.text}
-                            textStyle={S.transcriptLive}
-                          />
-                        ) : (
-                          <Text style={[S.hintSub, { color: theme.textTer }]}>Listening now</Text>
-                        )
-                      ) : voice.error ? (
-                        <View style={{ alignItems: 'center', gap: 12 }}>
-                          <Text style={[S.hintSub, { color: theme.textSec, textAlign: 'center' }]}>
-                            {voice.error}
-                          </Text>
-                          <View style={S.errorActions}>
-                            {voice.error.includes('Settings') && (
-                              <Pressable
-                                onPress={() => Linking.openSettings()}
-                                pointerEvents="box-only"
-                                hitSlop={8}
-                                accessibilityRole="button"
-                                accessibilityLabel="Open Settings"
-                              >
-                                <Text style={[TYPE.body, { color: theme.accent.dot }]}>Open Settings</Text>
-                              </Pressable>
-                            )}
-                            <Pressable
-                              onPress={switchToManual}
-                              pointerEvents="box-only"
-                              hitSlop={8}
-                              accessibilityRole="button"
-                              accessibilityLabel="Type it instead"
-                            >
-                              <Text style={[TYPE.body, { color: theme.accent.dot }]}>Type instead</Text>
-                            </Pressable>
-                          </View>
-                        </View>
-                      ) : (
-                        <>
-                          <Text style={[TYPE.captionEm, { color: theme.textTer, marginBottom: 4 }]}>Say something like</Text>
-                          <Text style={[S.hintExample, { color: theme.textSec }]}>
-                            "Coffee at Blue Bottle, six fifty"
-                          </Text>
-                          <Text style={[S.hintExample, { color: theme.textSec }]}>
-                            "Groceries, twenty dollars"
-                          </Text>
-                        </>
-                      )}
-                    </View>
-
-                    {/* Mic button with expanding pulse rings */}
-                    <View style={S.micZone}>
-                      {/* Rings render only while listening. Off-state they'd be
-                          invisible but still overlap the SwiftUI host, which
-                          suppresses the mic's interactive Liquid Glass press —
-                          so at idle the glass button is the sole element here,
-                          exactly like the other glass buttons in the app. */}
-                      {mode === 'listening' && (
-                        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                          {ringAnims.map((anim, i) => {
-                            const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
-                            const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
-                            return (
-                              <Animated.View
-                                key={i}
-                                style={[
-                                  S.ring,
-                                  {
-                                    backgroundColor: theme.accent.fill,
-                                    opacity,
-                                    transform: [{ scale }],
-                                  },
-                                ]}
-                              />
-                            );
-                          })}
-                        </View>
-                      )}
-                      {(() => {
-                        const onMicPress = () => {
-                          Haptics.impactAsync(
-                            mode === 'listening'
-                              ? Haptics.ImpactFeedbackStyle.Medium
-                              : Haptics.ImpactFeedbackStyle.Light
-                          );
-                          if (mode === 'listening') voice.stop(); else voice.start();
-                        };
-                        const micLabel = mode === 'listening' ? 'Stop recording' : 'Start recording';
-                        return SUPPORTS_GLASS ? (
-                          // Inline glass button inside a GlassEffectContainer —
-                          // the documented host for Liquid Glass effects. The
-                          // shared GlassCircleButton (no container) animates fine
-                          // for the small buttons, but the large 88pt mic needs
-                          // the container for its interactive press to render.
-                          <View
-                            style={{ width: 88, height: 88 }}
-                            accessible
-                            accessibilityRole="button"
-                            accessibilityLabel={micLabel}
-                          >
-                            <Host matchContents>
-                              <GlassEffectContainer>
-                                <Button
-                                  onPress={onMicPress}
-                                  modifiers={[
-                                    frame({ width: 88, height: 88 }),
-                                    glassEffect({
-                                      glass: { variant: 'regular', interactive: true },
-                                      shape: 'circle',
-                                    }),
-                                  ]}
-                                >
-                                  <SwiftImage
-                                    systemName={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
-                                    size={32}
-                                    color={theme.accent.dot}
-                                  />
-                                </Button>
-                              </GlassEffectContainer>
-                            </Host>
-                          </View>
-                        ) : (
-                          <Pressable
-                            onPress={onMicPress}
-                            pointerEvents="box-only"
-                            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-                            accessibilityRole="button"
-                            accessibilityLabel={micLabel}
-                            style={[S.micBtn, { backgroundColor: theme.accent.fill }]}
-                          >
-                            {mode === 'listening' ? (
-                              <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
-                            ) : (
-                              <Icon name="mic" size={26} color={theme.accent.dot} stroke={1.8} />
-                            )}
-                          </Pressable>
-                        );
-                      })()}
-                    </View>
-
-                    <Text style={[TYPE.captionEm, S.stateLabel, { color: theme.textTer }]}>
-                      {mode === 'listening' ? 'Tap to stop' : 'Tap to speak'}
-                    </Text>
-
-                    {/* Waveform — static at rest, level-driven while listening */}
-                    <View style={[S.waveformShell, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
-                      <View style={S.waveform}>
-                        {Array.from({ length: BAR_COUNT }, (_, i) => (
-                          <Animated.View
-                            key={i}
-                            style={[
-                              S.waveBar,
-                              {
-                                backgroundColor: mode === 'listening' ? theme.accent.dot : theme.textTer,
-                                transform: [{ scaleY: mode === 'listening' ? waveScaleForBar(i) : STATIC_WAVE[i] }],
-                              },
-                            ]}
-                          />
-                        ))}
-                      </View>
-                    </View>
-
-                  </View>
-                )}
-
-                {/* MANUAL */}
-                {mode === 'manual' && (
-                  <View style={{ paddingHorizontal: 20, paddingTop: 0 }}>
-                    {/* Amount display — only the freshly entered digit eases in */}
-                    <View style={S.manualAmountWrap}>
-                      <View style={S.manualAmountRow}>
-                        <Text style={[S.manualAmountSign, { color: theme.textSec }]}>$</Text>
-                        <AmountText
-                          value={manualAmt}
-                          color={canSave ? theme.text : theme.textTer}
-                          textStyle={S.manualAmountValue}
-                        />
-                      </View>
-                    </View>
-
-                    {/* What we heard, so a misheard amount can be checked against it */}
-                    {heardTranscript ? (
-                      <View style={S.heardRow}>
-                        <Icon name="mic" size={11} color={theme.textTer} stroke={1.7} />
-                        <Text style={[TYPE.caption, { color: theme.textTer, flexShrink: 1 }]} numberOfLines={1}>
-                          “{heardTranscript}”
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    {/* Merchant + Note */}
-                    <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
-                      <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-                        <Text style={[TYPE.body, { color: theme.textSec }]}>Merchant</Text>
-                        <TextInput
-                          value={manualMerchant}
-                          onChangeText={setManualMerchant}
-                          placeholder="Where?"
-                          placeholderTextColor={theme.textTer}
-                          style={[S.fieldInput, { color: theme.text, flex: 1 }]}
-                        />
-                      </View>
-                      <View style={S.fieldRow}>
-                        <Text style={[TYPE.body, { color: theme.textSec }]}>Note</Text>
-                        <TextInput
-                          value={manualNote}
-                          onChangeText={setManualNote}
-                          placeholder="Optional"
-                          placeholderTextColor={theme.textTer}
-                          style={[S.fieldInput, { color: theme.text, flex: 1 }]}
-                        />
-                      </View>
-                    </View>
-
-                    <View style={S.manualCategoryWrap}>
-                      <ManualCategoryPicker
-                        theme={theme}
-                        activeCat={manualCat}
-                        categories={categories}
-                        cats={cats}
-                        onChange={setManualCat}
-                      />
-                    </View>
-
-                    {/* Keypad */}
-                    <View style={S.keypad}>
-                      {['1','2','3','4','5','6','7','8','9','clear','0','del'].map(k => (
-                        <KeyButton
-                          key={k}
-                          theme={theme}
-                          onPress={() => press(k)}
-                          label={k === 'del' ? 'Delete' : k === 'clear' ? 'Clear' : k}
-                        >
-                          {k === 'del' ? (
-                            <Icon name="backspace" size={20} color={theme.text} stroke={1.5} />
-                          ) : k === 'clear' ? (
-                            <Text style={[TYPE.body, { fontWeight: '600', color: theme.textSec }]}>Clear</Text>
-                          ) : (
-                            <Text style={[TYPE.headline, { fontWeight: '500', color: theme.text }]}>{k}</Text>
-                          )}
-                        </KeyButton>
-                      ))}
-                    </View>
-                    <SheetPrimaryButton
-                      label="Save expense"
-                      onPress={saveExpense}
-                      theme={theme}
-                      disabled={!canSave}
-                      style={S.saveBtn}
+              {/* Hint text or live transcript */}
+              <View style={[S.topZone, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
+                {mode === 'listening' ? (
+                  voice.transcript ? (
+                    <DictationText
+                      text={voice.transcript}
+                      baseColor={theme.textSec}
+                      highlightColor={theme.text}
+                      textStyle={S.transcriptLive}
                     />
+                  ) : (
+                    <Text style={[S.hintSub, { color: theme.textTer }]}>Listening now</Text>
+                  )
+                ) : voice.error ? (
+                  <View style={{ alignItems: 'center', gap: 12 }}>
+                    <Text style={[S.hintSub, { color: theme.textSec, textAlign: 'center' }]}>
+                      {voice.error}
+                    </Text>
+                    <View style={S.errorActions}>
+                      {voice.error.includes('Settings') && (
+                        <Pressable
+                          onPress={() => Linking.openSettings()}
+                          pointerEvents="box-only"
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Open Settings"
+                        >
+                          <Text style={[TYPE.body, { color: theme.accent.dot }]}>Open Settings</Text>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        onPress={switchToManual}
+                        pointerEvents="box-only"
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Type it instead"
+                      >
+                        <Text style={[TYPE.body, { color: theme.accent.dot }]}>Type instead</Text>
+                      </Pressable>
+                    </View>
                   </View>
+                ) : (
+                  <>
+                    <Text style={[TYPE.captionEm, { color: theme.textTer, marginBottom: 4 }]}>Say something like</Text>
+                    <Text style={[S.hintExample, { color: theme.textSec }]}>
+                      "Coffee at Blue Bottle, six fifty"
+                    </Text>
+                    <Text style={[S.hintExample, { color: theme.textSec }]}>
+                      "Groceries, twenty dollars"
+                    </Text>
+                  </>
                 )}
               </View>
+
+              {/* Mic button with expanding pulse rings */}
+              <View style={S.micZone}>
+                {/* Rings render only while listening. Off-state they'd be
+                    invisible but still overlap the SwiftUI host, which
+                    suppresses the mic's interactive Liquid Glass press —
+                    so at idle the glass button is the sole element here,
+                    exactly like the other glass buttons in the app. */}
+                {mode === 'listening' && (
+                  <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                    {ringAnims.map((anim, i) => {
+                      const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
+                      const opacity = anim.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 0.22, 0] });
+                      return (
+                        <Animated.View
+                          key={i}
+                          style={[
+                            S.ring,
+                            {
+                              backgroundColor: theme.accent.fill,
+                              opacity,
+                              transform: [{ scale }],
+                            },
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+                )}
+                {(() => {
+                  const onMicPress = () => {
+                    Haptics.impactAsync(
+                      mode === 'listening'
+                        ? Haptics.ImpactFeedbackStyle.Medium
+                        : Haptics.ImpactFeedbackStyle.Light
+                    );
+                    if (mode === 'listening') voice.stop(); else voice.start();
+                  };
+                  const micLabel = mode === 'listening' ? 'Stop recording' : 'Start recording';
+                  return SUPPORTS_GLASS ? (
+                    // Inline glass button inside a GlassEffectContainer —
+                    // the documented host for Liquid Glass effects. The
+                    // shared GlassCircleButton (no container) animates fine
+                    // for the small buttons, but the large 88pt mic needs
+                    // the container for its interactive press to render.
+                    <View
+                      style={{ width: 88, height: 88 }}
+                      accessible
+                      accessibilityRole="button"
+                      accessibilityLabel={micLabel}
+                    >
+                      <Host matchContents>
+                        <GlassEffectContainer>
+                          <Button
+                            onPress={onMicPress}
+                            modifiers={[
+                              frame({ width: 88, height: 88 }),
+                              glassEffect({
+                                glass: { variant: 'regular', interactive: true },
+                                shape: 'circle',
+                              }),
+                            ]}
+                          >
+                            <SwiftImage
+                              systemName={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
+                              size={32}
+                              color={theme.accent.dot}
+                            />
+                          </Button>
+                        </GlassEffectContainer>
+                      </Host>
+                    </View>
+                  ) : (
+                    <Pressable
+                      onPress={onMicPress}
+                      pointerEvents="box-only"
+                      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={micLabel}
+                      style={[S.micBtn, { backgroundColor: theme.accent.fill }]}
+                    >
+                      {mode === 'listening' ? (
+                        <View style={[S.stopSquare, { backgroundColor: theme.accent.dot }]} />
+                      ) : (
+                        <Icon name="mic" size={26} color={theme.accent.dot} stroke={1.8} />
+                      )}
+                    </Pressable>
+                  );
+                })()}
+              </View>
+
+              <Text style={[TYPE.captionEm, S.stateLabel, { color: theme.textTer }]}>
+                {mode === 'listening' ? 'Tap to stop' : 'Tap to speak'}
+              </Text>
+
+              {/* Waveform — static at rest, level-driven while listening */}
+              <View style={[S.waveformShell, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
+                <View style={S.waveform}>
+                  {Array.from({ length: BAR_COUNT }, (_, i) => (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        S.waveBar,
+                        {
+                          backgroundColor: mode === 'listening' ? theme.accent.dot : theme.textTer,
+                          transform: [{ scaleY: mode === 'listening' ? waveScaleForBar(i) : STATIC_WAVE[i] }],
+                        },
+                      ]}
+                    />
+                  ))}
+                </View>
+              </View>
+
             </View>
-          </RNHostView>
-        </Group>
-      </BottomSheet>
-    </Host>
+          )}
+
+          {/* MANUAL */}
+          {mode === 'manual' && (
+            <View style={{ paddingHorizontal: 20, paddingTop: 0 }}>
+              {/* Amount display — only the freshly entered digit eases in */}
+              <View style={S.manualAmountWrap}>
+                <View style={S.manualAmountRow}>
+                  <Text style={[S.manualAmountSign, { color: theme.textSec }]}>$</Text>
+                  <AmountText
+                    value={manualAmt}
+                    color={canSave ? theme.text : theme.textTer}
+                    textStyle={S.manualAmountValue}
+                  />
+                </View>
+              </View>
+
+              {/* What we heard, so a misheard amount can be checked against it */}
+              {heardTranscript ? (
+                <View style={S.heardRow}>
+                  <Icon name="mic" size={11} color={theme.textTer} stroke={1.7} />
+                  <Text style={[TYPE.caption, { color: theme.textTer, flexShrink: 1 }]} numberOfLines={1}>
+                    "{heardTranscript}"
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Merchant + Note */}
+              <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
+                <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                  <Text style={[TYPE.body, { color: theme.textSec }]}>Merchant</Text>
+                  <BottomSheetTextInput
+                    value={manualMerchant}
+                    onChangeText={setManualMerchant}
+                    placeholder="Where?"
+                    placeholderTextColor={theme.textTer}
+                    keyboardAppearance={theme.dark ? 'dark' : 'light'}
+                    returnKeyType="done"
+                    selectTextOnFocus
+                    style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+                  />
+                </View>
+                <View style={S.fieldRow}>
+                  <Text style={[TYPE.body, { color: theme.textSec }]}>Note</Text>
+                  <BottomSheetTextInput
+                    value={manualNote}
+                    onChangeText={setManualNote}
+                    placeholder="Optional"
+                    placeholderTextColor={theme.textTer}
+                    keyboardAppearance={theme.dark ? 'dark' : 'light'}
+                    returnKeyType="done"
+                    selectTextOnFocus
+                    style={[S.fieldInput, { color: theme.text, flex: 1 }]}
+                  />
+                </View>
+              </View>
+
+              <View style={S.manualCategoryWrap}>
+                <ManualCategoryPicker
+                  theme={theme}
+                  activeCat={manualCat}
+                  categories={categories}
+                  cats={cats}
+                  onChange={setManualCat}
+                />
+              </View>
+
+              {/* Keypad */}
+              <View style={S.keypad}>
+                {['1','2','3','4','5','6','7','8','9','clear','0','del'].map(k => (
+                  <KeyButton
+                    key={k}
+                    theme={theme}
+                    onPress={() => press(k)}
+                    label={k === 'del' ? 'Delete' : k === 'clear' ? 'Clear' : k}
+                  >
+                    {k === 'del' ? (
+                      <Icon name="backspace" size={20} color={theme.text} stroke={1.5} />
+                    ) : k === 'clear' ? (
+                      <Text style={[TYPE.body, { fontWeight: '600', color: theme.textSec }]}>Clear</Text>
+                    ) : (
+                      <Text style={[TYPE.headline, { fontWeight: '500', color: theme.text }]}>{k}</Text>
+                    )}
+                  </KeyButton>
+                ))}
+              </View>
+              <SheetPrimaryButton
+                label="Save expense"
+                onPress={saveExpense}
+                theme={theme}
+                disabled={!canSave}
+                style={S.saveBtn}
+              />
+            </View>
+          )}
+        </View>
+      </View>
+    </BottomSheetModal>
   );
 }
 
@@ -834,13 +877,6 @@ const S = StyleSheet.create({
   saveBtn: {
     marginTop: 16,
   },
-  transcriptChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 16,
-  },
   fieldCard: {
     borderRadius: 14,
     overflow: 'hidden',
@@ -917,35 +953,6 @@ const S = StyleSheet.create({
     ...TYPE.body,
     fontWeight: '500',
     flexShrink: 1,
-  },
-  groupHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 8,
-    marginBottom: 4,
-  },
-  groupHeaderIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  subcatList: {
-    height: 93,
-  },
-  subcatRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 3,
   },
   keypad: {
     flexDirection: 'row',

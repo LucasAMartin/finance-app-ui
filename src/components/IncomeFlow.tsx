@@ -99,7 +99,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const [kind, setKind] = useState<'regular' | 'irregular'>('regular');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [source, setSource] = useState('');
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState('0.00');
   const [cadence, setCadence] = useState<Cadence>('Mo');
   const [startDate, setStartDate] = useState<Date>(defaultDate);
   const [endDate, setEndDate] = useState<Date | null>(null);
@@ -129,19 +129,13 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
 
   const resetRegular = () => {
     setKind('regular'); setEditingId(null); setSource('');
-    setCadence('Mo'); setDraft(''); setStartDate(defaultDate()); setEndDate(null); setFeedback('');
+    setCadence('Mo'); setDraft('0.00'); setStartDate(defaultDate()); setEndDate(null); setFeedback('');
   };
 
   const resetOneTime = () => {
     setKind('irregular'); setEditingId(null); setSource('');
-    setDraft(''); setReceivedDate(defaultDate()); setFeedback('');
+    setDraft('0.00'); setReceivedDate(defaultDate()); setFeedback('');
   };
-
-  // Pre-load the first regular income on mount, if any.
-  useEffect(() => {
-    if (regularIncomes.length > 0) loadRegular(regularIncomes[0]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const amountValue = parseAmountDraft(draft);
   const dateRangeValid = !endDate || endDate >= startDate;
@@ -330,8 +324,8 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                 style={[S.fieldRow, sep]}
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
-                <Text style={[S.amountValue, { color: draft ? theme.text : theme.textTer }]}>
-                  <Text style={{ color: theme.textSec }}>$</Text>{draft || '0.00'}
+                <Text style={[S.amountValue, { color: amountValue !== null ? theme.text : theme.textTer }]}>
+                  <Text style={{ color: theme.textSec }}>$</Text>{draft}
                 </Text>
               </Pressable>
               <View style={[S.fieldRow, sep]}>
@@ -364,7 +358,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   <DatePicker
                     selection={startDate} onDateChange={setStartDate}
                     displayedComponents={['date']}
-                    modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: darkScheme })]}
+                    modifiers={[datePickerStyle('compact'), tint(theme.accent.dot), environment({ key: 'colorScheme', value: darkScheme })]}
                   />
                 </Host>
               </View>
@@ -376,7 +370,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                       <DatePicker
                         selection={endDate} onDateChange={setEndDate}
                         displayedComponents={['date']}
-                        modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: darkScheme })]}
+                        modifiers={[datePickerStyle('compact'), tint(theme.accent.dot), environment({ key: 'colorScheme', value: darkScheme })]}
                       />
                     </Host>
                     <Pressable onPress={() => setEndDate(null)} hitSlop={8} accessibilityRole="button">
@@ -455,8 +449,8 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                 style={[S.fieldRow, sep]}
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
-                <Text style={[S.amountValue, { color: draft ? theme.text : theme.textTer }]}>
-                  <Text style={{ color: theme.textSec }}>$</Text>{draft || '0.00'}
+                <Text style={[S.amountValue, { color: amountValue !== null ? theme.text : theme.textTer }]}>
+                  <Text style={{ color: theme.textSec }}>$</Text>{draft}
                 </Text>
               </Pressable>
               <View style={S.fieldRow}>
@@ -465,7 +459,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   <DatePicker
                     selection={receivedDate} onDateChange={setReceivedDate}
                     displayedComponents={['date']}
-                    modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: darkScheme })]}
+                    modifiers={[datePickerStyle('compact'), tint(theme.accent.dot), environment({ key: 'colorScheme', value: darkScheme })]}
                   />
                 </Host>
               </View>
@@ -516,7 +510,7 @@ const S = StyleSheet.create({
   fieldCard: { borderRadius: 14, overflow: 'hidden' },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    minHeight: 50, paddingVertical: 12, paddingHorizontal: 16, gap: 12,
+    minHeight: 54, paddingVertical: 14, paddingHorizontal: 16, gap: 12,
   },
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', padding: 0 },

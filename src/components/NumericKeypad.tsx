@@ -12,27 +12,37 @@ import { TYPE } from '../typography';
 
 export type KeypadKey =
   | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-  | '.' | 'back';
+  | '00' | 'back';
 
-// Mutates a raw amount string (no `$`, no thousands separators). Keeps the value
-// inside the same shape parseAmountDraft accepts: digits, one dot, ≤2 decimals.
+// Cash App-style entry: digits fill right-to-left into cents, decimal is
+// always auto-placed two digits from the right. The value is always "X.XX".
+function formatCents(digits: string): string {
+  const n = parseInt(digits, 10) || 0;
+  return `${Math.floor(n / 100)}.${String(n % 100).padStart(2, '0')}`;
+}
+
 export function applyKeypadKey(value: string, key: KeypadKey): string {
-  if (key === 'back') return value.slice(0, -1);
-  if (key === '.') {
-    if (value.includes('.')) return value;
-    return value === '' ? '0.' : `${value}.`;
+  // Extract the raw digit sequence (strip the implicit decimal)
+  const digits = (value.replace('.', '') || '0').replace(/^0+/, '') || '0';
+
+  if (key === 'back') {
+    if (digits === '0') return '0.00';
+    return formatCents(digits.slice(0, -1) || '0');
   }
-  // A lone leading zero is replaced by the next digit ("0" → "5"), never "05".
-  if (value === '0') return key;
-  const next = `${value}${key}`;
-  return /^\d*\.?\d{0,2}$/.test(next) ? next : value;
+  if (key === '00') {
+    return applyKeypadKey(applyKeypadKey(value, '0'), '0');
+  }
+  if (digits === '0' && key === '0') return value; // no leading zeros
+  const next = digits === '0' ? key : digits + key;
+  if (next.length > 8) return value; // max $999,999.99
+  return formatCents(next);
 }
 
 const KEYS: { key: KeypadKey; label?: string; icon?: string }[] = [
   { key: '1', label: '1' }, { key: '2', label: '2' }, { key: '3', label: '3' },
   { key: '4', label: '4' }, { key: '5', label: '5' }, { key: '6', label: '6' },
   { key: '7', label: '7' }, { key: '8', label: '8' }, { key: '9', label: '9' },
-  { key: '.', label: '.' }, { key: '0', label: '0' }, { key: 'back', icon: 'backspace' },
+  { key: '00', label: '00' }, { key: '0', label: '0' }, { key: 'back', icon: 'backspace' },
 ];
 
 const KeypadButton = memo(function KeypadButton({ item, circleColor, textColor, onKey }: {
@@ -66,7 +76,7 @@ const KeypadButton = memo(function KeypadButton({ item, circleColor, textColor, 
       style={styles.key}
       hitSlop={2}
       accessibilityRole="button"
-      accessibilityLabel={item.key === 'back' ? 'Delete' : item.key === '.' ? 'Decimal point' : item.label}
+      accessibilityLabel={item.key === 'back' ? 'Delete' : item.label}
     >
       <Animated.View
         pointerEvents="none"

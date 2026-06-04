@@ -27,6 +27,7 @@ const EXPANDED_INDEX = 1;
 const SHEET_CHROME = 44;
 const DATE_PICKER_EXPANDED_HEIGHT = 236;
 type SheetPhase = 'closed' | 'presenting' | 'open' | 'dismissing';
+const EARLY_EXPAND_INTENT_THRESHOLD = 0.08;
 
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
@@ -94,8 +95,11 @@ export function TxSheet({
   // onAnimate/onChange callbacks, which raced and left stale content on manual
   // swipes between detents.
   const animatedIndex = useSharedValue(COMPACT_INDEX);
+  const openingToCompact = useSharedValue(false);
   const lastTx = useRef<Transaction | null>(null);
   const sheetHeightRef = useRef(0);
+  const pendingEarlyExpandRef = useRef(false);
+  const earlyExpandAppliedRef = useRef(false);
   visibleRef.current = visible;
   txRef.current = tx;
   if (tx) lastTx.current = tx;
@@ -136,12 +140,15 @@ export function TxSheet({
   const presentSheet = useCallback(() => {
     if (!txRef.current) return;
     pendingReopenRef.current = false;
+    pendingEarlyExpandRef.current = false;
+    earlyExpandAppliedRef.current = false;
     presentedRef.current = true;
     phaseRef.current = 'presenting';
+    openingToCompact.value = true;
     animatedIndex.value = COMPACT_INDEX;
     setSheetIndex(COMPACT_INDEX);
     sheetRef.current?.present();
-  }, [animatedIndex]);
+  }, [animatedIndex, openingToCompact]);
 
   // Keep the modal instance stable. `openRequestId` is incremented only by the
   // imperative open() call; prepare() may update tx on press-down but must not
@@ -157,6 +164,9 @@ export function TxSheet({
         presentSheet();
         return;
       }
+      pendingEarlyExpandRef.current = false;
+      earlyExpandAppliedRef.current = false;
+      openingToCompact.value = false;
       animatedIndex.value = COMPACT_INDEX;
       setSheetIndex(COMPACT_INDEX);
       sheetRef.current?.snapToIndex(COMPACT_INDEX);
@@ -170,8 +180,11 @@ export function TxSheet({
     }
     presentedRef.current = false;
     phaseRef.current = 'dismissing';
+    pendingEarlyExpandRef.current = false;
+    earlyExpandAppliedRef.current = false;
+    openingToCompact.value = false;
     sheetRef.current?.dismiss();
-  }, [animatedIndex, openRequestId, presentSheet, visible]);
+  }, [animatedIndex, openRequestId, openingToCompact, presentSheet, visible]);
 
   useEffect(() => {
     if (!isExpanded && amountKeypadOpen) setAmountKeypadOpen(false);
@@ -265,9 +278,49 @@ export function TxSheet({
     [applySheetIndex],
   );
 
+  const applyEarlyExpandIntent = useCallback(() => {
+    if (phaseRef.current === 'dismissing') return;
+    if (!presentedRef.current || earlyExpandAppliedRef.current) return;
+    pendingEarlyExpandRef.current = true;
+    earlyExpandAppliedRef.current = true;
+    openingToCompact.value = false;
+    sheetRef.current?.snapToIndex(EXPANDED_INDEX);
+  }, [openingToCompact]);
+
+  const markEarlyExpandIntent = useCallback(() => {
+    applyEarlyExpandIntent();
+  }, [applyEarlyExpandIntent]);
+
+  const clearEarlyExpandIntent = useCallback(() => {
+    pendingEarlyExpandRef.current = false;
+    earlyExpandAppliedRef.current = false;
+  }, []);
+
+  // If the user starts dragging upward before the initial present-to-compact
+  // animation settles, interrupt that opening animation immediately so the
+  // sheet does not bounce back to compact before expanding.
+  useAnimatedReaction(
+    () => openingToCompact.value && animatedIndex.value > EARLY_EXPAND_INTENT_THRESHOLD,
+    (hasIntent, hadIntent) => {
+      if (hasIntent && !hadIntent) runOnJS(markEarlyExpandIntent)();
+    },
+    [markEarlyExpandIntent],
+  );
+
   const handleSheetChange = useCallback((index: number) => {
     phaseRef.current = index >= COMPACT_INDEX ? 'open' : 'dismissing';
-  }, []);
+    if (index < COMPACT_INDEX) {
+      openingToCompact.value = false;
+      clearEarlyExpandIntent();
+      return;
+    }
+    openingToCompact.value = false;
+    if (index >= EXPANDED_INDEX) clearEarlyExpandIntent();
+  }, [clearEarlyExpandIntent, openingToCompact]);
+
+  const handleSheetAnimate = useCallback((_from: number, to: number) => {
+    if (to >= EXPANDED_INDEX && openingToCompact.value) markEarlyExpandIntent();
+  }, [markEarlyExpandIntent, openingToCompact]);
 
   // Fires after a dismiss fully completes (swipe or programmatic). If a new
   // transaction arrived while dismissing, present it now instead of letting the
@@ -275,6 +328,8 @@ export function TxSheet({
   const handleModalDismiss = useCallback(() => {
     presentedRef.current = false;
     phaseRef.current = 'closed';
+    openingToCompact.value = false;
+    clearEarlyExpandIntent();
     if (pendingReopenRef.current && visibleRef.current && txRef.current) {
       presentSheet();
       return;
@@ -284,7 +339,7 @@ export function TxSheet({
   }, [onClose, presentSheet]);
 
   const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
-  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface }), [theme.surface]);
+  const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
 
   const expandToEdit = useCallback(() => {
     sheetRef.current?.snapToIndex(EXPANDED_INDEX);
@@ -321,6 +376,7 @@ export function TxSheet({
       enableDynamicSizing={false}
       enablePanDownToClose
       animatedIndex={animatedIndex}
+      onAnimate={handleSheetAnimate}
       onChange={handleSheetChange}
       // Close on `onDismiss` (fires AFTER the dismiss animation completes), so
       // no React commit lands on top of the running dismiss — this is what kept
