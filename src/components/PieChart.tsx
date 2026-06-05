@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Theme, catPastel } from '../theme';
+import { UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 
 export interface PieSlice {
   cat: string;
@@ -75,7 +76,7 @@ export function PieChart({ data, theme, size = 240, selected, cats = {}, onSelec
     ? `$${sel.value.toFixed(0)}`
     : `$${total.toFixed(0)}`;
   const centerSub = sel
-    ? (cats[selected!]?.label ?? selected!)
+    ? (cats[selected!]?.label ?? UNCATEGORIZED_LABEL)
     : 'Total';
 
   return (
@@ -150,7 +151,7 @@ export function PieChart({ data, theme, size = 240, selected, cats = {}, onSelec
                 fontWeight: isSel ? '700' : '500',
                 color: isSel ? theme.text : theme.textSec,
               }}>
-                {cat?.label ?? s.cat}
+                {cat?.label ?? UNCATEGORIZED_LABEL}
               </Text>
             </TouchableOpacity>
           );

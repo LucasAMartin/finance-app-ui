@@ -1,5 +1,6 @@
 import type { Transaction, Category, Budget, RecurringRule, SpendSeriesPoint, SpendBucket } from '../repositories/types';
 import type { Period } from './finance';
+import { UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -511,7 +512,7 @@ export function categorySpending(
     const bucket = currMap[catId];
     return {
       cat:               catId,
-      label:             cat?.label  ?? catId,
+      label:             cat?.label  ?? UNCATEGORIZED_LABEL,
       icon:              cat?.icon   ?? 'tag',
       spent:             bucket.sum,
       prevSpent:         prevMap[catId]?.sum ?? 0,

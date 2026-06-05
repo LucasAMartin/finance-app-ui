@@ -27,7 +27,7 @@ import { RADIUS } from '../radius';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, deriveFloor, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import type { Bill, Category, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
@@ -362,7 +362,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   }, [transactionsRepo, repoVersion]);
 
   const [monthIdx, setMonthIdx] = useState(0);
-  const visibleMonthBudgets = useMemo(() => monthBudgets(currentMonthTransactions, budgets), [currentMonthTransactions, budgets]);
+  const visibleMonthBudgets = useMemo(() => monthBudgets(currentMonthTransactions, budgets, incomes), [currentMonthTransactions, budgets, incomes]);
   const selectedMonthKey = visibleMonthBudgets[monthIdx]?.key ?? visibleMonthBudgets[0]?.key ?? currentMonthKey();
   const selectedMonthRange = useMemo(() => monthRange(selectedMonthKey), [selectedMonthKey]);
   const selectedIsCurrentMonth = selectedMonthKey === (visibleMonthBudgets[0]?.key ?? currentMonthKey());
@@ -549,10 +549,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
     setTimeout(() => { setLoading(false); setRefreshing(false); }, 1100);
   }, []);
 
-  const rawPct = mb.budget > 0 ? mb.spent / mb.budget : 0;
+  const hasIncome = mb.budget > 0;
+  const rawPct = hasIncome ? mb.spent / mb.budget : 0;
   const available = Math.max(mb.budget - mb.spent, 0);
   const overage = mb.spent - mb.budget;
-  const over = mb.spent > mb.budget;
+  const over = hasIncome && mb.spent > mb.budget;
   const openSelectedMonthActivity = useCallback(() => {
     onViewActivity({
       dateFrom: selectedMonthRange.from,
@@ -691,7 +692,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
               <View style={styles.heroStatusGroup}>
                 {loading ? (
                   <Skeleton width={150} height={13} radius={4} onMedia={theme.dark} />
-                ) : (
+                ) : hasIncome ? (
                   <>
                     <Text style={[styles.heroStatusLabel, { color: over ? OVER_DOT : pWallpaper.text }, shadow]}>
                       {over ? 'Over budget' : 'Available'}
@@ -705,7 +706,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                       {mb.remainingLabel}
                     </Text>
                   </>
-                )}
+                ) : null}
               </View>
               {loading ? (
                 <Skeleton width={88} height={13} radius={4} onMedia={theme.dark} />
@@ -739,7 +740,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                 <Skeleton width={220} height={42} radius={8} onMedia={theme.dark} style={{ marginBottom: 20 }} />
                 <Skeleton width="100%" height={5} radius={3} onMedia={theme.dark} />
               </>
-            ) : (
+            ) : hasIncome ? (
               <Animated.View>
                 <View style={styles.heroAmountRow}>
                   <HeroAmount
@@ -751,6 +752,10 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                 </View>
                 <BudgetBar pct={rawPct} trackBg={pWallpaper.trackBg} />
               </Animated.View>
+            ) : (
+              <Text style={[styles.heroNoIncome, { color: pWallpaper.textSec }, shadow]}>
+                Set income to start tracking your budget
+              </Text>
             )}
           </View>
 
@@ -795,7 +800,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
               ) : (
                 visibleUpcomingBills.length === 0 ? (
                   <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
-                    No upcoming transactions
+                    No recurring bills tracked. Mark an expense as repeating to add one.
                   </Text>
                 ) : visibleUpcomingBills.map((b, i) => {
                   const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
@@ -861,7 +866,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                 <ActivitySkeleton dark={theme.dark} />
               ) : homeActivityGroups.length === 0 ? (
                 <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
-                  No transactions this month
+                  No expenses logged yet. Tap + below to add one by voice or text.
                 </Text>
               ) : (
                 homeActivityGroups.map(group => (
@@ -1084,7 +1089,7 @@ const TxRow = React.memo(function TxRow({
   categories: Category[];
 }) {
   const cat = cats[tx.cat];
-  const a11yLabel = `${tx.merchant}, ${cat?.label ?? 'transaction'}, ${tx.time}, $${fmtAmount(tx.amount)}`;
+  const a11yLabel = `${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${tx.time}, $${fmtAmount(tx.amount)}`;
   return (
     <GHTouchableOpacity
       onPressIn={onPrepare}
@@ -1108,7 +1113,7 @@ const TxRow = React.memo(function TxRow({
       />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.rowTitle, { color: p.text }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
-        <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
+        <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label ?? UNCATEGORIZED_LABEL} · {tx.time}</Text>
       </View>
       <Money value={tx.amount} theme={{ text: p.text } as Theme} color={p.text} prefix="$" />
     </GHTouchableOpacity>
@@ -1226,6 +1231,10 @@ const styles = StyleSheet.create({
   heroAmountRow: {
     marginBottom: SPACE.lg,
     alignItems: 'flex-start',
+  },
+  heroNoIncome: {
+    ...TYPE.onMediaStatusSub,
+    marginBottom: SPACE.xl,
   },
   heroAmount: {
     ...TYPE.onMediaAmount,

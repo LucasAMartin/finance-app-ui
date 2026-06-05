@@ -12,7 +12,6 @@ import {
   Keyboard,
   Platform,
   ScrollView,
-  Switch,
   ImageBackground,
   Animated,
   Dimensions,
@@ -42,30 +41,24 @@ import { RADIUS } from '../radius';
 import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
-import type { Bill, Category, GroupKey, Income, RecurringRule, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
+import type { Bill, Category, GroupKey, Income, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetScrollView,
-  BottomSheetTextInput,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import {
   Button as SwiftButton,
   DatePicker,
   Menu,
-  Picker,
-  Text as SwiftText,
   Host,
 } from '@expo/ui/swift-ui';
 import {
   datePickerStyle,
   tint,
-  pickerStyle,
-  tag,
-  fixedSize,
   environment,
 } from '@expo/ui/swift-ui/modifiers';
 import { useTheme } from '../ThemeProvider';
@@ -79,18 +72,11 @@ interface Props {
 }
 
 type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
-type CategoryRecurringCadence = RecurringRule['cadence'];
 const CADENCES: { value: Cadence; label: string }[] = [
   { value: 'Mo', label: 'Monthly' },
   { value: '2w', label: 'Bi-weekly' },
   { value: 'Wk', label: 'Weekly' },
   { value: 'Yr', label: 'Annual' },
-];
-const RECURRING_CADENCES: { value: CategoryRecurringCadence; label: string }[] = [
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'annual', label: 'Annual' },
-  { value: 'customMonthly', label: 'Custom monthly' },
 ];
 
 const CURRENT_MONTH = '2026-05';
@@ -109,26 +95,6 @@ const monthKeyFromOffset = (baseKey: string, offset: number): string => {
 const monthLabel = (key: string): string => {
   const [y, m] = key.split('-').map(Number);
   return `${MONTH_NAMES[m - 1]} ${y}`;
-};
-const dateFromYMD = (value: string): Date => {
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  return new Date(year, month - 1, day || 1);
-};
-const monthStartDate = (monthKey: string): Date => dateFromYMD(`${monthKey}-01`);
-const monthEndDate = (monthKey: string): Date => {
-  const [year, month] = monthKey.split('-').map(Number);
-  return new Date(year, month, 0);
-};
-const toYMD = (date: Date): string => date.toISOString().slice(0, 10);
-const toISODateTime = (date: Date): string => date.toISOString();
-const defaultIncomeDateForMonth = (monthKey: string): Date => {
-  const today = new Date();
-  return today.toISOString().slice(0, 7) === monthKey ? today : monthStartDate(monthKey);
-};
-const formatDateShort = (value?: string): string => {
-  if (!value) return 'Not set';
-  const date = dateFromYMD(value);
-  return `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 };
 
 const bKey = (gKey: string, label: string) => `${gKey}:${label}`;
@@ -235,6 +201,94 @@ function IconBtn({ onPress, children, size = 40 }: { onPress?: () => void; child
   );
 }
 
+
+// ─── FrameworkCard ────────────────────────────────────────────────────────────
+// Shown once on first visit to Budget. Explains the 50/30/20 rule in two lines
+// so users understand what the group percentages mean before they start editing.
+function FrameworkCard({ theme, onDismiss }: { theme: Theme; onDismiss: () => void }) {
+  const groups: { key: string; color: string; pct: string; label: string }[] = [
+    { key: 'needs', color: GROUP_COLORS.needs.light, pct: '50%', label: 'Needs' },
+    { key: 'wants', color: GROUP_COLORS.wants.light, pct: '30%', label: 'Wants' },
+    { key: 'savings', color: GROUP_COLORS.savings.light, pct: '20%', label: 'Savings' },
+  ];
+  return (
+    <View
+      style={[fwStyles.card, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}
+      accessibilityRole="none"
+    >
+      <View style={fwStyles.cardHead}>
+        <Text style={[TYPE.captionEm, fwStyles.eyebrow, { color: theme.textTer }]}>
+          HOW IT WORKS
+        </Text>
+        <Pressable
+          onPress={onDismiss}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss budget framework explanation"
+        >
+          <Icon name="close" size={14} color={theme.textTer} stroke={1.8} />
+        </Pressable>
+      </View>
+      <Text style={[TYPE.body, fwStyles.headline, { color: theme.text }]}>
+        The 50/30/20 rule
+      </Text>
+      <Text style={[TYPE.bodyRegular, fwStyles.body, { color: theme.textSec }]}>
+        Aim to spend 50% of income on essentials, 30% on things you enjoy, and save the remaining 20%.
+      </Text>
+      <View style={fwStyles.groups}>
+        {groups.map(g => (
+          <View key={g.key} style={fwStyles.groupItem}>
+            <View style={[fwStyles.groupDot, { backgroundColor: g.color }]} />
+            <Text style={[TYPE.captionEm, { color: theme.text }]}>{g.pct}</Text>
+            <Text style={[TYPE.caption, { color: theme.textSec }]}>{g.label}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const fwStyles = StyleSheet.create({
+  card: {
+    borderWidth: 1,
+    borderRadius: RADIUS.card,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: SPACE.lg,
+    paddingBottom: SPACE.xl,
+  },
+  cardHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACE.sm,
+  },
+  eyebrow: {
+    letterSpacing: 0.6,
+  },
+  headline: {
+    marginBottom: SPACE.xs,
+  },
+  body: {
+    lineHeight: 20,
+    marginBottom: SPACE.lg,
+  },
+  groups: {
+    flexDirection: 'row',
+    gap: SPACE.xl,
+  },
+  groupItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.xs,
+  },
+  groupDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4, // width/2 — circle
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
   children: React.ReactNode;
@@ -470,7 +524,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   ), [incomes, selectedMonth]);
   const initialIncome = regularMonthlyIncome + oneTimeIncomeThisMonth;
   const insets = useSafeAreaInsets();
-  const { wallpaper, wallpaperFloorBase } = useTheme();
+  const { wallpaper, wallpaperFloorBase, metaFlag, setMetaFlag } = useTheme();
   const pWallpaper = makeP(true);
   const p = makeP(theme.dark);
   const shadow = DARK_TEXT_SHADOW;
@@ -573,9 +627,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const [categoryGoalTarget, setCategoryGoalTarget] = useState('');
   const [categoryGoalSaved, setCategoryGoalSaved] = useState('');
   const [categoryBudgetDraft, setCategoryBudgetDraft] = useState('');
-  const [categoryRecurring, setCategoryRecurring] = useState(false);
-  const [categoryRecurringDate, setCategoryRecurringDate] = useState('');
-  const [categoryRecurringCadence, setCategoryRecurringCadence] = useState<CategoryRecurringCadence>('monthly');
   const [categoryGoalDeadline, setCategoryGoalDeadline] = useState('');
   const [duplicateNameError, setDuplicateNameError] = useState(false);
   const [categoryFormError, setCategoryFormError] = useState('');
@@ -786,56 +837,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     });
   };
 
-  const syncCategoryRecurringRule = (
-    catId: string,
-    label: string,
-    amount: number,
-    enabled: boolean,
-    nextDateValue: string,
-    cadenceValue: CategoryRecurringCadence,
-  ) => {
-    // Prefer a rule this editor created, but fall back to any active rule for the
-    // same category so a rule that originated elsewhere gets updated in place
-    // rather than spawning a duplicate.
-    const existing =
-      recurringRules.find(rule => rule.cat === catId && rule.meta?.source === 'budget-category') ??
-      recurringRules.find(rule => rule.active && rule.cat === catId);
-    if (!enabled) {
-      if (existing) recurringRulesRepo.update(existing.id, { active: false, updatedByUserId: 'local' });
-      return;
-    }
-    const nextDate = nextDateValue || toYMD(defaultIncomeDateForMonth(selectedMonth));
-    const due = dateFromYMD(nextDate);
-    const payload = {
-      merchant: label,
-      cat: catId,
-      amount: Math.max(0, amount),
-      cadence: cadenceValue,
-      startDate: nextDate,
-      nextDueDate: nextDate,
-      dayOfMonth: cadenceValue === 'monthly' || cadenceValue === 'customMonthly'
-        ? Math.max(1, Math.min(28, due.getDate()))
-        : undefined,
-      active: true,
-      estimate: false,
-      updatedByUserId: 'local',
-      meta: { source: 'budget-category' },
-    };
-    if (existing) {
-      // Merge meta so fields owned elsewhere (e.g. partialPaid) survive while we
-      // mark the rule as managed by the budget editor.
-      recurringRulesRepo.update(existing.id, {
-        ...payload,
-        meta: { ...existing.meta, source: 'budget-category' },
-      });
-    } else {
-      recurringRulesRepo.create({
-        ...payload,
-        createdByUserId: 'local',
-      });
-    }
-  };
-
   const saveSnapshot = (extra?: { deletedIncome?: Income }) => {
     prevActionSnapshot.current = {
       budgets: { ...budgets },
@@ -871,16 +872,17 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     label: string,
     iconOverride?: string,
     budget?: number,
-    recurring?: boolean,
-    recurringDate?: string,
-    recurringCadence: CategoryRecurringCadence = 'monthly',
     goalTarget?: number,
     goalSaved?: number,
     goalDeadline?: string,
   ): boolean => {
     const origGroup = visibleSpendGroups.find(g => g.key === gKey);
+    // Exclude rows the user just deleted (pending the undo window) so the name
+    // they removed is immediately reusable.
     const taken = new Set([
-      ...(origGroup?.subs.map(s => s.label.toLowerCase()) ?? []),
+      ...(origGroup?.subs ?? [])
+        .filter(s => !removedSubs.has(bKey(gKey, s.label)))
+        .map(s => s.label.toLowerCase()),
       ...(customSubs[gKey] ?? []).map(s => s.label.toLowerCase()),
     ]);
     if (taken.has(label.toLowerCase())) {
@@ -890,11 +892,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     }
     const icon = iconOverride ?? inferCategoryIcon(label);
     const catMeta: Record<string, unknown> = { custom: true };
-    if (recurring) {
-      catMeta.recurring = true;
-      catMeta.recurringCadence = recurringCadence;
-      if (recurringDate) catMeta.recurringDate = recurringDate;
-    }
     if (goalTarget && goalTarget > 0) {
       catMeta.goalTarget = goalTarget;
       catMeta.goalSaved = goalSaved ?? 0;
@@ -919,14 +916,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       amount: budget ?? 0,
       meta: catMeta,
     });
-    syncCategoryRecurringRule(
-      created.id,
-      label,
-      budget ?? 0,
-      Boolean(recurring),
-      recurringDate ?? '',
-      recurringCadence,
-    );
     setBudgets(b => ({ ...b, [bKey(gKey, label)]: budget ?? 0 }));
     setDuplicateNameError(false);
     setCategoryFormError('');
@@ -960,21 +949,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     const meta = category.meta ?? {};
     setCategoryGoalTarget(typeof meta.goalTarget === 'number' ? String(meta.goalTarget) : '');
     setCategoryGoalSaved(typeof meta.goalSaved === 'number' ? String(meta.goalSaved) : '');
-    setCategoryRecurring(meta.recurring === true);
-    setCategoryRecurringDate(typeof meta.recurringDate === 'string' ? meta.recurringDate : '');
-    setCategoryRecurringCadence(
-      RECURRING_CADENCES.some(item => item.value === meta.recurringCadence)
-        ? meta.recurringCadence as CategoryRecurringCadence
-        : 'monthly',
-    );
     setCategoryGoalDeadline(typeof meta.goalDeadline === 'string' ? meta.goalDeadline : '');
-    // For a recurring category the source of truth is the recurring rule's amount
-    // (what the inline bill row edits and what BillSheet shows), not the category
-    // budget record — read from there so the editor stays in sync with the row.
-    const recurringBill = upcomingBills.find(bl => bl.cat === category.id);
-    const amt = recurringBill
-      ? budgets[billKey(category.group, recurringBill.id)] ?? recurringBill.amount
-      : budgets[bKey(category.group, category.label)] ?? category.defaultBudget ?? 0;
+    const amt = budgets[bKey(category.group, category.label)] ?? category.defaultBudget ?? 0;
     setCategoryBudgetDraft(amt > 0 ? String(amt) : '');
     setCategoryNotes(typeof meta.notes === 'string' ? meta.notes : '');
     setCategoryGroupDraft(category.group);
@@ -989,9 +965,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setCategoryGroupDraft('needs');
     setCategoryGoalTarget('');
     setCategoryGoalSaved('');
-    setCategoryRecurring(false);
-    setCategoryRecurringDate('');
-    setCategoryRecurringCadence('monthly');
     setCategoryGoalDeadline('');
     setCategoryBudgetDraft('');
     setCategoryNotes('');
@@ -1043,19 +1016,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       delete nextMeta.goalSaved;
       delete nextMeta.goalDeadline;
     }
-    if (categoryRecurring) {
-      nextMeta.recurring = true;
-      nextMeta.recurringCadence = categoryRecurringCadence;
-      if (categoryRecurringDate.trim()) {
-        nextMeta.recurringDate = categoryRecurringDate.trim();
-      } else {
-        delete nextMeta.recurringDate;
-      }
-    } else {
-      delete nextMeta.recurring;
-      delete nextMeta.recurringCadence;
-      delete nextMeta.recurringDate;
-    }
     if (categoryNotes.trim()) {
       nextMeta.notes = categoryNotes.trim();
     } else {
@@ -1095,14 +1055,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     if (budgetValue !== null) {
       syncBudgetRecord(newKey, budgetValue);
     }
-    syncCategoryRecurringRule(
-      editingCategory.id,
-      label,
-      nextDefaultBudget,
-      categoryRecurring,
-      categoryRecurringDate,
-      categoryRecurringCadence,
-    );
     return true;
   };
 
@@ -1415,6 +1367,14 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 </SectionCard>
               </Animated.View>
 
+              {/* 50/30/20 framework card — shown once on first visit */}
+              {!metaFlag('frameworkCardDismissed') && (
+                <FrameworkCard
+                  theme={theme}
+                  onDismiss={() => setMetaFlag('frameworkCardDismissed')}
+                />
+              )}
+
               {/* Spending group cards */}
               {visibleSpendGroups.map(g => {
                 const groupColor = gCol(g.key);
@@ -1423,27 +1383,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 const groupDelta = groupTotal - groupTarget;
                 const groupIsOver = groupDelta > 0;
                 const visibleOrigSubs = g.subs.filter(s => !removedSubs.has(bKey(g.key, s.label)));
-                const regularOrigSubs = visibleOrigSubs.filter(s => {
-                  const c = categories.find(x => x.id === s.cat);
-                  return !c?.meta?.recurring;
-                });
-                const recurringOrigSubs = visibleOrigSubs.filter(s => {
-                  const c = categories.find(x => x.id === s.cat);
-                  return c?.meta?.recurring === true;
-                });
                 const customs = customSubs[g.key] ?? [];
-                const regularCustoms = customs.filter(s => {
-                  const c = categories.find(x => x.group === (g.key as GroupKey) && x.label.toLowerCase() === s.label.toLowerCase());
-                  return !c?.meta?.recurring;
-                });
-	                const recurringCustoms = customs.filter(s => {
-	                  const c = categories.find(x => x.group === (g.key as GroupKey) && x.label.toLowerCase() === s.label.toLowerCase());
-	                  return c?.meta?.recurring === true;
-	                });
-	                const groupBills = (billsByGroup[g.key] ?? []).filter(b => !removedBills.has(b.id));
-	                const hasRecurringSection = recurringOrigSubs.length > 0 || recurringCustoms.length > 0 || groupBills.length > 0;
-	                const isCollapsed = collapsedGroups.has(g.key);
-	                const visibleItemCount = visibleOrigSubs.length + customs.length + groupBills.length;
+                const groupBills = (billsByGroup[g.key] ?? []).filter(b => !removedBills.has(b.id));
+                const hasRecurringSection = groupBills.length > 0;
+                const isCollapsed = collapsedGroups.has(g.key);
 
 	                return (
 	                  <SectionCard key={g.key} dark={theme.dark}>
@@ -1473,8 +1416,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
 	                    <Collapsible open={!isCollapsed}>
 	                    <View>
-	                    {regularOrigSubs.map((sub, si) => {
-                      const isLast = si === regularOrigSubs.length - 1 && regularCustoms.length === 0 && !hasRecurringSection;
+	                    {visibleOrigSubs.map((sub, si) => {
+                      const isLast = si === visibleOrigSubs.length - 1 && customs.length === 0 && !hasRecurringSection;
                       const rowKey = bKey(g.key, sub.label);
                       const isRemoving = pendingRemoveKeys.has(rowKey);
 	                      const subCat = categories.find(c => c.id === sub.cat);
@@ -1528,8 +1471,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                       );
                     })}
 
-	                    {regularCustoms.map((sub, ci) => {
-                      const isLast = ci === regularCustoms.length - 1 && !hasRecurringSection;
+	                    {customs.map((sub, ci) => {
+                      const isLast = ci === customs.length - 1 && !hasRecurringSection;
 	                      const rowKey = bKey(g.key, sub.label);
 	                      const isRemoving = pendingRemoveKeys.has(rowKey);
 	                      const customCat = categories.find(c => c.group === (g.key as GroupKey) && c.label.toLowerCase() === sub.label.toLowerCase());
@@ -1577,93 +1520,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                           <Icon name="repeat" size={11} color={p.textTer} stroke={1.6} />
                           <Text style={[TYPE.labelSm, { color: p.textTer }]}>Recurring</Text>
                         </View>
-                        {recurringOrigSubs.map((sub, ri) => {
-                          const isLast = ri === recurringOrigSubs.length - 1 && recurringCustoms.length === 0 && groupBills.length === 0;
-                          const rowKey = bKey(g.key, sub.label);
-	                          const isRemoving = pendingRemoveKeys.has(rowKey);
-	                          const subCat = categories.find(c => c.id === sub.cat);
-	                          const nextDate = subCat && typeof subCat.meta?.recurringDate === 'string' ? subCat.meta.recurringDate as string : null;
-	                          const subBudget = budgets[rowKey] ?? sub.budget;
-	                          return (
-                            <CollapsingRow key={sub.cat} removing={isRemoving}>
-	                              <SwipeRow onRemove={() => handleRemoveSub(g.key, sub)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
-	                                <TouchableOpacity
-                                  onPress={() => openCategoryEditor(sub.cat)}
-                                  activeOpacity={0.7}
-                                  delayPressIn={0}
-                                  style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`Edit ${sub.label} category`}
-                                  accessibilityHint="Swipe left to delete"
-                                  accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-                                  onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, sub); }}
-                                >
-                                  <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
-                                    <Icon name={sub.icon} size={15} color={groupColor} stroke={1.6} />
-                                  </View>
-	                                  <View style={{ flex: 1, minWidth: 0 }}>
-	                                    <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
-	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{formatDateShort(nextDate)}</Text>}
-	                                  </View>
-	                                  <EditableBudgetAmount
-                                value={subBudget}
-                                active={editingKey === rowKey}
-                                color={p.textSec}
-                                accentColor={theme.accent.dot}
-                                underlineColor={p.hairline}
-                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
-                                onMeasured={scrollEditIntoView}
-                                accessibilityLabel={`Edit ${sub.label} budget`}
-                              />
-	                                </TouchableOpacity>
-	                              </SwipeRow>
-                            </CollapsingRow>
-                          );
-                        })}
-                        {recurringCustoms.map((sub, ci) => {
-                          const isLast = ci === recurringCustoms.length - 1 && groupBills.length === 0;
-                          const rowKey = bKey(g.key, sub.label);
-	                          const isRemoving = pendingRemoveKeys.has(rowKey);
-	                          const customCat = categories.find(c => c.group === (g.key as GroupKey) && c.label.toLowerCase() === sub.label.toLowerCase());
-	                          const nextDate = customCat && typeof customCat.meta?.recurringDate === 'string' ? customCat.meta.recurringDate as string : null;
-	                          const spendSub = visibleSpendGroups.find(group => group.key === g.key)?.subs.find(item => item.label.toLowerCase() === sub.label.toLowerCase());
-	                          const subBudget = budgets[rowKey] ?? spendSub?.budget ?? 0;
-	                          return (
-                            <CollapsingRow key={sub.label} removing={isRemoving}>
-                              <SwipeRow onRemove={() => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
-                                <TouchableOpacity
-                                  onPress={() => customCat && openCategoryEditor(customCat.id)}
-                                  activeOpacity={customCat ? 0.7 : 1}
-                                  delayPressIn={0}
-                                  style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`Edit ${sub.label} category`}
-                                  accessibilityHint="Swipe left to delete"
-                                  accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-                                  onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }); }}
-                                >
-                                  <View style={[styles.rowIcon, { backgroundColor: groupColor + '26' }]}>
-                                    <Icon name={customCat?.icon ?? 'repeat'} size={14} color={groupColor} stroke={1.5} />
-                                  </View>
-	                                  <View style={{ flex: 1, minWidth: 0 }}>
-	                                    <Text style={[TYPE.body, { color: p.text }]}>{sub.label}</Text>
-	                                    {nextDate && <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]} numberOfLines={1}>{formatDateShort(nextDate)}</Text>}
-	                                  </View>
-	                                  <EditableBudgetAmount
-                                value={subBudget}
-                                active={editingKey === rowKey}
-                                color={p.textSec}
-                                accentColor={theme.accent.dot}
-                                underlineColor={p.hairline}
-                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
-                                onMeasured={scrollEditIntoView}
-                                accessibilityLabel={`Edit ${sub.label} budget`}
-                              />
-                                </TouchableOpacity>
-                              </SwipeRow>
-                            </CollapsingRow>
-                          );
-                        })}
                         {groupBills.map((bill, bi) => {
                           const isLast = bi === groupBills.length - 1;
                           const isBillRemoving = pendingRemoveKeys.has(bill.id);
@@ -1715,9 +1571,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                         setCategoryGoalTarget('');
                         setCategoryGoalSaved('');
                         setCategoryBudgetDraft('');
-                        setCategoryRecurring(false);
-                        setCategoryRecurringDate('');
-                        setCategoryRecurringCadence('monthly');
                         setCategoryGoalDeadline('');
                         setCategoryNotes('');
                         setDuplicateNameError(false);
@@ -1786,9 +1639,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         goalTarget={categoryGoalTarget}
         goalSaved={categoryGoalSaved}
         budget={categoryBudgetDraft}
-        recurring={categoryRecurring}
-        recurringDate={categoryRecurringDate}
-        recurringCadence={categoryRecurringCadence}
         goalDeadline={categoryGoalDeadline}
         nameError={duplicateNameError}
         formError={categoryFormError}
@@ -1799,16 +1649,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         onGoalTargetChange={setCategoryGoalTarget}
         onGoalSavedChange={setCategoryGoalSaved}
         onBudgetChange={setCategoryBudgetDraft}
-        onRecurringChange={setCategoryRecurring}
-        onRecurringDateChange={setCategoryRecurringDate}
-        onRecurringCadenceChange={setCategoryRecurringCadence}
         onGoalDeadlineChange={setCategoryGoalDeadline}
         onNotesChange={(v) => { setCategoryNotes(v); if (categoryFormError) setCategoryFormError(''); }}
         onClose={() => { closeCategoryEditor(); setAddingForGroup(null); }}
         onSave={saveCategoryEdit}
         onDelete={deleteEditingCategory}
-        onAddNew={(lbl, icn, grp, bgt, rec, recDate, recCadence, gt, gs, gd) => {
-          return addSub(grp, lbl, icn, bgt, rec, recDate, recCadence, gt, gs, gd);
+        onAddNew={(lbl, icn, grp, bgt, gt, gs, gd) => {
+          return addSub(grp, lbl, icn, bgt, gt, gs, gd);
           // The sheet owns dismissal; parent drafts reset after native onDismiss.
         }}
       />
@@ -1875,9 +1722,9 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
 
 function CategoryEditSheet({
   theme, category, addingForGroup, label, icon, group, goalTarget, goalSaved,
-  budget, recurring, recurringDate, recurringCadence, goalDeadline, nameError, formError, notes,
+  budget, goalDeadline, nameError, formError, notes,
   onLabelChange, onIconChange, onGroupChange, onGoalTargetChange, onGoalSavedChange,
-  onBudgetChange, onRecurringChange, onRecurringDateChange, onRecurringCadenceChange, onGoalDeadlineChange, onNotesChange,
+  onBudgetChange, onGoalDeadlineChange, onNotesChange,
   onClose, onSave, onDelete, onAddNew,
 }: {
   theme: Theme;
@@ -1889,9 +1736,6 @@ function CategoryEditSheet({
   goalTarget: string;
   goalSaved: string;
   budget: string;
-  recurring: boolean;
-  recurringDate: string;
-  recurringCadence: CategoryRecurringCadence;
   goalDeadline: string;
   nameError: boolean;
   formError: string;
@@ -1902,15 +1746,12 @@ function CategoryEditSheet({
   onGoalTargetChange: (v: string) => void;
   onGoalSavedChange: (v: string) => void;
   onBudgetChange: (v: string) => void;
-  onRecurringChange: (v: boolean) => void;
-  onRecurringDateChange: (v: string) => void;
-  onRecurringCadenceChange: (v: CategoryRecurringCadence) => void;
   onGoalDeadlineChange: (v: string) => void;
   onNotesChange: (v: string) => void;
   onClose: () => void;
   onSave: () => boolean;
   onDelete: () => void;
-  onAddNew: (label: string, icon: string, group: GroupKey, budget?: number, recurring?: boolean, recurringDate?: string, recurringCadence?: CategoryRecurringCadence, goalTarget?: number, goalSaved?: number, goalDeadline?: string) => boolean;
+  onAddNew: (label: string, icon: string, group: GroupKey, budget?: number, goalTarget?: number, goalSaved?: number, goalDeadline?: string) => boolean;
 }) {
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -1927,7 +1768,6 @@ function CategoryEditSheet({
   const [goalTargetDisplay, setGoalTargetDisplay] = useState('');
   const [goalSavedDisplay, setGoalSavedDisplay] = useState('');
   const [deadlineDate, setDeadlineDate] = useState<Date | null>(null);
-  const [recurringDateVal, setRecurringDateVal] = useState<Date | null>(null);
   useEffect(() => {
     if (shouldPresent) {
       if (!presentedRef.current) {
@@ -1948,7 +1788,6 @@ function CategoryEditSheet({
       setGoalTargetDisplay(goalTarget ? `$${goalTarget}` : '');
       setGoalSavedDisplay(goalSaved ? `$${goalSaved}` : '');
       setDeadlineDate(parseDeadline(goalDeadline));
-      setRecurringDateVal(parseDeadline(recurringDate));
     }
   }, [category, addingForGroup]);
 
@@ -2067,9 +1906,6 @@ function CategoryEditSheet({
       const added = onAddNew(
         trimmedLabel, icon, group,
         rawBudget ?? undefined,
-        recurring || undefined,
-        recurring && recurringDateVal ? recurringDateVal.toISOString().slice(0, 10) : undefined,
-        recurringCadence,
         rawGoalTarget > 0 ? rawGoalTarget : undefined,
         rawGoalSaved > 0 ? rawGoalSaved : undefined,
         deadlineDate ? deadlineDate.toISOString().slice(0, 10) : undefined,
@@ -2113,7 +1949,6 @@ function CategoryEditSheet({
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={handleIndicatorStyle}
       backgroundStyle={backgroundStyle}
-      keyboardBehavior="fillParent"
     >
       <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); if (activeNumField) closeNumKeypad(); }} accessible={false}>
       <View style={[styles.categorySheet, {
@@ -2203,11 +2038,11 @@ function CategoryEditSheet({
             style={[styles.catGroupSegmented, compactSheet && styles.catGroupSegmentedCompact]}
           />
 
-          {/* Primary field card: Name, Budget, Recurring, Notes */}
+          {/* Primary field card: Name, Budget, Notes */}
           <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 8 : 12 }]}>
             <View style={[fieldRowStyle, sep]}>
               <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
-              <BottomSheetTextInput
+              <TextInput
                 value={label}
                 accessibilityLabel="Category name"
                 onChangeText={(next) => {
@@ -2237,63 +2072,9 @@ function CategoryEditSheet({
                 onActivate={() => activateNumField('budget', budgetDisplay)}
               />
             </View>
-            <View style={[fieldRowStyle, recurring ? sep : {}]}>
-              <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Recurring</Text>
-              <Switch
-                value={recurring}
-                accessibilityLabel="Recurring expense"
-                onValueChange={onRecurringChange}
-                trackColor={{ false: theme.hairline, true: theme.accent.dot }}
-                thumbColor={ON_GROUP_ICON}
-              />
-            </View>
-            {recurring && (
-              <>
-                <View style={[fieldRowStyle, sep]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Frequency</Text>
-                  <Host matchContents ignoreSafeArea="all">
-                    <Picker
-                      selection={recurringCadence}
-                      onSelectionChange={(val) => onRecurringCadenceChange(val as CategoryRecurringCadence)}
-                      modifiers={[
-                        pickerStyle('menu'),
-                        tint(theme.text),
-                        fixedSize({ horizontal: true, vertical: false }),
-                      ]}
-                    >
-                      {RECURRING_CADENCES.map(item => (
-                        <SwiftText key={item.value} modifiers={[tag(item.value)]}>{item.label}</SwiftText>
-                      ))}
-                    </Picker>
-                  </Host>
-                </View>
-                <View style={[fieldRowStyle, sep, styles.catFieldRowFixed]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Next payment</Text>
-                  {recurringDateVal ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
-                        <DatePicker
-                          selection={recurringDateVal}
-                          onDateChange={(d) => { setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }}
-                          displayedComponents={['date']}
-                          modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
-                        />
-                      </Host>
-                      <Pressable onPress={() => { setRecurringDateVal(null); onRecurringDateChange(''); }} pointerEvents="box-only" hitSlop={8}>
-                        <Icon name="close" size={11} color={theme.textTer} stroke={2} />
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <Pressable onPress={() => { const d = new Date(); d.setMonth(d.getMonth() + 1); setRecurringDateVal(d); onRecurringDateChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only">
-                      <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
-                    </Pressable>
-                  )}
-                </View>
-              </>
-            )}
             <View style={fieldRowStyle}>
               <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Notes</Text>
-              <BottomSheetTextInput
+              <TextInput
                 value={notes}
                 accessibilityLabel="Category notes"
                 onChangeText={onNotesChange}
@@ -2386,8 +2167,10 @@ function CategoryEditSheet({
 
         </BottomSheetScrollView>
 
-        {/* Fixed footer — outside the scroll view so it never shifts when
-            content height changes, groups switch, or the numeric keypad opens. */}
+        {/* Fixed footer — in normal flow under the scroll container. The Name /
+            Notes fields use a plain TextInput (not BottomSheetTextInput), so the
+            iOS keyboard never registers with the sheet: it simply overlays, the
+            sheet stays anchored, and this footer stays put under the container. */}
         <View style={[styles.catSheetFooter, { paddingBottom: sheetBottomPadding }]}>
           <SheetPrimaryButton
             label={isAddMode ? 'Add category' : 'Save category'}

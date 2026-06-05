@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Keyboa
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, OVER_DOT } from '../theme';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import type { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
@@ -99,7 +99,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           accessibilityLabel="Back"
         />
         <Text style={{ fontSize: 12, color: theme.textSec, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' }}>
-          {cat?.label}
+          {cat?.label ?? UNCATEGORIZED_LABEL}
         </Text>
         <TouchableOpacity
           onPress={() => {
@@ -201,7 +201,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
         {/* Category context — data only */}
         <View style={styles.catContext}>
           <View style={styles.catContextRow}>
-            <Text style={{ fontSize: 13, color: theme.textSec }}>{cat?.label} this month</Text>
+            <Text style={{ fontSize: 13, color: theme.textSec }}>{cat?.label ?? UNCATEGORIZED_LABEL} this month</Text>
             <Text style={{ fontSize: 13, color: theme.text }}>
               <Text style={{ fontWeight: '600' }}>${catTotal.toFixed(0)}</Text>
               <Text style={{ color: theme.textSec }}> of ${catBudget}</Text>

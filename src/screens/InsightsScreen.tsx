@@ -41,10 +41,10 @@ import {
   useRepositories,
   useRepositoryList,
 } from '../repositories/RepositoryProvider';
-import { categoryGroupFor } from '../repositories/categoryUtils';
+import { categoryGroupFor, isUncategorized, uncategorizedColor } from '../repositories/categoryUtils';
 import type { Category, GroupKey, Transaction, TransactionCursor } from '../repositories/types';
 import {
-  currentMonthlyBudget,
+  monthlyIncome,
   upcomingBillsFromRecurring,
 } from '../selectors/finance';
 import {
@@ -174,6 +174,7 @@ function categoryDisplayColor(
   categories: Category[],
   dark: boolean,
 ): string {
+  if (isUncategorized(cat, categories)) return uncategorizedColor(dark);
   return groupDisplayColor(categoryGroupFor(cat, categories), dark);
 }
 
@@ -358,12 +359,7 @@ function EmptyState({
   theme: Theme;
 }) {
   return (
-    <View
-      style={[
-        styles.emptyState,
-        { backgroundColor: theme.chipBg },
-      ]}
-    >
+    <View style={styles.emptyState}>
       <Text style={[TYPE.bodySmEm, { color: theme.text }]}>{title}</Text>
       <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 3 }]}>
         {body}
@@ -664,7 +660,7 @@ export function InsightsScreen({
   // A range whose end is in the past is settled: its totals are actuals, not
   // projections, so we drop the "pace"/"projected" framing for it.
   const rangeComplete = ranges.current.to <= now;
-  const monthlyBgt = useMemo(() => currentMonthlyBudget(budgets), [budgets]);
+  const monthlyBgt = useMemo(() => monthlyIncome(incomes), [incomes]);
 
   const catBreakdown = useMemo(
     () =>
@@ -1031,6 +1027,9 @@ export function InsightsScreen({
     // ── 50/30/20 mix: a group running past its target share ─────────
     const groupTotals: Record<GroupKey, number> = { needs: 0, wants: 0, savings: 0 };
     catBreakdown.rows.forEach((r) => {
+      // Uncategorized spend has no 50/30/20 home — leave it out of group shares
+      // rather than letting the fallback bucket it into Wants.
+      if (isUncategorized(r.cat, categories)) return;
       groupTotals[categoryGroupFor(r.cat, categories)] += r.spent;
     });
     const targets: Record<GroupKey, number> = { needs: 0.5, wants: 0.3, savings: 0.2 };
@@ -1916,11 +1915,13 @@ export function InsightsScreen({
                   </View>
                 </BentoTile>
               ) : (
-                <EmptyState
-                  theme={theme}
-                  title="No spending yet this period"
-                  body="Log an expense and your top categories, merchants, and what changed since last period show up here."
-                />
+                <BentoTile dark={theme.dark}>
+                  <EmptyState
+                    theme={theme}
+                    title="No spending yet this period"
+                    body="Log an expense and your top categories, merchants, and what changed since last period show up here."
+                  />
+                </BentoTile>
               )}
             </View>
 

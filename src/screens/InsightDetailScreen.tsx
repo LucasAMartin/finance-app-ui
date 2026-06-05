@@ -30,7 +30,7 @@ import { MerchantMark } from '../components/MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
 import { Money } from '../components/shared';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import type {
   Category,
   Transaction,
@@ -815,7 +815,7 @@ function DetailDayGroup({
                 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
+              accessibilityLabel={`${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
             >
               <MerchantMark
                 merchant={tx.merchant}
@@ -834,7 +834,7 @@ function DetailDayGroup({
                   )}
                 </View>
                 <Text style={[styles.txMeta, { color: p.textSec }]}>
-                  {cat?.label} · {tx.time}
+                  {cat?.label ?? UNCATEGORIZED_LABEL} · {tx.time}
                 </Text>
               </View>
               <Money

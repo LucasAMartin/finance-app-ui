@@ -40,7 +40,7 @@ import { Button as SwiftButton, ContentUnavailableView, Host, Menu, Picker, Text
 import { environment, pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import type { Bill, Category, Transaction, TransactionCursor, TransactionQuery, TransactionsRepo, TransactionSummary, TransactionSummaryQuery } from '../repositories/types';
 import { txToCreateInput, upcomingBillsFromRecurring } from '../selectors/finance';
 import type { ActivityInitialFilter } from '../selectors/spending';
@@ -54,6 +54,7 @@ const CALENDAR_YEAR  = NOW.getFullYear();
 const CALENDAR_MONTH = NOW.getMonth();
 const ACTIVITY_PAGE_SIZE = 80;
 const FILTER_COMMIT_DELAY_MS = 90;
+const RANGE_CLOSE_DELAY_MS = 420;
 
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
@@ -87,6 +88,7 @@ type CalendarSelectMode = 'day' | 'range';
 type SheetHandle = {
   open: () => void;
   close: () => void;
+  resetSelection?: () => void;
 };
 
 const SORT_OPTIONS: { id: SortOrder; label: string }[] = [
@@ -352,17 +354,18 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
   const handleSetDateFilter = useCallback((d: DateFilter) => {
     setDateFilter(d);
     if (d !== null) setSelectedDay(null);
+    if (d === null || typeof d === 'string') {
+      calendarSheetRef.current?.resetSelection?.();
+    }
   }, []);
   const clearSelectedDay = useCallback(() => setSelectedDay(null), []);
   const openFilterSheet = useCallback(() => filterSheetRef.current?.open(), []);
   const openCalendarSheet = useCallback(() => calendarSheetRef.current?.open(), []);
 
-  const resetCal = () => {
-    setSelectedDay(null);
+  const clearDateRange = useCallback(() => {
     setDateFilter(null);
-    setCalViewYear(CALENDAR_YEAR);
-    setCalViewMonth(CALENDAR_MONTH);
-  };
+    calendarSheetRef.current?.resetSelection?.();
+  }, []);
 
   const handleDeleteTx = useCallback((t: Transaction) => {
     transactionsRepo.delete(t.id);
@@ -607,20 +610,15 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
       setCalViewYear(pressed.getFullYear());
       setCalViewMonth(pressed.getMonth());
       setSelectedDay(pressed.getDate());
-      setDateFilter(null);
+      clearDateRange();
     }
-  }, [selectedDateId]);
+  }, [clearDateRange, selectedDateId]);
   const handleCalendarSelectRange = useCallback(({ from, to }: { from: Date; to: Date }) => {
     setSelectedDay(null);
     setDateFilter({ from, to });
     setCalViewYear(from.getFullYear());
     setCalViewMonth(from.getMonth());
   }, []);
-  const handleCalendarClear = useCallback(() => {
-    setSelectedDay(null);
-    setDateFilter(null);
-  }, []);
-
   return (
     <View style={{ flex: 1, backgroundColor: floorColor }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
@@ -777,7 +775,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                     </FilterPill>
                   )}
                   {dateFilter && typeof dateFilter === 'string' && (
-                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => setDateFilter(null)} accessibilityLabel="Remove date filter">
+                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={clearDateRange} accessibilityLabel="Remove date filter">
                       <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
                         {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
                       </Text>
@@ -785,7 +783,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                     </FilterPill>
                   )}
                   {dateFilter && typeof dateFilter !== 'string' && (
-                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => setDateFilter(null)} accessibilityLabel="Remove date filter">
+                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={clearDateRange} accessibilityLabel="Remove date filter">
                       <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
                         {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
                       </Text>
@@ -836,7 +834,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                       <Host
                         matchContents
                         colorScheme={theme.dark ? 'dark' : 'light'}
-                        style={S.unavailableHost}
+                        style={S.detailUnavailableHost}
                       >
                         <ContentUnavailableView
                           title="No activity"
@@ -898,10 +896,19 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                         accessibilityLiveRegion="polite"
                         style={[S.summaryRow, S.summaryRowSolo]}
                       >
-                        <Text style={[S.summaryLabel, { color: p.textSec }]}>
+                        <Text style={[S.summaryLabel, { color: p.text }]}>
                           {filteredExpenseCount} {filteredExpenseCount === 1 ? 'expense' : 'expenses'}
                         </Text>
-                        <Money value={filteredSpendTotal} theme={theme} />
+                        <View style={S.summaryValueWrap}>
+                          <Money
+                            value={filteredSpendTotal}
+                            theme={theme}
+                            size={15}
+                            color={p.text}
+                            prefix="$"
+                          />
+                          <Text style={[S.summaryTotal, { color: p.text }]}> total</Text>
+                        </View>
                       </View>
                     </SectionCard>
                   )}
@@ -928,7 +935,8 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
           amountFilter={amountFilter}
           onSelectDate={handleCalendarSelectDate}
           onSelectRange={handleCalendarSelectRange}
-          onClear={handleCalendarClear}
+          onClearDay={clearSelectedDay}
+          onClearRange={clearDateRange}
           onOpenChange={onOverlayOpenChange}
         />
 
@@ -995,7 +1003,8 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   amountFilter: AmountFilter;
   onSelectDate: (dateId: string) => void;
   onSelectRange: (range: { from: Date; to: Date }) => void;
-  onClear: () => void;
+  onClearDay: () => void;
+  onClearRange: () => void;
   onOpenChange?: (open: boolean) => void;
 }>(function CalendarSheet({
   theme,
@@ -1011,7 +1020,8 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   amountFilter,
   onSelectDate,
   onSelectRange,
-  onClear,
+  onClearDay,
+  onClearRange,
   onOpenChange,
 }, ref) {
   const insets = useSafeAreaInsets();
@@ -1024,6 +1034,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     : null;
   const [mode, setMode] = useState<CalendarSelectMode>(activeRange ? 'range' : 'day');
   const [draftRange, setDraftRange] = useState<{ startId?: string; endId?: string }>({});
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (activeRange) {
@@ -1038,6 +1049,13 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     return () => task.cancel?.();
   }, [contentReady]);
 
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
   const markOpen = useCallback(() => {
     if (presentedRef.current) return;
     presentedRef.current = true;
@@ -1051,9 +1069,22 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   }, [onOpenChange]);
 
   const close = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     markClosed();
     sheetRef.current?.close();
   }, [markClosed]);
+
+  const resetSelection = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setMode('day');
+    setDraftRange({});
+  }, []);
 
   const open = useCallback(() => {
     if (!contentReady) setContentReady(true);
@@ -1062,7 +1093,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     sheetRef.current?.snapToIndex(0);
   }, [contentReady, markOpen]);
 
-  useImperativeHandle(ref, () => ({ open, close }), [close, open]);
+  useImperativeHandle(ref, () => ({ open, close, resetSelection }), [close, open, resetSelection]);
 
   useAnimatedReaction(
     () => {
@@ -1124,12 +1155,23 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     const ordered = start <= end ? { from: start, to: end } : { from: end, to: start };
     setDraftRange({ startId: toDateId(ordered.from), endId: toDateId(ordered.to) });
     onSelectRange(ordered);
-    close();
+    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+    requestAnimationFrame(() => {
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null;
+        close();
+      }, RANGE_CLOSE_DELAY_MS);
+    });
   }, [close, mode, onSelectDate, onSelectRange, rangeEndId, rangeStartId]);
   const handleClear = useCallback(() => {
     setDraftRange({});
-    onClear();
-  }, [onClear]);
+    resetSelection();
+    if (rangeStartId) {
+      onClearRange();
+      return;
+    }
+    onClearDay();
+  }, [onClearDay, onClearRange, rangeStartId, resetSelection]);
   const calendarTheme = useMemo<CalendarTheme>(() => ({
     rowMonth: {
       content: {
@@ -1273,6 +1315,11 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
                   selection={mode === 'range' ? 1 : 0}
                   onSelectionChange={(val) => {
                     const next = Number(val) === 1 ? 'range' : 'day';
+                    if (next === 'day') {
+                      resetSelection();
+                      onClearRange();
+                      return;
+                    }
                     setMode(next);
                     if (next === 'range' && activeRange) setDraftRange(activeRange);
                   }}
@@ -2142,7 +2189,7 @@ const TxRow = React.memo(function TxRow({
       onPress={onPress}
       style={({ pressed }) => [S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline, opacity: pressed ? 0.6 : 1 }]}
       accessibilityRole="button"
-      accessibilityLabel={`${tx.merchant}, ${cat?.label ?? ''}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
+      accessibilityLabel={`${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
       accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
       onAccessibilityAction={onDelete ? (e) => { if (e.nativeEvent.actionName === 'delete') onDelete(); } : undefined}
     >
@@ -2160,7 +2207,7 @@ const TxRow = React.memo(function TxRow({
           </Text>
           {tx.recurring && <Icon name="repeat" size={11} color={p.textTer} stroke={1.7} />}
         </View>
-        <Text style={[S.txMeta, { color: p.textSec }]}>{cat?.label} · {tx.time}</Text>
+        <Text style={[S.txMeta, { color: p.textSec }]}>{cat?.label ?? UNCATEGORIZED_LABEL} · {tx.time}</Text>
       </View>
       <Money
         value={tx.amount}
@@ -2304,7 +2351,7 @@ function EmptyState({ theme, p, isFiltered, onClearFilters }: {
   return (
     <View style={S.empty}>
       <Host
-        matchContents
+        ignoreSafeArea="all"
         colorScheme={theme.dark ? 'dark' : 'light'}
         style={S.unavailableHost}
       >
@@ -2314,7 +2361,7 @@ function EmptyState({ theme, p, isFiltered, onClearFilters }: {
           description={
             isFiltered
               ? 'Try adjusting your filters'
-              : 'Tap the add button below to record your first expense, or use the mic to log one by voice.'
+              : '\nTap the add button below to record your first expense'
           }
         />
       </Host>
@@ -2449,7 +2496,7 @@ const S = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'baseline', paddingHorizontal: SPACE.px2,
+    alignItems: 'center', paddingHorizontal: SPACE.px2,
     paddingBottom: SPACE.md, marginBottom: SPACE.lg,
   },
   summaryRowSolo: {
@@ -2457,10 +2504,14 @@ const S = StyleSheet.create({
     marginBottom: 0,
   },
   summaryLabel: {
-    ...TYPE.bodySm,
+    ...TYPE.subsectionTitle,
   },
   summaryTotal: {
     ...TYPE.subsectionTitle,
+  },
+  summaryValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   swipeActionBtn: {
     flex: 1, marginLeft: 8,
@@ -2478,7 +2529,12 @@ const S = StyleSheet.create({
   txName: { ...TYPE.body },
   txMeta: { ...TYPE.caption, marginTop: 2 },
   empty:      { alignItems: 'center', paddingTop: 40, paddingBottom: 24 },
-  unavailableHost: { width: '100%' },
+  // Fixed frame (not matchContents) so the SwiftUI ContentUnavailableView has
+  // real bounds to wrap its description within — matchContents sizes to the
+  // text's intrinsic width, which runs it off-screen on one line.
+  unavailableHost: { width: '100%', height: 240 },
+  // Day-detail empty has a short description that fits, so matchContents is fine.
+  detailUnavailableHost: { width: '100%' },
 });
 
 // ─── CalendarSheet styles ───────────────────────────────────────────────────

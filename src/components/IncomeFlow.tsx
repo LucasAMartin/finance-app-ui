@@ -277,7 +277,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               {regularIncomes.length > 0 && (
                 <View style={[S.fieldRow, sep]}>
                   <Text style={[S.fieldLabel, { color: theme.textSec }]}>Source</Text>
-                  <Host ignoreSafeArea="all" style={S.menuHost}>
+                  <Host key="income-source" ignoreSafeArea="all" style={S.menuHost}>
                     <Menu
                       label={
                         <View style={[S.menuTrigger, { justifyContent: 'flex-end' }]}>
@@ -330,7 +330,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               </Pressable>
               <View style={[S.fieldRow, sep]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Frequency</Text>
-                <Host ignoreSafeArea="all" style={S.menuHost}>
+                <Host key="income-frequency" ignoreSafeArea="all" style={S.menuHost}>
                   <Menu
                     label={
                       <View style={[S.menuTrigger, { justifyContent: 'flex-end' }]}>
@@ -354,7 +354,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               </View>
               <View style={[S.fieldRow, sep]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Starts</Text>
-                <Host matchContents ignoreSafeArea="all">
+                <Host key="income-starts" matchContents ignoreSafeArea="all">
                   <DatePicker
                     selection={startDate} onDateChange={setStartDate}
                     displayedComponents={['date']}
@@ -366,7 +366,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Ends</Text>
                 {endDate ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Host matchContents ignoreSafeArea="all">
+                    <Host key="income-ends" matchContents ignoreSafeArea="all">
                       <DatePicker
                         selection={endDate} onDateChange={setEndDate}
                         displayedComponents={['date']}
@@ -410,7 +410,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               {oneTimeIncomes.length > 0 && (
                 <View style={[S.fieldRow, sep]}>
                   <Text style={[S.fieldLabel, { color: theme.textSec }]}>Income</Text>
-                  <Host matchContents ignoreSafeArea="all">
+                  <Host key="onetime-income" matchContents ignoreSafeArea="all">
                     <Picker
                       selection={editingId ?? '__new__'}
                       onSelectionChange={(val) => {
@@ -455,7 +455,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               </Pressable>
               <View style={S.fieldRow}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Received</Text>
-                <Host matchContents ignoreSafeArea="all">
+                <Host key="onetime-received" matchContents ignoreSafeArea="all">
                   <DatePicker
                     selection={receivedDate} onDateChange={setReceivedDate}
                     displayedComponents={['date']}

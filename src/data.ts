@@ -128,8 +128,6 @@ function buildSeedTransactions(): Transaction[] {
 
 export const SEED_TRANSACTIONS: Transaction[] = buildSeedTransactions();
 
-export const DEFAULT_MONTHLY_BUDGET = 2400;
-
 // ─────────────────────────────────────────────────────────────
 // Upcoming bills (forward-looking)
 // ─────────────────────────────────────────────────────────────

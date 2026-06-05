@@ -23,6 +23,11 @@ interface ThemeCtx {
   // Raw representative color extracted from the active wallpaper. Screens bend
   // this toward dark/light via deriveFloor() — see wallpaperPalette.ts.
   wallpaperFloorBase: string;
+  // Generic key/value flags stored in settings.meta. Used for one-time
+  // onboarding signals (first-run prompt shown, framework card dismissed, etc.)
+  // so individual screens don't need direct settingsRepo access.
+  metaFlag: (key: string) => boolean;
+  setMetaFlag: (key: string, value?: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeCtx | null>(null);
@@ -130,6 +135,20 @@ export function ThemeProvider({
   }, [settingsRepo, settings]);
   const toggleDark = useCallback(() => setDark(!dark), [dark, setDark]);
 
+  const metaFlag = useCallback(
+    (key: string) => !!(settings.meta?.[key]),
+    [settings.meta],
+  );
+  const setMetaFlag = useCallback(
+    (key: string, value = true) => {
+      const currentMeta = settings.meta ?? {};
+      const update = { meta: { ...currentMeta, [key]: value } };
+      settingsRepo.update('settings', update)
+        ?? settingsRepo.create({ ...settings, ...update });
+    },
+    [settingsRepo, settings],
+  );
+
   const value = useMemo<ThemeCtx>(
     () => ({
       theme, dark, setDark, toggleDark,
@@ -138,8 +157,9 @@ export function ThemeProvider({
       wallpaperId, wallpaper, setWallpaperId,
       customWallpaperUri, setCustomWallpaperUri,
       wallpaperFloorBase,
+      metaFlag, setMetaFlag,
     }),
-    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId, customWallpaperUri, setCustomWallpaperUri, wallpaperFloorBase],
+    [theme, dark, setDark, toggleDark, accentKey, setAccentKey, cardStyle, setCardStyle, wallpaperId, wallpaper, setWallpaperId, customWallpaperUri, setCustomWallpaperUri, wallpaperFloorBase, metaFlag, setMetaFlag],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

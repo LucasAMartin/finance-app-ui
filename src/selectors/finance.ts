@@ -1,9 +1,7 @@
 import {
-  DEFAULT_MONTHLY_BUDGET,
   SEED_MONTH_BUDGETS,
   SEED_PERIOD_DATA,
   SEED_SPARK_7D,
-  SEED_SPEND_GROUPS,
   SEED_TREND,
 } from '../data';
 import type { Bill, Budget, Category, CreateTransactionInput, GroupKey, Income, RecurringRule, SpendGroup, Transaction, MonthBudget } from '../repositories/types';
@@ -78,13 +76,13 @@ export function monthlyIncome(incomes: Income[], monthKey = currentMonthKey()): 
 export function currentMonthlyBudget(budgets: Budget[], monthKey = currentMonthKey()): number {
   const monthly = budgets.find(b => b.month === monthKey && b.meta?.kind === 'monthly-budget')
     ?? budgets.find(b => b.meta?.kind === 'monthly-budget');
-  return monthly?.amount ?? DEFAULT_MONTHLY_BUDGET;
+  return monthly?.amount ?? 0;
 }
 
 export function periodTotals(
   transactions: Transaction[],
   range: Period,
-  budget = DEFAULT_MONTHLY_BUDGET,
+  budget = 0,
 ): PeriodData {
   const seed = SEED_PERIOD_DATA[range];
   if (!seed) return SEED_PERIOD_DATA.Month;
@@ -141,16 +139,7 @@ export function groupSpent(
 }
 
 export function spendGroups(transactions: Transaction[], budgets: Budget[] = [], categories: Category[] = [], month = '2026-05'): SpendGroup[] {
-  const activeCategories = categories.length > 0
-    ? categories.filter(cat => !cat.archived)
-    : SEED_SPEND_GROUPS.flatMap(g => g.subs.map((sub, idx) => ({
-      id: sub.cat,
-      label: sub.label,
-      icon: sub.icon,
-      group: g.key,
-      defaultBudget: sub.budget,
-      sortOrder: idx,
-    } as Category)));
+  const activeCategories = categories.filter(cat => !cat.archived);
 
   const groupLabels: Record<GroupKey, string> = { needs: 'Needs', wants: 'Wants', savings: 'Savings' };
   const targetPct: Record<GroupKey, number> = { needs: 0.5, wants: 0.3, savings: 0.2 };
@@ -243,9 +232,9 @@ function nextDueDate(rule: RecurringRule, today: Date): Date {
   return next;
 }
 
-export function monthBudgets(transactions: Transaction[], budgets: Budget[] = []): MonthBudget[] {
+export function monthBudgets(transactions: Transaction[], budgets: Budget[] = [], incomes: Income[] = []): MonthBudget[] {
   const monthKey = currentMonthKey();
-  const monthlyBudget = currentMonthlyBudget(budgets, monthKey);
+  const monthlyBudget = monthlyIncome(incomes, monthKey);
   const transactionTotal = transactions
     .filter(tx => tx.type !== 'income')
     .reduce((sum, tx) => sum + tx.amount, 0);

@@ -30,7 +30,7 @@ type SheetPhase = 'closed' | 'presenting' | 'open' | 'dismissing';
 const EARLY_EXPAND_INTENT_THRESHOLD = 0.08;
 
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import { categoryGroupColor, categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
+import { categoryGroupColor, categoryGroupFor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import type { Category, GroupKey, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { MerchantMark } from './MerchantMark';
@@ -512,7 +512,7 @@ function SheetBody({
       />
       <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
       <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
-        {cat?.label}
+        {cat?.label ?? UNCATEGORIZED_LABEL}
         <Text style={{ color: theme.textTer }}> · </Text>
         {tx.fullDate}
         <Text style={{ color: theme.textTer }}> · </Text>

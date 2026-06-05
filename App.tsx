@@ -15,8 +15,9 @@ import { router, useFocusEffect } from 'expo-router';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
 import { useAppFonts, patchTextWithInter } from './src/fonts';
-import { RepositoryProvider, useRepositories } from './src/repositories/RepositoryProvider';
+import { RepositoryProvider, useRepositories, useRepositoryList } from './src/repositories/RepositoryProvider';
 import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
+import { FirstRunPrompt } from './src/components/FirstRunPrompt';
 import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
 
@@ -75,9 +76,17 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
 });
 
 export function DashboardApp() {
-  const { theme, dark } = useTheme();
-  const { transactionsRepo, devDataRepo } = useRepositories();
+  const { theme, dark, metaFlag, setMetaFlag } = useTheme();
+  const { transactionsRepo, devDataRepo, incomeRepo } = useRepositories();
+  const incomes = useRepositoryList(incomeRepo);
   const { showToast } = useAppFeedback();
+
+  // Show the income prompt once: on first open when no income has been set and
+  // the prompt hasn't been dismissed before. We wait for repos to settle (at
+  // least one render with an empty list) rather than on the very first render
+  // before the DB has loaded, so the flag check is stable.
+  const incomePromptShown = metaFlag('incomePromptShown');
+  const showIncomePrompt = !incomePromptShown && incomes.length === 0;
 
   // `screen` is only used for TabBar active state and pointerEvents.
   // The actual visual positions are driven imperatively via TX refs.
@@ -382,6 +391,20 @@ export function DashboardApp() {
 
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
         <BillSheetMount ref={billSheetRef} />
+
+        {/* First-run income prompt — rendered once when no income is set */}
+        {showIncomePrompt && (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 95 }]} pointerEvents="box-none">
+            <FirstRunPrompt
+              theme={theme}
+              onSetIncome={() => {
+                setMetaFlag('incomePromptShown');
+                router.push('/income');
+              }}
+              onSkip={() => setMetaFlag('incomePromptShown')}
+            />
+          </View>
+        )}
 
         <ThemeScreen
           theme={theme}
