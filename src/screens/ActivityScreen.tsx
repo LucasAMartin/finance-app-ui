@@ -57,7 +57,7 @@ const FILTER_COMMIT_DELAY_MS = 90;
 
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
-import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 import { SearchFilterBar } from '../components/SearchFilterBar';
 import { MerchantMark } from '../components/MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
@@ -69,11 +69,15 @@ import { Toast } from '../components/Toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
-import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText } from '../theme';
-import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim, deriveFloor } from '../wallpaperPalette';
+import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText, ON_GROUP_ICON } from '../theme';
+import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim, deriveFloor, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
 import { TYPE } from '../typography';
+import { SPACE, LAYOUT } from '../spacing';
+import { RADIUS } from '../radius';
 import { useTheme } from '../ThemeProvider';
+import type { WallpaperP } from '../wallpaperPalette';
 
+const GLASS_TINT_ACTIVE = 'rgba(255,255,255,0.18)';
 
 type DateFilterPreset = 'today' | 'yesterday' | 'this-week' | 'this-month';
 type DateFilter = DateFilterPreset | { from: Date; to: Date } | null;
@@ -272,7 +276,7 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
         intensity={dark ? 55 : 72}
         tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
         style={[S.filterPill, S.filterPillBlur, {
-          borderColor: dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)',
+          borderColor: dark ? GLASS_TINT_ACTIVE : 'rgba(0,0,0,0.10)',
         }]}
       >
         {overlay ? (
@@ -557,6 +561,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
         theme={theme}
         cats={cats}
         categories={categories}
+        p={p}
         onPress={handleOpenTx}
         onPrepare={handlePrepareTx}
         onDelete={handleDeleteTx}
@@ -577,6 +582,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
     handlePrepareTx,
     handleSwipeClose,
     handleSwipeOpen,
+    p,
     theme,
   ]);
 
@@ -656,7 +662,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
               style={StyleSheet.absoluteFill}
             />
             <View style={[S.headerDivider, {
-              backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)',
+              backgroundColor: theme.dark ? MEDIA.hairline : ONMEDIA_BORDER_LIGHT,
             }]} />
           </Animated.View>
           {SUPPORTS_GLASS ? (
@@ -666,7 +672,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
               size={40}
               iconSize={18}
               iconColor={theme.dark ? MEDIA.text : '#0E0C18'}
-              glassTint={theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'}
+              glassTint={glassTintForTheme(theme.dark)}
               colorScheme={theme.dark ? 'dark' : 'light'}
               accessibilityLabel="Open menu"
             />
@@ -687,7 +693,10 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
             />
           </Pressable>
           )}
-          <Text style={[S.title, { color: theme.text }]}>Transactions</Text>
+          <View style={S.title} pointerEvents="none">
+            <Text style={[S.titleText, { color: pWallpaper.text }]}>Transactions</Text>
+            <Animated.Text style={[S.titleText, StyleSheet.absoluteFill, { color: theme.text, opacity: iconScrolledOpacity }]}>Transactions</Animated.Text>
+          </View>
           <ThemeToggle />
         </View>
 
@@ -697,6 +706,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
           data={activityDayKeys}
           keyExtractor={(day) => String(day)}
           renderItem={renderActivityItem}
+          accessibilityRole="list"
           style={{ flex: 1 }}
           contentContainerStyle={[S.listContent, { paddingTop: insets.top + 64 }]}
           showsVerticalScrollIndicator={false}
@@ -730,7 +740,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
             </SectionCard>
           ) : showSwipeHint && activityDayKeys.length > 0 ? (
             <SectionCard dark={theme.dark} style={S.swipeHintCard}>
-              <SwipeHint dark={theme.dark} />
+              <SwipeHint p={p} />
             </SectionCard>
           ) : null}
           ListHeaderComponent={(
@@ -814,6 +824,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
               <SectionCard dark={theme.dark}>
                 <LoadError
                   theme={theme}
+                  p={p}
                   onRetry={() => { setLoadError(false); setLoading(true); setTimeout(() => setLoading(false), 1100); }}
                 />
               </SectionCard>
@@ -857,12 +868,13 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                           theme={theme}
                           cats={cats}
                           categories={categories}
+                          p={p}
                           onPress={() => handleOpenTx(tx)}
                           last={i === dayDetail.txs.length - 1 && dayDetail.bills.length === 0}
                         />
                       ))}
                       {dayDetail.bills.map((bill, i) => (
-                        <BillRow key={bill.id} bill={bill} theme={theme} categories={categories} last={i === dayDetail.bills.length - 1} />
+                        <BillRow key={bill.id} bill={bill} theme={theme} categories={categories} p={p} last={i === dayDetail.bills.length - 1} />
                       ))}
                     </View>
                   )}
@@ -873,6 +885,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                 <SectionCard dark={theme.dark}>
                   <EmptyState
                     theme={theme}
+                    p={p}
                     isFiltered={isFiltered}
                     onClearFilters={() => { setQuery(''); setCatFilter([]); setDateFilter(null); setAmountFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
                   />
@@ -1121,16 +1134,16 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     rowMonth: {
       content: {
         color: theme.text,
-        fontSize: 15,
-        fontWeight: '600',
+        fontSize: TYPE.subsectionTitle.fontSize,
+        fontWeight: TYPE.subsectionTitle.fontWeight,
         textAlign: 'left',
       },
     },
     itemWeekName: {
       content: {
         color: theme.textSec,
-        fontSize: 11,
-        fontWeight: '500',
+        fontSize: TYPE.labelLg.fontSize,
+        fontWeight: TYPE.labelLg.fontWeight,
       },
     },
   }), [theme.text, theme.textSec]);
@@ -1435,6 +1448,7 @@ const DayActivityMarks = React.memo(function DayActivityMarks({
               CS.dayDot,
               {
                 backgroundColor: selected ? theme.accent.ink : color,
+                borderColor: theme.dark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.20)',
                 marginLeft: index === 0 ? 0 : -3,
               },
             ]}
@@ -1913,20 +1927,20 @@ function FilterSheet({
                           >
                             <View style={[
                               FS.catChipIcon,
-                              { backgroundColor: active ? 'rgba(255,255,255,0.18)' : groupColor + '24' },
+                              { backgroundColor: active ? GLASS_TINT_ACTIVE : groupColor + '24' },
                             ]}>
-                              <Icon name={c.icon} size={12} color={active ? '#fff' : groupColor} stroke={1.6} />
+                              <Icon name={c.icon} size={12} color={active ? ON_GROUP_ICON : groupColor} stroke={1.6} />
                             </View>
                             <Text
                               numberOfLines={1}
                               style={[
                                 FS.catChipName,
-                                { color: active ? '#fff' : theme.text },
+                                { color: active ? ON_GROUP_ICON : theme.text },
                               ]}
                             >
                               {c.label}
                             </Text>
-                            {active && <Icon name="check" size={12} color="#fff" stroke={2} />}
+                            {active && <Icon name="check" size={12} color={ON_GROUP_ICON} stroke={2} />}
                           </TouchableOpacity>
                         );
                       })}
@@ -1959,11 +1973,12 @@ function AmountRangeField({
   onPress: () => void;
 }) {
   const hasValue = parseAmountDraft(value) !== undefined;
+  const accessibilityLabel = label === 'Min' ? 'Minimum amount' : label === 'Max' ? 'Maximum amount' : `${label} amount`;
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${label} amount`}
+      accessibilityLabel={accessibilityLabel}
       style={[
         FS.amountField,
         active && { backgroundColor: theme.accent.fill },
@@ -1984,8 +1999,8 @@ function AmountRangeField({
 
 // ─── DayGroup ────────────────────────────────────────────────────────────────
 
-function DayGroup({
-  day, group, theme, cats, categories, onPress, onDelete,
+const DayGroup = React.memo(function DayGroup({
+  day, group, theme, cats, categories, p, onPress, onDelete,
   onPrepare, onSwipeOpen, onSwipeClose, scrollRef, avgDaySpend, style,
 }: {
   day: string;
@@ -1993,6 +2008,7 @@ function DayGroup({
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  p: WallpaperP;
   onPress: (tx: Transaction) => void;
   onPrepare?: (tx: Transaction) => void;
   onDelete: (tx: Transaction) => void;
@@ -2002,7 +2018,6 @@ function DayGroup({
   avgDaySpend: number;
   style?: any;
 }) {
-  const p     = makeP(theme.dark);
   const { txs } = group;
   const expenseCount = txs.filter(t => t.type !== 'income').length;
   const spendTotal = txs.filter(t => t.type !== 'income').reduce((s, t) => s + t.amount, 0);
@@ -2040,6 +2055,7 @@ function DayGroup({
               theme={theme}
               cats={cats}
               categories={categories}
+              p={p}
               onPrepare={() => onPrepare?.(tx)}
               onPress={() => onPress(tx)}
               last={i === txs.length - 1}
@@ -2050,7 +2066,7 @@ function DayGroup({
       </View>
     </View>
   );
-}
+});
 
 // ─── SwipeRow ────────────────────────────────────────────────────────────────
 
@@ -2063,21 +2079,24 @@ function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
 }) {
   const swipeRef = useRef<Swipeable>(null);
 
-  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
-    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
-    return (
-      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
-        <TouchableOpacity
-          onPress={() => { swipeRef.current?.close(); onDelete(); }}
-          style={S.swipeActionBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Delete transaction"
-        >
-          <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
+  const renderRightActions = useCallback(
+    (progress: Animated.AnimatedInterpolation<number>) => {
+      const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
+      return (
+        <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
+          <TouchableOpacity
+            onPress={() => { swipeRef.current?.close(); onDelete(); }}
+            style={S.swipeActionBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Delete transaction"
+          >
+            <Icon name="trash" size={18} color={ON_GROUP_ICON} stroke={1.6} />
+          </TouchableOpacity>
+        </Animated.View>
+      );
+    },
+    [onDelete],
+  );
 
   return (
     <Swipeable
@@ -2099,19 +2118,19 @@ function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
 
 // ─── TxRow ───────────────────────────────────────────────────────────────────
 
-function TxRow({
-  tx, theme, cats, categories, onPress, onPrepare, last, onDelete,
+const TxRow = React.memo(function TxRow({
+  tx, theme, cats, categories, p, onPress, onPrepare, last, onDelete,
 }: {
   tx: Transaction;
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  p: WallpaperP;
   onPress: () => void;
   onPrepare?: () => void;
   last: boolean;
   onDelete?: () => void;
 }) {
-  const p          = makeP(theme.dark);
   const cat        = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const isIncome   = tx.type === 'income';
@@ -2153,12 +2172,11 @@ function TxRow({
       />
     </Pressable>
   );
-}
+});
 
 // ─── BillRow ─────────────────────────────────────────────────────────────────
 
-function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; categories: Category[]; last: boolean }) {
-  const p          = makeP(theme.dark);
+function BillRow({ bill, theme, categories, p, last }: { bill: Bill; theme: Theme; categories: Category[]; p: WallpaperP; last: boolean }) {
   const groupColor = categoryGroupColor(bill.cat, categories, theme.dark);
   return (
     <View style={[S.txRow, {
@@ -2203,8 +2221,7 @@ function BillRow({ bill, theme, categories, last }: { bill: Bill; theme: Theme; 
 
 // ─── LoadError ───────────────────────────────────────────────────────────────
 
-function LoadError({ theme, onRetry }: { theme: Theme; onRetry: () => void }) {
-  const p = makeP(theme.dark);
+function LoadError({ theme, p, onRetry }: { theme: Theme; p: WallpaperP; onRetry: () => void }) {
   return (
     <View style={S.empty}>
       {/* Native iOS empty-state view; colorScheme is pinned to the app theme
@@ -2237,8 +2254,7 @@ function LoadError({ theme, onRetry }: { theme: Theme; onRetry: () => void }) {
 
 // ─── SwipeHint ───────────────────────────────────────────────────────────────
 
-function SwipeHint({ dark }: { dark: boolean }) {
-  const p = makeP(dark);
+function SwipeHint({ p }: { p: WallpaperP }) {
   return (
     <View style={S.swipeHint}>
       <Icon name="chevL" size={11} color={p.textTer} stroke={2} />
@@ -2279,12 +2295,12 @@ function TxListSkeleton({ dark }: { dark: boolean }) {
 
 // ─── EmptyState ──────────────────────────────────────────────────────────────
 
-function EmptyState({ theme, isFiltered, onClearFilters }: {
+function EmptyState({ theme, p, isFiltered, onClearFilters }: {
   theme: Theme;
+  p: WallpaperP;
   isFiltered: boolean;
   onClearFilters?: () => void;
 }) {
-  const p = makeP(theme.dark);
   return (
     <View style={S.empty}>
       <Host
@@ -2327,8 +2343,8 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingBottom: LAYOUT.rowPadY,
     zIndex: 10,
     overflow: 'hidden',
   },
@@ -2345,23 +2361,28 @@ const S = StyleSheet.create({
   },
   title: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleText: {
+    textAlign: 'center',
     ...TYPE.pageTitle,
   },
 
   // Section stack
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: LAYOUT.screenGutter,
     paddingBottom: 160,
   },
   sectionStack: {
-    gap: 16,
-    marginBottom: 16,
+    gap: SPACE.lg,
+    marginBottom: SPACE.lg,
   },
   dayGroupCard: {
-    marginBottom: 16,
+    marginBottom: SPACE.lg,
   },
   swipeHintCard: {
-    marginBottom: 16,
+    marginBottom: SPACE.lg,
   },
   loadingMore: {
     minHeight: 22,
@@ -2370,20 +2391,20 @@ const S = StyleSheet.create({
   },
 
   swipeHint: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    justifyContent: 'flex-end', paddingTop: 8, paddingBottom: 2,
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.xs,
+    justifyContent: 'flex-end', paddingTop: SPACE.sm, paddingBottom: SPACE.px2,
   },
   swipeHintText: {
     ...TYPE.caption,
   },
 
   searchWrap: {
-    paddingHorizontal: 4,
+    paddingHorizontal: SPACE.xs,
   },
   filterPill: {
     flexDirection: 'row', alignItems: 'center',
-    paddingLeft: 12, paddingRight: 8, paddingVertical: 8,
-    borderRadius: 100, gap: 8,
+    paddingLeft: SPACE.md, paddingRight: SPACE.sm, paddingVertical: SPACE.sm,
+    borderRadius: RADIUS.full, gap: SPACE.sm,
   },
   filterPillBlur: {
     overflow: 'hidden',
@@ -2393,32 +2414,32 @@ const S = StyleSheet.create({
     ...TYPE.caption,
   },
   filterStripScroll: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 4,
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingRight: SPACE.xs,
   },
   emptyClear: {
-    marginTop: 16, paddingHorizontal: 20, paddingVertical: 12,
-    borderRadius: 100,
+    marginTop: SPACE.lg, paddingHorizontal: LAYOUT.cardPadX, paddingVertical: LAYOUT.rowPadY,
+    borderRadius: RADIUS.full,
   },
   emptyClearText: {
     ...TYPE.bodySm,
   },
   // Day detail
   detailEmptyWrap: {
-    alignItems: 'center', paddingVertical: 12,
+    alignItems: 'center', paddingVertical: LAYOUT.rowPadY,
   },
   // Rows
   nameRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: SPACE.sm,
   },
   upcomingPill: {
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 100,
+    paddingHorizontal: SPACE.sm, paddingVertical: SPACE.px2, borderRadius: RADIUS.full,
   },
   upcomingText: {
     ...TYPE.labelSmPlain,
   },
   dayHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'baseline', paddingHorizontal: 2, marginBottom: 8,
+    alignItems: 'baseline', paddingHorizontal: SPACE.px2, marginBottom: SPACE.sm,
   },
   dayLabel: {
     ...TYPE.txDateLabel,
@@ -2428,8 +2449,8 @@ const S = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'baseline', paddingHorizontal: 2,
-    paddingBottom: 12, marginBottom: 16,
+    alignItems: 'baseline', paddingHorizontal: SPACE.px2,
+    paddingBottom: SPACE.md, marginBottom: SPACE.lg,
   },
   summaryRowSolo: {
     paddingBottom: 0,
@@ -2448,10 +2469,10 @@ const S = StyleSheet.create({
   },
   txRow: {
     flexDirection: 'row', alignItems: 'center',
-    gap: 12, paddingVertical: 16,
+    gap: SPACE.md, paddingVertical: LAYOUT.rowPadY,
   },
   txIcon: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 36, height: 36, borderRadius: 18, // width/2 — circle
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   txName: { ...TYPE.body },
@@ -2469,28 +2490,28 @@ const CS = StyleSheet.create({
   },
   sheetContent: {
     flex: 1,
-    paddingTop: 8,
+    paddingTop: SPACE.sm,
   },
   sheetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: SPACE.lg,
+    paddingBottom: SPACE.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: SPACE.md,
     flexShrink: 1,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 12,
+    gap: SPACE.md,
     flexShrink: 0,
   },
   sheetTitle: {
@@ -2523,12 +2544,12 @@ const CS = StyleSheet.create({
   },
   weekRow: {
     flexDirection: 'row',
-    gap: 4,
+    gap: SPACE.xs,
   },
   daySlot: {
     flex: 1,
     height: HISTORY_CAL_DAY_HEIGHT,
-    borderRadius: 16,
+    borderRadius: RADIUS.button,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 6,
@@ -2557,13 +2578,13 @@ const CS = StyleSheet.create({
   dayDot: {
     width: 7,
     height: 7,
-    borderRadius: 3.5,
+    borderRadius: 3.5, // height/2 — pill dot
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.72)',
+    // borderColor is set inline in DayActivityMarks (theme-aware)
   },
   dayCount: {
     ...TYPE.labelPlain,
-    marginLeft: 4,
+    marginLeft: SPACE.xs,
     fontWeight: '600',
   },
 });
@@ -2579,20 +2600,20 @@ const FS = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: SPACE.lg,
+    paddingBottom: SPACE.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: SPACE.lg,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: SPACE.md,
   },
   title: {
     ...TYPE.pageTitle,
@@ -2606,14 +2627,14 @@ const FS = StyleSheet.create({
 
   // Sort by + Date — grouped card container
   controlsCard: {
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 14,
+    marginHorizontal: LAYOUT.cardPadX,
+    marginTop: SPACE.lg,
+    borderRadius: RADIUS.field,
     overflow: 'hidden',
   },
   controlsDivider: {
     height: StyleSheet.hairlineWidth,
-    marginHorizontal: 16,
+    marginHorizontal: LAYOUT.screenGutter,
   },
 
   // Single row inside the controls card
@@ -2621,8 +2642,8 @@ const FS = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingHorizontal: LAYOUT.screenGutter,
+    paddingVertical: 13, // off-grid by design — slightly taller than rowPadY for form rows
     minHeight: 44,
   },
   sortRowLabel: {
@@ -2631,9 +2652,9 @@ const FS = StyleSheet.create({
   menuTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
-    paddingLeft: 8,
+    gap: SPACE.xs,
+    paddingVertical: SPACE.xs,
+    paddingLeft: SPACE.sm,
   },
   menuTriggerText: {
     ...TYPE.body,
@@ -2641,55 +2662,55 @@ const FS = StyleSheet.create({
   },
 
   amountSection: {
-    paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: 18, // off-grid by design — slightly above xl for visual breathing room
   },
   amountHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 24,
-    marginBottom: 8,
+    marginBottom: SPACE.sm,
   },
   amountClear: {
     ...TYPE.bodySm,
   },
   amountCard: {
     minHeight: 66,
-    borderRadius: 14,
+    borderRadius: RADIUS.field,
     flexDirection: 'row',
     overflow: 'hidden',
   },
   amountField: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    paddingHorizontal: LAYOUT.screenGutter,
+    paddingVertical: 11, // off-grid by design — tighter than rowPadY for form fields
   },
   amountFieldLabel: {
     ...TYPE.labelPlain,
-    marginBottom: 4,
+    marginBottom: SPACE.xs,
   },
   amountFieldValue: {
     ...TYPE.subsectionTitle,
   },
   amountDivider: {
     width: StyleSheet.hairlineWidth,
-    marginVertical: 12,
+    marginVertical: SPACE.md,
   },
   amountHint: {
     ...TYPE.caption,
-    marginTop: 8,
+    marginTop: SPACE.sm,
   },
 
   // Category section
   groupEyebrow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 10,
-    gap: 8,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: SPACE.xxl,
+    paddingBottom: 10, // off-grid optical gap before category chips
+    gap: SPACE.sm,
   },
   groupDot: {
     width: 6,
@@ -2702,24 +2723,24 @@ const FS = StyleSheet.create({
   catGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 20,
+    gap: SPACE.sm,
+    paddingHorizontal: LAYOUT.cardPadX,
   },
   catChip: {
     width: '48.6%',
     minHeight: 42,
-    borderRadius: 14,
+    borderRadius: RADIUS.field,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap: SPACE.sm,
+    paddingHorizontal: 10, // tighter than screenGutter — narrow chip columns
+    paddingVertical: SPACE.sm,
   },
   catChipIcon: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: 12, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -2729,7 +2750,7 @@ const FS = StyleSheet.create({
     ...TYPE.bodySmEm,
   },
   groupEmpty: {
-    paddingHorizontal: 20, paddingVertical: 12,
+    paddingHorizontal: LAYOUT.cardPadX, paddingVertical: LAYOUT.rowPadY,
     ...TYPE.caption, fontStyle: 'italic',
   },
 

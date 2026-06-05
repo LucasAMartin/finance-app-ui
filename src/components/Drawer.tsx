@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Animated,
+  Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Host, Image } from '@expo/ui/swift-ui';
@@ -34,6 +35,8 @@ interface Props {
   progress: Animated.AnimatedInterpolation<number> | Animated.Value;
   onNavigate: (id: string) => void;
   onClose: () => void;
+  sampleDataEnabled: boolean;
+  onSampleDataEnabledChange: (enabled: boolean) => void;
 }
 
 const SECTIONS: DrawerSection[] = [
@@ -60,7 +63,15 @@ const SECTIONS: DrawerSection[] = [
   },
 ];
 
-export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
+export function Drawer({
+  theme,
+  width,
+  progress,
+  onNavigate,
+  onClose,
+  sampleDataEnabled,
+  onSampleDataEnabledChange,
+}: Props) {
   const insets = useSafeAreaInsets();
 
   const translateX = (progress as Animated.Value).interpolate
@@ -154,6 +165,38 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
             ))}
           </View>
         ))}
+        {__DEV__ && (
+          <View style={{ marginBottom: 20 }}>
+            <Text style={[TYPE.labelLg, styles.sectionTitle, { color: theme.textTer }]}>
+              Developer
+            </Text>
+            <View style={styles.devRow}>
+              <Host style={styles.iconHost} ignoreSafeArea="all">
+                <Image
+                  systemName="externaldrive"
+                  size={20}
+                  color={theme.textSec}
+                />
+              </Host>
+              <View style={styles.devCopy}>
+                <Text style={[TYPE.subsectionTitle, { color: theme.text }]}>
+                  Sample data
+                </Text>
+                <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
+                  Off clears the app state; on reloads the seed DB.
+                </Text>
+              </View>
+              <Switch
+                value={sampleDataEnabled}
+                onValueChange={onSampleDataEnabledChange}
+                trackColor={{ false: theme.chipBg, true: theme.accent.fill }}
+                thumbColor={sampleDataEnabled ? theme.accent.ink : theme.surface}
+                ios_backgroundColor={theme.chipBg}
+                accessibilityLabel="Toggle sample data"
+              />
+            </View>
+          </View>
+        )}
       </ScrollView>
     </Animated.View>
   );
@@ -218,5 +261,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  devRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  devCopy: {
+    flex: 1,
+    minWidth: 0,
   },
 });

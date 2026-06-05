@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   View,
   Animated,
@@ -76,7 +76,7 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
 
 export function DashboardApp() {
   const { theme, dark } = useTheme();
-  const { transactionsRepo } = useRepositories();
+  const { transactionsRepo, devDataRepo } = useRepositories();
   const { showToast } = useAppFeedback();
 
   // `screen` is only used for TabBar active state and pointerEvents.
@@ -140,6 +140,17 @@ export function DashboardApp() {
     transactionsRepo.delete(tx.id);
     showToast('Transaction deleted', () => transactionsRepo.create(txToCreateInput(tx)));
   }, [showToast, transactionsRepo]);
+
+  const sampleDataEnabled = useSyncExternalStore(
+    useCallback((listener) => devDataRepo.subscribe(listener), [devDataRepo]),
+    useCallback(() => devDataRepo.isSeedDataEnabled(), [devDataRepo]),
+    useCallback(() => devDataRepo.isSeedDataEnabled(), [devDataRepo]),
+  );
+
+  const handleSampleDataEnabledChange = useCallback((enabled: boolean) => {
+    devDataRepo.setSeedDataEnabled(enabled);
+    showToast(enabled ? 'Sample data reloaded' : 'Sample data cleared');
+  }, [devDataRepo, showToast]);
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -364,6 +375,8 @@ export function DashboardApp() {
             progress={drawerAnim}
             onNavigate={handleDrawerNav}
             onClose={closeDrawer}
+            sampleDataEnabled={sampleDataEnabled}
+            onSampleDataEnabledChange={handleSampleDataEnabledChange}
           />
         </View>
 

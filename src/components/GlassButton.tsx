@@ -11,6 +11,14 @@ import { MEDIA } from '../wallpaperPalette';
 export const SUPPORTS_GLASS =
   Platform.OS === 'ios' && parseInt(String(Platform.Version), 10) >= 26;
 
+// Canonical glass tint values for GlassCircleButton — dark mode applies a near-
+// black veil over the Liquid Glass material; light mode a near-white frost.
+// Import these instead of inlining the rgba literals in every screen.
+export const GLASS_TINT_DARK = 'rgba(20,20,24,0.55)';
+export const GLASS_TINT_LIGHT = 'rgba(255,255,255,0.92)';
+export const glassTintForTheme = (dark: boolean) =>
+  dark ? GLASS_TINT_DARK : GLASS_TINT_LIGHT;
+
 export interface GlassCircleButtonProps {
   onPress: () => void;
   /** SF Symbol shown inside the button (e.g. 'xmark', 'mic.fill'). */

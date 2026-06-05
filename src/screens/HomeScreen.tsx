@@ -21,7 +21,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Link, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS } from '../theme';
+import { Theme, OVER_DOT, cautionText, CAUTION_AMBER, HERO_AVAIL, GROUP_COLORS, ON_GROUP_ICON } from '../theme';
+import { SPACE, LAYOUT } from '../spacing';
+import { RADIUS } from '../radius';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, deriveFloor, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
@@ -77,7 +79,7 @@ function currentMonthKey() {
 // ── Budget progress bar ──────────────────────────────────────────
 function BudgetBar({ pct, trackBg }: { pct: number; trackBg: string }) {
   const [barW, setBarW] = useState(0);
-  const H = 5, R = 3;
+  const H = 5, R = RADIUS.bar;
   const color = pct >= 1.0 ? OVER_DOT
     : pct >= 0.9  ? CAUTION_AMBER
     : pct >= 0.75 ? GROUP_COLORS.wants.light
@@ -528,47 +530,6 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
     });
   }, [incomeMorph, onLogIncome, prepareHeroMorphReaction, startHeroMorphReaction]);
 
-  const heroTopMorphStyle = {
-    opacity: heroMorphAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [1, 0.72],
-    }),
-    transform: [
-      {
-        translateY: heroMorphAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, -9],
-        }),
-      },
-      {
-        scale: heroMorphAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [1, 0.97],
-        }),
-      },
-    ],
-  };
-
-  const heroAmountMorphStyle = {
-    opacity: heroMorphAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [1, 0.58],
-    }),
-    transform: [
-      {
-        translateY: heroMorphAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, -14],
-        }),
-      },
-      {
-        scale: heroMorphAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [1, 0.94],
-        }),
-      },
-    ],
-  };
 
   const quickActionMorphStyle = (key: HeroAction | 'more') => {
     return undefined;
@@ -582,11 +543,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   }, []);
 
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     setLoading(true);
     setTimeout(() => { setLoading(false); setRefreshing(false); }, 1100);
-  };
+  }, []);
 
   const rawPct = mb.budget > 0 ? mb.spent / mb.budget : 0;
   const available = Math.max(mb.budget - mb.spent, 0);
@@ -686,10 +647,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
               </IconBtn>
             )}
             <View style={{ flexDirection: 'row', gap: 4 }}>
-              <View
+              <TouchableOpacity
                 style={[styles.iconBtn, { width: 40, height: 40 }]}
                 accessibilityLabel="Notifications"
-                accessibilityRole="image"
+                accessibilityRole="button"
+                accessibilityHint="View recent alerts"
               >
                 <HeaderIcon
                   name="bell"
@@ -701,7 +663,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                   backgroundColor: OVER_DOT,
                   borderColor: 'rgba(8,6,20,0.4)',
                 }]} />
-              </View>
+              </TouchableOpacity>
               <ThemeToggle />
             </View>
           </View>
@@ -814,7 +776,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             {/* Spending */}
             <SectionCard dark={theme.dark}>
               <View style={styles.sectionHead}>
-                <Text style={[styles.ledgerLabel, { color: p.text }]}>Spending</Text>
+                <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Spending</Text>
               </View>
               {loading ? (
                 <CategorySkeleton dark={theme.dark} />
@@ -826,7 +788,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             {/* Upcoming */}
             <SectionCard dark={theme.dark}>
               <View style={styles.sectionHead}>
-                <Text style={[styles.ledgerLabel, { color: p.text }]}>Upcoming</Text>
+                <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Upcoming</Text>
               </View>
               {loading ? (
                 <BillsSkeleton dark={theme.dark} />
@@ -856,6 +818,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                         ]}
                         accessible
                         accessibilityLabel={a11y}
+                        accessibilityHint="Swipe right to mark paid"
+                        accessibilityActions={[{ name: 'paid', label: 'Mark as paid' }]}
+                        onAccessibilityAction={(e) => {
+                          if (e.nativeEvent.actionName === 'paid') markBillPaid(b);
+                        }}
                       >
                         <MerchantMark
                           merchant={b.merchant}
@@ -885,7 +852,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             {/* Activity */}
             <SectionCard dark={theme.dark}>
               <View style={styles.sectionHead}>
-                <Text style={[styles.ledgerLabel, { color: p.text }]}>Activity</Text>
+                <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Activity</Text>
                 <TouchableOpacity onPress={openSelectedMonthActivity} activeOpacity={0.6} delayPressIn={0}>
                   <Text style={[styles.ledgerAction, { color: p.text }]}>See all</Text>
                 </TouchableOpacity>
@@ -912,6 +879,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                           <TxRow tx={tx}
                             onPress={() => onOpenTx(tx)}
                             onPrepare={onPrepareTx ? () => onPrepareTx(tx) : undefined}
+                            onDelete={() => onDeleteTx(tx)}
                             last={i === arr.length - 1}
                             dark={theme.dark} p={p} cats={cats} categories={categories} />
                         </SwipeTxRow>
@@ -1025,19 +993,22 @@ function SwipeBillRow({ children, onPaid, onOpen, onClose }: {
   onClose: () => void;
 }) {
   const swipeRef = useRef<Swipeable>(null);
-  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
-    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
-    return (
-      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
-        <TouchableOpacity
-          onPress={onPaid}
-          style={[styles.paidAction, { marginLeft: 8 }]}
-        >
-          <Icon name="check" size={18} color="#FBF8FF" stroke={2.2} />
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
+  const renderRightActions = useCallback(
+    (progress: Animated.AnimatedInterpolation<number>) => {
+      const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
+      return (
+        <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
+          <TouchableOpacity
+            onPress={onPaid}
+            style={[styles.paidAction, { marginLeft: 8 }]}
+          >
+            <Icon name="check" size={18} color={ON_GROUP_ICON} stroke={2.2} />
+          </TouchableOpacity>
+        </Animated.View>
+      );
+    },
+    [onPaid],
+  );
   return (
     <Swipeable
       ref={swipeRef}
@@ -1063,21 +1034,24 @@ function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
   onClose: () => void;
 }) {
   const swipeRef = useRef<Swipeable>(null);
-  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
-    const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
-    return (
-      <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
-        <TouchableOpacity
-          onPress={() => { swipeRef.current?.close(); onDelete(); }}
-          style={[styles.deleteAction, { marginLeft: 8 }]}
-          accessibilityRole="button"
-          accessibilityLabel="Delete transaction"
-        >
-          <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
+  const renderRightActions = useCallback(
+    (progress: Animated.AnimatedInterpolation<number>) => {
+      const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
+      return (
+        <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
+          <TouchableOpacity
+            onPress={() => { swipeRef.current?.close(); onDelete(); }}
+            style={[styles.deleteAction, { marginLeft: 8 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Delete transaction"
+          >
+            <Icon name="trash" size={18} color={ON_GROUP_ICON} stroke={1.6} />
+          </TouchableOpacity>
+        </Animated.View>
+      );
+    },
+    [onDelete],
+  );
   return (
     <Swipeable
       ref={swipeRef}
@@ -1097,11 +1071,12 @@ function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
 
 // ── TxRow ─────────────────────────────────────────────────────────
 const TxRow = React.memo(function TxRow({
-  tx, onPress, onPrepare, last, dark, p, cats, categories,
+  tx, onPress, onPrepare, onDelete, last, dark, p, cats, categories,
 }: {
   tx: Transaction;
   onPress: () => void;
   onPrepare?: () => void;
+  onDelete?: () => void;
   last: boolean;
   dark: boolean;
   p: P;
@@ -1118,6 +1093,11 @@ const TxRow = React.memo(function TxRow({
       style={[styles.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
+      accessibilityHint="Swipe left to delete"
+      accessibilityActions={[{ name: 'delete', label: 'Delete transaction' }]}
+      onAccessibilityAction={(e: { nativeEvent: { actionName: string } }) => {
+        if (e.nativeEvent.actionName === 'delete') onDelete?.();
+      }}
     >
       <MerchantMark
         merchant={tx.merchant}
@@ -1184,8 +1164,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingBottom: SPACE.sm,
     zIndex: 10,
     overflow: 'hidden',
   },
@@ -1212,25 +1192,25 @@ const styles = StyleSheet.create({
     right: 0,
     width: 9,
     height: 9,
-    borderRadius: 5,
+    borderRadius: 4, // width/2 — circle
     borderWidth: 1.5,
   },
   hero: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 32,
+    paddingHorizontal: SPACE.xxl,
+    paddingTop: SPACE.xxl,
+    paddingBottom: SPACE.xxxl,
   },
   heroTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: SPACE.lg,
     height: 30,
   },
   heroStatusGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: SPACE.md,
     flexShrink: 1,
   },
   heroStatusLabel: {
@@ -1244,7 +1224,7 @@ const styles = StyleSheet.create({
     ...TYPE.onMediaStatusSub,
   },
   heroAmountRow: {
-    marginBottom: 16,
+    marginBottom: SPACE.lg,
     alignItems: 'flex-start',
   },
   heroAmount: {
@@ -1254,7 +1234,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'flex-start',
-    paddingHorizontal: 20,
+    paddingHorizontal: LAYOUT.cardPadX,
     marginBottom: 28,
   },
   qa: {
@@ -1276,17 +1256,16 @@ const styles = StyleSheet.create({
     paddingRight: 2,
   },
   monthPickerText: {
-    ...TYPE.onMediaStatusSub,
-    fontWeight: '500',
+    ...TYPE.onMediaStatusSubMd,
   },
   qaInner: {
     alignItems: 'center',
-    gap: 8,
+    gap: SPACE.sm,
   },
   qaCircle: {
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: 28, // width/2 — circle
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1295,8 +1274,8 @@ const styles = StyleSheet.create({
     ...TYPE.onMediaQa,
   },
   sectionStack: {
-    paddingHorizontal: 16,
-    gap: 24,
+    paddingHorizontal: LAYOUT.screenGutter,
+    gap: LAYOUT.sectionGap,
   },
   sectionHead: {
     flexDirection: 'row',
@@ -1324,7 +1303,7 @@ const styles = StyleSheet.create({
   rowIcon: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 18, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -1342,8 +1321,8 @@ const styles = StyleSheet.create({
   billRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
   paidAction: {
     flex: 1,
@@ -1360,7 +1339,7 @@ const styles = StyleSheet.create({
   txRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
 });

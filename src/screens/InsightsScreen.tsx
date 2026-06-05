@@ -8,6 +8,7 @@ import {
   Animated,
   ImageBackground,
   Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -34,6 +35,7 @@ import {
   DARK_TEXT_SHADOW,
   makeP,
   deriveFloor,
+  ONMEDIA_BORDER_LIGHT,
 } from '../wallpaperPalette';
 import {
   useRepositories,
@@ -61,7 +63,7 @@ import {
 import { buildSavedMetric } from '../selectors/savings';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
-import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
@@ -77,22 +79,22 @@ import {
 import { SnapshotViz, type SnapshotVizSpec } from '../components/charts/SnapshotViz';
 import { TYPE } from '../typography';
 import { RADIUS } from '../radius';
+import { SPACE, LAYOUT } from '../spacing';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+// SCREEN_H is used for scroll-based animation interpolation only; it only needs
+// the initial value (the parallax scrim range is stable after mount).
+const { height: SCREEN_H } = Dimensions.get('window');
 
-const CARD_OUTER_PAD = 16;
-const CARD_INNER_PAD = 20;
-const CARD_W = SCREEN_W - CARD_OUTER_PAD * 2;
-const CHART_INNER_W = CARD_W - CARD_INNER_PAD * 2;
+const CARD_OUTER_PAD = LAYOUT.screenGutter;
+const CARD_INNER_PAD = LAYOUT.cardPadX;
 const CHART_H = 188;
-
-// Bento tile geometry. BentoTile has 16px inner padding; a half tile is half
-// the content width minus the 12px row gap. Chart widths are the inner content
-// widths so the SVG fills its tile edge to edge.
 const TILE_PAD = 16;
-const HERO_CHART_W = CARD_W - TILE_PAD * 2;
-const HALF_W = (CARD_W - 12) / 2;
-const HALF_CHART_W = HALF_W - TILE_PAD * 2;
+
+// Neutral chart-line colors — deliberately off-accent so the eye reads
+// category/group data rather than action color. Defined here once so all
+// chart usages stay in sync if the base neutral ever shifts.
+const CHART_LINE = { dark: 'rgba(242,244,245,0.72)', light: 'rgba(14,12,24,0.50)' };
+const CHART_LINE_FAINT = { dark: 'rgba(242,244,245,0.32)', light: 'rgba(14,12,24,0.22)' };
 
 const PERIODS = ['Week', 'Month', 'Year'] as const;
 type Period = (typeof PERIODS)[number];
@@ -359,11 +361,7 @@ function EmptyState({
     <View
       style={[
         styles.emptyState,
-        {
-          backgroundColor: theme.dark
-            ? 'rgba(242,244,245,0.045)'
-            : 'rgba(14,12,24,0.035)',
-        },
+        { backgroundColor: theme.chipBg },
       ]}
     >
       <Text style={[TYPE.bodySmEm, { color: theme.text }]}>{title}</Text>
@@ -600,9 +598,16 @@ export function InsightsScreen({
   const incomes = useRepositoryList(incomeRepo);
   const { wallpaper, wallpaperFloorBase } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
   const pWall = makeP(true);
   const p = makeP(theme.dark);
   const shadow = DARK_TEXT_SHADOW;
+
+  // Responsive tile geometry — recomputed when the device rotates.
+  const cardW = screenW - CARD_OUTER_PAD * 2;
+  const heroChartW = cardW - TILE_PAD * 2;
+  const halfW = (cardW - SPACE.md) / 2;
+  const halfChartW = halfW - TILE_PAD * 2;
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1M');
   const period = TF_TO_PERIOD[timeframe];
@@ -1394,13 +1399,8 @@ export function InsightsScreen({
 
   // ── Bento summary tiles ───────────────────────────────────────────
   const savingsTint = groupDisplayColor('savings', theme.dark);
-  // Neutral line colors for the spend chart (no accent in data viz).
-  const lineColor = theme.dark
-    ? 'rgba(242,244,245,0.72)'
-    : 'rgba(14,12,24,0.50)';
-  const lineColorFaint = theme.dark
-    ? 'rgba(242,244,245,0.32)'
-    : 'rgba(14,12,24,0.22)';
+  const lineColor = theme.dark ? CHART_LINE.dark : CHART_LINE.light;
+  const lineColorFaint = theme.dark ? CHART_LINE_FAINT.dark : CHART_LINE_FAINT.light;
   const savedMetric = useMemo(
     () =>
       buildSavedMetric({
@@ -1496,9 +1496,7 @@ export function InsightsScreen({
               style={[
                 styles.headerDivider,
                 {
-                  backgroundColor: theme.dark
-                    ? MEDIA.hairline
-                    : 'rgba(14,12,24,0.08)',
+                  backgroundColor: theme.dark ? MEDIA.hairline : ONMEDIA_BORDER_LIGHT,
                 },
               ]}
             />
@@ -1511,7 +1509,7 @@ export function InsightsScreen({
                 size={40}
                 iconSize={18}
                 iconColor={theme.dark ? MEDIA.text : '#0E0C18'}
-                glassTint={theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'}
+                glassTint={glassTintForTheme(theme.dark)}
                 colorScheme={theme.dark ? 'dark' : 'light'}
                 accessibilityLabel="Open menu"
               />
@@ -1526,9 +1524,10 @@ export function InsightsScreen({
               </IconBtn>
             )}
 
-            <Text style={[styles.headerTitle, { color: theme.text }]}>
-              Insights
-            </Text>
+            <View style={styles.headerTitle} pointerEvents="none">
+              <Text style={[styles.headerTitleText, { color: pWall.text }]}>Insights</Text>
+              <Animated.Text style={[styles.headerTitleText, StyleSheet.absoluteFill, { color: theme.text, opacity: iconScrolledOpacity }]}>Insights</Animated.Text>
+            </View>
 
             <ThemeToggle />
           </View>
@@ -1554,6 +1553,7 @@ export function InsightsScreen({
                   sitting right above the chart like the reference. */}
               <View style={styles.bentoControls}>
                 <SegmentedControl
+                  accessibilityLabel="Timeframe"
                   values={TIMEFRAMES as unknown as string[]}
                   selectedIndex={timeframeIdx}
                   onChange={(e) => {
@@ -1628,10 +1628,14 @@ export function InsightsScreen({
                   {spendDisplay.whole}
                   <Text style={{ color: p.textSec }}>{spendDisplay.cents}</Text>
                 </Text>
-                <View style={styles.heroChart}>
+                <View
+                  style={styles.heroChart}
+                  accessibilityRole="image"
+                  accessibilityLabel={`Spending trend chart for ${rangeContextLabel}`}
+                >
                   <SpendChart
                     data={cumulativeSeries}
-                    width={HERO_CHART_W}
+                    width={heroChartW}
                     height={150}
                     color={lineColor}
                     ringColor={theme.surface}
@@ -1646,7 +1650,7 @@ export function InsightsScreen({
               <View style={styles.bentoRow}>
                 <BentoTile
                   dark={theme.dark}
-                  style={styles.tileHalf}
+                  style={[styles.tileHalf, { minHeight: Math.round(halfW) }]}
                   onPress={() =>
                     onOpenInsight({
                       kind: 'savings',
@@ -1673,10 +1677,14 @@ export function InsightsScreen({
                   >
                     {savedSubLabel}
                   </Text>
-                  <View style={styles.tileMiniChart}>
+                  <View
+                    style={styles.tileMiniChart}
+                    accessibilityRole="image"
+                    accessibilityLabel="Savings trend chart"
+                  >
                     <SpendChart
                       data={savedMetric.cumulativeSeries}
-                      width={HALF_CHART_W}
+                      width={halfChartW}
                       height={40}
                       color={savingsTint}
                       fillColor={savingsTint}
@@ -1689,7 +1697,7 @@ export function InsightsScreen({
 
                 <BentoTile
                   dark={theme.dark}
-                  style={styles.tileHalf}
+                  style={[styles.tileHalf, { minHeight: Math.round(halfW) }]}
                   onPress={() =>
                     onOpenInsight({
                       kind: 'trends',
@@ -1715,13 +1723,17 @@ export function InsightsScreen({
                   >
                     {trendRightLabel}
                   </Text>
-                  <View style={styles.tileTrendChart}>
+                  <View
+                    style={styles.tileTrendChart}
+                    accessibilityRole="image"
+                    accessibilityLabel={`Spending trends chart, ${trendRightLabel}`}
+                  >
                     <TrendBars
                       values={trend.values}
                       labels={trend.labels}
                       selectedIdx={trendScrubIdx}
                       onScrub={setTrendScrubIdx}
-                      width={HALF_CHART_W}
+                      width={halfChartW}
                       height={64}
                       barColor={lineColorFaint}
                       selectedColor={lineColor}
@@ -1735,7 +1747,7 @@ export function InsightsScreen({
               {/* What changed — movement vs the previous period */}
               {changeSnapshots.length > 0 ? (
                 <BentoTile dark={theme.dark}>
-                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]}>
+                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
                     What changed
                   </Text>
                   {changeSnapshots.map((s, i) => (
@@ -1784,10 +1796,11 @@ export function InsightsScreen({
                   and a row tap opens the same insight sheet. */}
               {hasSpending ? (
                 <BentoTile dark={theme.dark}>
-                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]}>
+                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
                     Where it went
                   </Text>
                   <SegmentedControl
+                    accessibilityLabel="View by"
                     values={WHERE_TABS as unknown as string[]}
                     selectedIndex={whereTab}
                     onChange={(e) =>
@@ -1821,8 +1834,11 @@ export function InsightsScreen({
                           <Pressable
                             key={it.key}
                             onPress={() => setInsightDetail(it.detail)}
+                            onLongPress={() => onViewActivity(it.detail.filter!)}
+                            delayLongPress={400}
                             accessibilityRole="button"
                             accessibilityLabel={`${it.label}, ${money(it.spent, dec)}`}
+                            accessibilityHint="Long press to see matching transactions"
                             style={({ pressed }) => [
                               styles.catRow,
                               {
@@ -1929,8 +1945,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingBottom: SPACE.sm,
     zIndex: 10,
     overflow: 'hidden',
   },
@@ -1945,7 +1961,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 8,
+    paddingBottom: SPACE.sm,
   },
   headerDateNav: {
     flex: 1,
@@ -1958,13 +1974,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 4,
+    gap: SPACE.xs,
+    paddingHorizontal: SPACE.xs,
   },
   headerDateText: {
-    fontSize: 17,
-    fontWeight: '600',
-    letterSpacing: -0.4,
+    ...TYPE.pageTitle,
   },
   weekNavBtn: {
     width: 40,
@@ -1973,22 +1987,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
-  sectionStack: { paddingHorizontal: CARD_OUTER_PAD, gap: 24 },
+  sectionStack: { paddingHorizontal: CARD_OUTER_PAD, gap: LAYOUT.sectionGap },
   // Bento (v3): varied-size frosted tiles, tighter gap than the section stack.
-  headerTitle: { ...TYPE.pageTitle, flex: 1, textAlign: 'center' },
+  headerTitle: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerTitleText: { ...TYPE.pageTitle, textAlign: 'center' },
   bentoPeriod: { height: 36 },
-  bento: { gap: 12 },
+  bento: { gap: SPACE.md },
   bentoControls: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   timeframeSeg: { width: 200, height: 30, borderRadius: RADIUS.field, overflow: 'hidden' },
-  monthLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  monthLabel: { flexDirection: 'row', alignItems: 'center', gap: SPACE.xs },
   monthLabelText: { ...TYPE.subsectionTitle },
-  bentoRow: { flexDirection: 'row', gap: 12 },
+  bentoRow: { flexDirection: 'row', gap: SPACE.md },
   tileHero: { minHeight: 260 },
-  tileHalf: { flex: 1, minHeight: Math.round(HALF_W) },
+  tileHalf: { flex: 1 }, // minHeight set inline as halfW (orientation-responsive)
   tileWide: { minHeight: 56 },
   tileHeroAmount: { ...TYPE.display, lineHeight: 38, marginTop: 8 },
   heroLabelRow: { flexDirection: 'row', alignItems: 'center' },
@@ -2002,8 +2017,8 @@ const styles = StyleSheet.create({
   catRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
   catIcon: {
     width: 32,
@@ -2018,12 +2033,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: SPACE.sm,
   },
   catRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: SPACE.sm,
     flexShrink: 0,
   },
   catBar: {
@@ -2037,8 +2052,8 @@ const styles = StyleSheet.create({
   changeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
   changeIcon: {
     width: 32,
@@ -2072,25 +2087,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  tileWideRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tileWideRight: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm },
   // Chart
   chartTitle: { ...TYPE.bodySmEm, opacity: 0.7, letterSpacing: 0.2 },
   chartPeriodSegmented: {
-    marginBottom: 16,
+    marginBottom: SPACE.lg,
     height: 36,
   },
   chartHero: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16,
+    gap: SPACE.md,
+    marginBottom: SPACE.lg,
   },
   chartHeroAmount: { ...TYPE.display, lineHeight: 38 },
   chartHeroLabel: { ...TYPE.bodySm, marginTop: 2 },
   chartHeroRight: {
     alignItems: 'flex-end',
-    gap: 8,
+    gap: SPACE.sm,
     flexShrink: 0,
   },
   chartSegmented: {
@@ -2100,21 +2115,21 @@ const styles = StyleSheet.create({
   },
   chartSlide: { height: CHART_H, justifyContent: 'center' },
   emptyState: {
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 16,
-    marginTop: 12,
+    borderRadius: RADIUS.button,
+    paddingHorizontal: SPACE.md,
+    paddingVertical: SPACE.lg,
+    marginTop: SPACE.md,
   },
   changedBlock: {
     borderTopWidth: 1,
-    marginTop: 8,
-    paddingTop: 12,
+    marginTop: SPACE.sm,
+    paddingTop: SPACE.md,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
   rowIcon: {
     width: 38,
@@ -2128,12 +2143,12 @@ const styles = StyleSheet.create({
   rowInnerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: SPACE.sm,
   },
   rowTitle: { ...TYPE.body },
   rowSub: { ...TYPE.caption, marginTop: 2 },
   rowRight: { alignItems: 'flex-end', flexShrink: 0, minWidth: 92 },
-  rowAmtRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rowAmtRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm },
   rowAmt: { ...TYPE.body },
   rowPct: { ...TYPE.caption, marginTop: 2 },
   rowBudgetStatus: { ...TYPE.caption, marginTop: 2 },
@@ -2145,31 +2160,31 @@ const styles = StyleSheet.create({
   // Native insight sheet
   insightSheetContent: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: LAYOUT.cardPadTop,
   },
   insightSheetHero: {
     alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: SPACE.sm,
+    paddingBottom: SPACE.md,
   },
   insightSheetMark: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: 26, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: SPACE.md,
   },
   insightVizWrap: {
-    marginTop: 4,
-    paddingHorizontal: 4,
+    marginTop: SPACE.xs,
+    paddingHorizontal: SPACE.xs,
   },
   insightStatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
-    paddingTop: 16,
+    marginTop: SPACE.xl,
+    paddingTop: SPACE.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   insightStat: {
@@ -2182,9 +2197,9 @@ const styles = StyleSheet.create({
     marginVertical: 1,
   },
   insightSheetAction: {
-    marginTop: 16,
+    marginTop: SPACE.lg,
     minHeight: 50,
-    borderRadius: 16,
+    borderRadius: RADIUS.button,
     alignItems: 'center',
     justifyContent: 'center',
   },

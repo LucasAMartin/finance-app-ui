@@ -24,6 +24,10 @@ export abstract class SQLiteRepository<T extends { id: string }, CreateInput = O
     return () => this.listeners.delete(listener);
   }
 
+  refresh() {
+    this.emit();
+  }
+
   protected emit() {
     this.cache = null;
     this.listeners.forEach(listener => listener());

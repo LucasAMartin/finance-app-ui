@@ -156,6 +156,10 @@ export function flagBg(dark: boolean): string {
 // DESIGN.md hero-avail token.
 export const HERO_AVAIL = '#5CC4BA';
 
+// Icon color on group-color, over-ember, or caution-amber filled backgrounds.
+// Always white — group-color fills are bold enough in both modes.
+export const ON_GROUP_ICON = '#FFFFFF';
+
 // Accent colors for the three 50/30/20 spending groups.
 // Import GROUP_COLORS in any component that needs to color by group.
 export const GROUP_COLORS: Record<

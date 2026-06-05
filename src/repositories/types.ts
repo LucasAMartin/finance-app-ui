@@ -271,6 +271,12 @@ export type RecurringRulesRepo = Repository<RecurringRule>;
 export type AttachmentsRepo = Repository<Attachment>;
 export type MerchantLogosRepo = Repository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>;
 
+export interface DevDataRepo {
+  isSeedDataEnabled(): boolean;
+  setSeedDataEnabled(enabled: boolean): void;
+  subscribe(listener: RepoListener): Unsubscribe;
+}
+
 export interface Repositories {
   transactionsRepo: TransactionsRepo;
   incomeRepo: IncomeRepo;
@@ -281,6 +287,7 @@ export interface Repositories {
   recurringRulesRepo: RecurringRulesRepo;
   attachmentsRepo: AttachmentsRepo;
   merchantLogosRepo: MerchantLogosRepo;
+  devDataRepo: DevDataRepo;
 }
 
 export interface SpendSub {

@@ -14,6 +14,7 @@ import type {
   Budget,
   Category,
   CreateTransactionInput,
+  DevDataRepo,
   Income,
   MerchantLogo,
   RecurringRule,
@@ -77,12 +78,17 @@ class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, 
     if (this.rows.length !== before) this.emit();
   }
 
+  replaceAll(rows: T[]) {
+    this.rows = rows.map(row => ({ ...row }));
+    this.emit();
+  }
+
   subscribe(listener: RepoListener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private emit() {
+  protected emit() {
     this.listeners.forEach(listener => listener());
   }
 }
@@ -195,16 +201,79 @@ class InMemoryTransactionsRepo
   }
 }
 
+class InMemoryDevDataRepo implements DevDataRepo {
+  private listeners = new Set<RepoListener>();
+
+  constructor(
+    private repos: {
+      transactionsRepo: InMemoryTransactionsRepo;
+      incomeRepo: InMemoryRepository<Income>;
+      billsRepo: InMemoryRepository<Bill>;
+      budgetsRepo: InMemoryRepository<Budget>;
+      categoriesRepo: InMemoryRepository<Category>;
+      recurringRulesRepo: InMemoryRepository<RecurringRule>;
+      attachmentsRepo: InMemoryRepository<Attachment>;
+    },
+  ) {}
+
+  isSeedDataEnabled(): boolean {
+    return (
+      this.repos.transactionsRepo.list().length +
+      this.repos.incomeRepo.list().length +
+      this.repos.billsRepo.list().length +
+      this.repos.budgetsRepo.list().length +
+      this.repos.categoriesRepo.list().length +
+      this.repos.recurringRulesRepo.list().length +
+      this.repos.attachmentsRepo.list().length
+    ) > 0;
+  }
+
+  setSeedDataEnabled(enabled: boolean): void {
+    this.repos.transactionsRepo.replaceAll(enabled ? SEED_TRANSACTIONS : []);
+    this.repos.incomeRepo.replaceAll(enabled ? SEED_INCOME : []);
+    this.repos.billsRepo.replaceAll(enabled ? SEED_BILLS : []);
+    this.repos.budgetsRepo.replaceAll(enabled ? SEED_BUDGETS : []);
+    this.repos.categoriesRepo.replaceAll(enabled ? SEED_CATEGORIES : []);
+    this.repos.recurringRulesRepo.replaceAll(enabled ? SEED_RECURRING_RULES : []);
+    this.repos.attachmentsRepo.replaceAll([]);
+    this.listeners.forEach(listener => listener());
+  }
+
+  subscribe(listener: RepoListener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
+
 export function createInMemoryRepositories(): Repositories {
+  const transactionsRepo = new InMemoryTransactionsRepo(SEED_TRANSACTIONS);
+  const incomeRepo = new InMemoryRepository<Income>(SEED_INCOME);
+  const billsRepo = new InMemoryRepository<Bill>(SEED_BILLS);
+  const budgetsRepo = new InMemoryRepository<Budget>(SEED_BUDGETS);
+  const settingsRepo = new InMemoryRepository<AppSettings, AppSettings>([SEED_SETTINGS]);
+  const categoriesRepo = new InMemoryRepository<Category>(SEED_CATEGORIES);
+  const recurringRulesRepo = new InMemoryRepository<RecurringRule>(SEED_RECURRING_RULES);
+  const attachmentsRepo = new InMemoryRepository<Attachment>([]);
+  const merchantLogosRepo = new InMemoryRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>([]);
+
   return {
-    transactionsRepo: new InMemoryTransactionsRepo(SEED_TRANSACTIONS),
-    incomeRepo: new InMemoryRepository<Income>(SEED_INCOME),
-    billsRepo: new InMemoryRepository<Bill>(SEED_BILLS),
-    budgetsRepo: new InMemoryRepository<Budget>(SEED_BUDGETS),
-    settingsRepo: new InMemoryRepository<AppSettings, AppSettings>([SEED_SETTINGS]),
-    categoriesRepo: new InMemoryRepository<Category>(SEED_CATEGORIES),
-    recurringRulesRepo: new InMemoryRepository<RecurringRule>(SEED_RECURRING_RULES),
-    attachmentsRepo: new InMemoryRepository<Attachment>([]),
-    merchantLogosRepo: new InMemoryRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>([]),
+    transactionsRepo,
+    incomeRepo,
+    billsRepo,
+    budgetsRepo,
+    settingsRepo,
+    categoriesRepo,
+    recurringRulesRepo,
+    attachmentsRepo,
+    merchantLogosRepo,
+    devDataRepo: new InMemoryDevDataRepo({
+      transactionsRepo,
+      incomeRepo,
+      billsRepo,
+      budgetsRepo,
+      categoriesRepo,
+      recurringRulesRepo,
+      attachmentsRepo,
+    }),
   };
 }

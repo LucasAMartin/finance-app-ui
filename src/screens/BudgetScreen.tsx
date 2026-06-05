@@ -26,9 +26,9 @@ const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
+import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON } from '../theme';
 import { Icon } from '../components/Icon';
-import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 import { applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { Collapsible } from '../components/Collapsible';
@@ -37,7 +37,9 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { TYPE } from '../typography';
-import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA } from '../wallpaperPalette';
+import { SPACE, LAYOUT } from '../spacing';
+import { RADIUS } from '../radius';
+import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
 import type { Bill, Category, GroupKey, Income, RecurringRule, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
@@ -244,7 +246,7 @@ function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
 }) {
   const swipeRef = useRef<Swipeable>(null);
 
-  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
+  const renderRightActions = useCallback((progress: Animated.AnimatedInterpolation<number>) => {
     const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
     return (
       <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
@@ -252,11 +254,11 @@ function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
           onPress={onRemove}
           style={{ flex: 1, marginLeft: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: OVER_DOT }}
         >
-          <Icon name="trash" size={18} color="#FBF8FF" stroke={1.6} />
+          <Icon name="trash" size={18} color={ON_GROUP_ICON} stroke={1.6} />
         </TouchableOpacity>
       </Animated.View>
     );
-  };
+  }, [onRemove]);
 
   return (
     <Swipeable
@@ -311,14 +313,19 @@ function CollapsingRow({ removing, children }: { removing: boolean; children: Re
 }
 
 // Allocation bar segments
-function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, wantsCol, savingsCol, height = 8 }: {
+function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, wantsCol, savingsCol, height = 8, accessibilityLabel }: {
   needsFrac: number; wantsFrac: number; savingsFrac: number;
   trackBg: string; needsCol: string; wantsCol: string; savingsCol: string;
   height?: number;
+  accessibilityLabel?: string;
 }) {
   const r = height / 2;
   return (
-    <View style={{ height, borderRadius: r, overflow: 'hidden', flexDirection: 'row', backgroundColor: trackBg }}>
+    <View
+      style={{ height, borderRadius: r, overflow: 'hidden', flexDirection: 'row', backgroundColor: trackBg }}
+      accessibilityRole="image"
+      accessibilityLabel={accessibilityLabel}
+    >
       {needsFrac > 0 && <View style={{ height: '100%', width: `${(needsFrac * 100).toFixed(2)}%` as any, backgroundColor: needsCol }} />}
       {wantsFrac > 0 && <View style={{ height: '100%', width: `${(wantsFrac * 100).toFixed(2)}%` as any, backgroundColor: wantsCol }} />}
       {savingsFrac > 0 && <View style={{ height: '100%', width: `${(savingsFrac * 100).toFixed(2)}%` as any, backgroundColor: savingsCol }} />}
@@ -489,6 +496,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   // runs as the JS listener to drive the (layout-dependent) pin state.
   const scrollY = useRef(new Animated.Value(0)).current;
   const bgTranslateY = makeBgTranslateY(scrollY);
+  const iconScrolledOpacity = scrollY.interpolate({ inputRange: [0, 80], outputRange: [0, 1], extrapolate: 'clamp' });
   const floorOpacity = scrollY.interpolate({
     inputRange: [0, SCREEN_H * 0.6],
     outputRange: [0, 1],
@@ -1201,12 +1209,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   // Shared allocation-card body — rendered identically by both the in-scroll
   // card and the pinned overlay so the hand-off is a seamless swap, not a fade.
   // Only the bar + legend animates — the income button lives in its own card below.
-  const allocationBarBody = () => (
+  const allocationBarBody = useMemo(() => (
     <>
       <AllocationBar
         needsFrac={needsFrac} wantsFrac={wantsFrac} savingsFrac={savingsFrac}
         trackBg={p.trackBg} needsCol={needsCol} wantsCol={wantsCol} savingsCol={savingsCol}
         height={7}
+        accessibilityLabel={`Budget allocation: Needs ${Math.round(needsFrac * 100)}%, Wants ${Math.round(wantsFrac * 100)}%, Savings ${Math.round(savingsFrac * 100)}%`}
       />
       <View style={styles.legendRow}>
         {legendItems.map(item => (
@@ -1223,11 +1232,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         ))}
       </View>
     </>
-  );
+  ), [needsFrac, wantsFrac, savingsFrac, p.trackBg, p.text, p.textSec, needsCol, wantsCol, savingsCol, legendItems]);
 
   const incomeBtnRef = useRef<View>(null);
 
-  const stickyBorderColor = theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
+  const stickyBorderColor = theme.dark ? MEDIA.hairline : ONMEDIA_BORDER_LIGHT;
 
   return (
     <DraftContext.Provider value={draftContextValue}>
@@ -1289,7 +1298,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 size={40}
                 iconSize={18}
                 iconColor={theme.dark ? MEDIA.text : '#0E0C18'}
-                glassTint={theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'}
+                glassTint={glassTintForTheme(theme.dark)}
                 colorScheme={theme.dark ? 'dark' : 'light'}
                 accessibilityLabel="Open menu"
               />
@@ -1298,7 +1307,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 <Icon name="menu" size={22} color={pWallpaper.text} stroke={1.7} />
               </IconBtn>
             )}
-            <Text style={[TYPE.pageTitle, { color: theme.text }]}>Budget</Text>
+            <View style={styles.headerTitle} pointerEvents="none">
+              <Text style={[styles.headerTitleText, { color: pWallpaper.text }]}>Budget</Text>
+              <Animated.Text style={[styles.headerTitleText, StyleSheet.absoluteFill, { color: theme.text, opacity: iconScrolledOpacity }]}>Budget</Animated.Text>
+            </View>
             <ThemeToggle />
           </View>
 
@@ -1321,7 +1333,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
               tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
             >
               <View style={[styles.stickyCardInner, { borderColor: stickyBorderColor }]}>
-                {allocationBarBody()}
+                {allocationBarBody}
               </View>
             </BlurView>
           </Animated.View>
@@ -1399,7 +1411,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 style={{ opacity: allocCardOpacity }}
               >
                 <SectionCard dark={theme.dark}>
-                  {allocationBarBody()}
+                  {allocationBarBody}
                 </SectionCard>
               </Animated.View>
 
@@ -1447,7 +1459,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                      <View style={{ flex: 1, minWidth: 0 }}>
 	                        <View style={styles.groupTitleRow}>
 	                          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: groupColor }} />
-	                          <Text style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
+	                          <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
 	                        </View>
 	                        <Text style={[TYPE.caption, { color: groupIsOver ? OVER_DOT : p.textSec }]}>
 	                          {groupIsOver ? `\$${fmtMoney(groupDelta)} over target of ${fmtPct(g.targetPct)}` : `\$${fmtMoney(groupTarget)} target · ${fmtPct(g.targetPct)}`}
@@ -1480,6 +1492,9 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                               style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                               accessibilityRole="button"
                               accessibilityLabel={`Edit ${sub.label} category`}
+                              accessibilityHint="Swipe left to delete"
+                              accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+                              onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, sub); }}
                             >
                               <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
                                 <Icon name={sub.icon} size={15} color={groupColor} stroke={1.6} />
@@ -1528,8 +1543,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                               activeOpacity={customCat ? 0.7 : 1}
                               delayPressIn={0}
                               style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Edit ${sub.label} category`}
+                              accessibilityHint="Swipe left to delete"
+                              accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+                              onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }); }}
                             >
-                              <View style={[styles.rowIcon, { backgroundColor: theme.dark ? 'rgba(180,160,240,0.18)' : 'rgba(14,12,24,0.08)' }]}>
+                              <View style={[styles.rowIcon, { backgroundColor: groupColor + '26' }]}>
                                 <Icon name={customCat?.icon ?? 'tag'} size={14} color={groupColor} stroke={1.5} />
                               </View>
 	                              <View style={{ flex: 1, minWidth: 0 }}>
@@ -1572,6 +1592,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                   activeOpacity={0.7}
                                   delayPressIn={0}
                                   style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Edit ${sub.label} category`}
+                                  accessibilityHint="Swipe left to delete"
+                                  accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+                                  onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, sub); }}
                                 >
                                   <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
                                     <Icon name={sub.icon} size={15} color={groupColor} stroke={1.6} />
@@ -1611,8 +1636,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                   activeOpacity={customCat ? 0.7 : 1}
                                   delayPressIn={0}
                                   style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Edit ${sub.label} category`}
+                                  accessibilityHint="Swipe left to delete"
+                                  accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+                                  onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }); }}
                                 >
-                                  <View style={[styles.rowIcon, { backgroundColor: theme.dark ? 'rgba(180,160,240,0.18)' : 'rgba(14,12,24,0.08)' }]}>
+                                  <View style={[styles.rowIcon, { backgroundColor: groupColor + '26' }]}>
                                     <Icon name={customCat?.icon ?? 'repeat'} size={14} color={groupColor} stroke={1.5} />
                                   </View>
 	                                  <View style={{ flex: 1, minWidth: 0 }}>
@@ -1645,6 +1675,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                 activeOpacity={0.7}
                                 delayPressIn={0}
                                 style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Edit ${bill.name} category`}
+                                accessibilityHint="Swipe left to delete"
+                                accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+                                onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveBill(bill); }}
                               >
                                 <View style={[styles.rowIcon, { backgroundColor: `${categoryGroupColor(bill.cat, categories, theme.dark)}26` }]}>
                                   <Icon name={bill.icon} size={15} color={categoryGroupColor(bill.cat, categories, theme.dark)} stroke={1.6} />
@@ -1715,7 +1750,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
               <BlurView
                 intensity={theme.dark ? 70 : 100}
                 tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-                style={{ borderRadius: 14, overflow: 'hidden' }}
+                style={{ borderRadius: RADIUS.field, overflow: 'hidden' }}
               >
                 <View style={[styles.undoToast, { borderColor: stickyBorderColor }]}>
                   <Text style={[TYPE.bodySm, { flex: 1, color: p.text }]}>{undoLabel}</Text>
@@ -2125,7 +2160,7 @@ function CategoryEditSheet({
                     accessibilityLabel="Choose category icon"
                   >
                     <View style={[styles.catHeroCircle, { backgroundColor: groupIconBg }]}>
-                      <Icon name={icon} size={22} color="#FBF8FF" stroke={1.5} />
+                      <Icon name={icon} size={22} color={ON_GROUP_ICON} stroke={1.5} />
                     </View>
                     <View style={[styles.iconPickerBadge, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
                       <Icon name="chevDown" size={7} color="rgba(0,0,0,0.55)" stroke={2.4} />
@@ -2163,7 +2198,8 @@ function CategoryEditSheet({
             appearance={theme.dark ? 'dark' : 'light'}
             backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
             fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
-            activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
+            activeFontStyle={{ color: theme.accent.ink, fontWeight: '600' }}
+            accessibilityLabel="Budget group"
             style={[styles.catGroupSegmented, compactSheet && styles.catGroupSegmentedCompact]}
           />
 
@@ -2208,7 +2244,7 @@ function CategoryEditSheet({
                 accessibilityLabel="Recurring expense"
                 onValueChange={onRecurringChange}
                 trackColor={{ false: theme.hairline, true: theme.accent.dot }}
-                thumbColor="#FBF8FF"
+                thumbColor={ON_GROUP_ICON}
               />
             </View>
             {recurring && (
@@ -2392,19 +2428,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingBottom: LAYOUT.rowPadY,
   },
+  headerTitle: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerTitleText: { ...TYPE.pageTitle, textAlign: 'center' },
   stickyCardInner: {
     borderBottomWidth: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: LAYOUT.cardPadTop,
+    paddingBottom: SPACE.lg,
   },
   hero: {
-    paddingHorizontal: 4,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: SPACE.xs,
+    paddingTop: SPACE.sm,
+    paddingBottom: SPACE.md,
   },
   heroTopRow: {
     flexDirection: 'row',
@@ -2429,45 +2467,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 5,
-    paddingVertical: 4,
-    paddingLeft: 8,
-    paddingRight: 2,
+    gap: 5, // off-grid optical — tight arrow+text pairing
+    paddingVertical: SPACE.xs,
+    paddingLeft: SPACE.sm,
+    paddingRight: SPACE.px2,
   },
   heroMonthText: {
-    ...TYPE.onMediaStatusSub,
-    fontWeight: '500' as const,
+    ...TYPE.onMediaStatusSubMd,
   },
   sectionStack: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: LAYOUT.screenGutter,
+    paddingTop: SPACE.md,
     paddingBottom: 0,
-    gap: 16,
+    gap: SPACE.lg,
   },
   cardHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    gap: 16,
-    marginBottom: 16,
+    gap: SPACE.lg,
+    marginBottom: SPACE.lg,
   },
   groupTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+    gap: SPACE.sm,
+    marginBottom: SPACE.xs,
   },
   groupHeadAmount: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: SPACE.sm,
     flexShrink: 0,
   },
   legendRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 12,
-    marginBottom: 4,
+    marginTop: SPACE.md,
+    marginBottom: SPACE.xs,
   },
   legendItem: {
     alignItems: 'center',
@@ -2475,19 +2512,19 @@ const styles = StyleSheet.create({
   },
   incomeNativeSheet: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    gap: 16,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: 22, // slightly above xl — visual breathing room before the hero
+    gap: SPACE.lg,
   },
   incomeHero: {
     alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: SPACE.sm,
+    paddingBottom: SPACE.md,
   },
   incomeHeroCircle: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: 26, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2496,13 +2533,13 @@ const styles = StyleSheet.create({
   },
   incomeFeedback: {
     minHeight: 34,
-    borderRadius: 17,
-    marginTop: 12,
-    paddingHorizontal: 12,
+    borderRadius: 17, // width/2 — pill shape
+    marginTop: SPACE.md,
+    paddingHorizontal: SPACE.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
+    gap: 7, // off-grid optical — tight icon+text pairing
   },
   incomeAmountInput: {
     minWidth: 60,
@@ -2511,16 +2548,16 @@ const styles = StyleSheet.create({
   undoToast: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: LAYOUT.screenGutter,
+    paddingVertical: LAYOUT.rowPadY,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: RADIUS.field,
   },
   editRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
   subGoalTrack: {
     width: 56,
@@ -2531,7 +2568,7 @@ const styles = StyleSheet.create({
   rowIcon: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 16, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -2539,17 +2576,17 @@ const styles = StyleSheet.create({
   billsDivider: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingTop: 12,
-    paddingBottom: 2,
+    gap: SPACE.sm,
+    paddingTop: SPACE.md,
+    paddingBottom: SPACE.px2,
     borderTopWidth: 1,
   },
   addCatBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingTop: 12,
-    paddingBottom: 2,
+    gap: SPACE.sm,
+    paddingTop: SPACE.md,
+    paddingBottom: SPACE.px2,
   },
   categorySheet: {
     flex: 1,
@@ -2559,11 +2596,11 @@ const styles = StyleSheet.create({
   },
   categorySheetContent: {
     flexGrow: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: LAYOUT.cardPadX,
   },
   categoryGoalPreview: {
-    marginTop: 12,
-    gap: 8,
+    marginTop: SPACE.md,
+    gap: SPACE.sm,
   },
   goalTrack: {
     height: 6,
@@ -2571,27 +2608,27 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   catSheetFooter: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: SPACE.md,
   },
   categoryDeleteButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: LAYOUT.rowPadY,
   },
   catHero: {
     alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 16,
+    paddingTop: SPACE.sm,
+    paddingBottom: SPACE.lg,
   },
   catHeroCompact: {
-    paddingTop: 4,
-    paddingBottom: 12,
+    paddingTop: SPACE.xs,
+    paddingBottom: SPACE.md,
   },
   catHeroCircle: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: 26, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2601,7 +2638,7 @@ const styles = StyleSheet.create({
     right: -1,
     width: 18,
     height: 18,
-    borderRadius: 9,
+    borderRadius: 9, // width/2 — circle
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -2627,7 +2664,7 @@ const styles = StyleSheet.create({
   editCaret: {
     width: 2,
     height: 17,
-    borderRadius: 1,
+    borderRadius: 1, // rounded cursor tip
     marginLeft: 1,
   },
   // Fixes date picker row height — prevents Host from expanding when a picker
@@ -2646,7 +2683,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   catFieldCard: {
-    borderRadius: 14,
+    borderRadius: RADIUS.field,
     overflow: 'hidden',
   },
   catFieldRow: {
@@ -2654,18 +2691,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 50,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    gap: 12,
+    paddingVertical: LAYOUT.rowPadY,
+    paddingHorizontal: LAYOUT.screenGutter,
+    gap: SPACE.md,
   },
   catFieldRowCompact: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 44,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    gap: 12,
+    paddingVertical: SPACE.sm,
+    paddingHorizontal: LAYOUT.screenGutter,
+    gap: SPACE.md,
   },
   catFieldLabel: {
     ...TYPE.body,

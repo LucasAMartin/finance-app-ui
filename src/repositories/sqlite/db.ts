@@ -345,77 +345,116 @@ function seedIfEmpty(database: SQLiteDatabase) {
       json(SEED_SETTINGS.meta),
     );
 
-    SEED_INCOME.forEach(income => {
-      database.runSync(
-        'INSERT INTO incomes (id, kind, amount, source, cadence, start_date, end_date, received_at, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        income.id,
-        income.kind ?? 'regular',
-        income.amount,
-        income.source,
-        income.cadence,
-        income.startDate,
-        income.endDate ?? null,
-        income.receivedAt ?? null,
-        income.createdByUserId ?? 'local',
-        income.updatedByUserId ?? 'local',
-        json(income.meta),
-      );
-    });
+    insertSeedDomainData(database);
+  });
+}
 
-    insertSeedTransactions(database);
+export function isDevSeedDataEnabled(): boolean {
+  const database = getDb();
+  const row = database.getFirstSync<{ count: number }>(`
+    SELECT
+      (SELECT COUNT(*) FROM transactions) +
+      (SELECT COUNT(*) FROM incomes) +
+      (SELECT COUNT(*) FROM budgets) +
+      (SELECT COUNT(*) FROM bills) +
+      (SELECT COUNT(*) FROM categories) +
+      (SELECT COUNT(*) FROM recurring_rules) +
+      (SELECT COUNT(*) FROM attachments) AS count
+  `);
+  return (row?.count ?? 0) > 0;
+}
 
-    SEED_CATEGORIES.forEach(cat => insertCategory(database, cat));
+export function setDevSeedDataEnabled(enabled: boolean) {
+  const database = getDb();
+  database.withTransactionSync(() => {
+    clearDomainData(database);
+    if (enabled) insertSeedDomainData(database);
+  });
+}
 
-    SEED_BUDGETS.forEach(budget => {
-      database.runSync(
-        'INSERT INTO budgets (id, month, group_key, category, label, icon, amount, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        budget.id,
-        budget.month,
-        budget.group ?? null,
-        budget.category ?? null,
-        budget.label ?? null,
-        budget.icon ?? null,
-        budget.amount,
-        json(budget.meta),
-      );
-    });
+function clearDomainData(database: SQLiteDatabase) {
+  database.execSync(`
+    DELETE FROM attachments;
+    DELETE FROM transactions;
+    DELETE FROM incomes;
+    DELETE FROM budgets;
+    DELETE FROM bills;
+    DELETE FROM recurring_rules;
+    DELETE FROM categories;
+  `);
+}
 
-    SEED_BILLS.forEach(bill => {
-      database.runSync(
-        'INSERT INTO bills (id, amount, merchant, name, icon, category, due_date, recurring, days_until, estimate, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        bill.id,
-        bill.amount,
-        bill.merchant,
-        bill.name,
-        bill.icon,
-        bill.cat,
-        bill.dueDate,
-        bill.recurring ? 1 : 0,
-        bill.daysUntil,
-        bill.estimate ? 1 : 0,
-        json(bill.meta),
-      );
-    });
+function insertSeedDomainData(database: SQLiteDatabase) {
+  SEED_INCOME.forEach(income => {
+    database.runSync(
+      'INSERT OR REPLACE INTO incomes (id, kind, amount, source, cadence, start_date, end_date, received_at, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      income.id,
+      income.kind ?? 'regular',
+      income.amount,
+      income.source,
+      income.cadence,
+      income.startDate,
+      income.endDate ?? null,
+      income.receivedAt ?? null,
+      income.createdByUserId ?? 'local',
+      income.updatedByUserId ?? 'local',
+      json(income.meta),
+    );
+  });
 
-    SEED_RECURRING_RULES.forEach(rule => {
-      database.runSync(
-        'INSERT INTO recurring_rules (id, merchant, category, amount, cadence, start_date, next_due_date, day_of_month, month_of_year, estimate, active, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        rule.id,
-        rule.merchant,
-        rule.cat,
-        rule.amount,
-        rule.cadence,
-        rule.startDate,
-        nextDueFromSeed(rule.dayOfMonth ?? new Date(rule.nextDueDate).getDate()),
-        rule.dayOfMonth ?? null,
-        rule.monthOfYear ?? null,
-        rule.estimate ? 1 : 0,
-        rule.active ? 1 : 0,
-        rule.createdByUserId ?? 'local',
-        rule.updatedByUserId ?? 'local',
-        json(rule.meta),
-      );
-    });
+  insertSeedTransactions(database);
+
+  SEED_CATEGORIES.forEach(cat => insertCategory(database, cat));
+
+  SEED_BUDGETS.forEach(budget => {
+    database.runSync(
+      'INSERT OR REPLACE INTO budgets (id, month, group_key, category, label, icon, amount, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      budget.id,
+      budget.month,
+      budget.group ?? null,
+      budget.category ?? null,
+      budget.label ?? null,
+      budget.icon ?? null,
+      budget.amount,
+      json(budget.meta),
+    );
+  });
+
+  SEED_BILLS.forEach(bill => {
+    database.runSync(
+      'INSERT OR REPLACE INTO bills (id, amount, merchant, name, icon, category, due_date, recurring, days_until, estimate, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      bill.id,
+      bill.amount,
+      bill.merchant,
+      bill.name,
+      bill.icon,
+      bill.cat,
+      bill.dueDate,
+      bill.recurring ? 1 : 0,
+      bill.daysUntil,
+      bill.estimate ? 1 : 0,
+      json(bill.meta),
+    );
+  });
+
+  SEED_RECURRING_RULES.forEach(rule => {
+    database.runSync(
+      'INSERT OR REPLACE INTO recurring_rules (id, merchant, category, amount, cadence, start_date, next_due_date, day_of_month, month_of_year, estimate, active, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      rule.id,
+      rule.merchant,
+      rule.cat,
+      rule.amount,
+      rule.cadence,
+      rule.startDate,
+      nextDueFromSeed(rule.dayOfMonth ?? new Date(rule.nextDueDate).getDate()),
+      rule.dayOfMonth ?? null,
+      rule.monthOfYear ?? null,
+      rule.estimate ? 1 : 0,
+      rule.active ? 1 : 0,
+      rule.createdByUserId ?? 'local',
+      rule.updatedByUserId ?? 'local',
+      json(rule.meta),
+    );
   });
 }
 

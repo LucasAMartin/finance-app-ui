@@ -35,6 +35,14 @@ export function makeP(dark: boolean) {
 
 export type WallpaperP = ReturnType<typeof makeP>;
 
+// Shared on-wallpaper surface constants. Use alongside MEDIA (which covers the
+// dark-mode variants) so callers never inline the same rgba string independently.
+
+// Hairline border/overlay for on-wallpaper surfaces in light mode (8% dark tint).
+// Darker than makeP(false).hairline (9%) — used for sticky card borders and
+// header backdrop dividers that need a slightly crisper edge.
+export const ONMEDIA_BORDER_LIGHT = 'rgba(14,12,24,0.08)';
+
 // Scrim colors that match the HomeScreen aesthetic.
 // Light mode: subtle dark tint (wallpaper shows through vividly).
 // Dark mode: heavy violet-black tint (frames the dark glass cards).
