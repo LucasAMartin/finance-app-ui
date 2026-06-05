@@ -2,11 +2,12 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
+import { Link } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Divider, HStack, Host, Image } from '@expo/ui/swift-ui';
 import { accessibilityLabel, buttonStyle, frame, glassEffect, padding } from '@expo/ui/swift-ui/modifiers';
 import { Icon } from './Icon';
-import { SUPPORTS_GLASS } from './GlassButton';
+import { GlassCircleIcon, SUPPORTS_GLASS } from './GlassButton';
 import { Theme } from '../theme';
 import type { SourceRect } from './ContainerTransform';
 
@@ -33,9 +34,8 @@ const TAB_GAP  = 4;   // spacing between buttons in the pill
 
 // ─── Liquid Glass tab bar (iOS 26+) ──────────────────────────────────────────
 
-function GlassTabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
+function GlassTabBar({ theme, active, onTabPress }: TabBarProps) {
   const insets  = useSafeAreaInsets();
-  const pillRef = useRef<View>(null);
 
   const handleTabPress = (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -44,13 +44,6 @@ function GlassTabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
 
   const handleAdd = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // The + button sits at the trailing end of the pill, vertically centered.
-    // Derive its window rect from the measured pill so the morph starts from it.
-    pillRef.current?.measureInWindow((x, y, w, h) => {
-      const btnX = x + w - PILL_PAD - ADD_SIZE;
-      const btnY = y + (h - ADD_SIZE) / 2;
-      onAdd({ x: btnX, y: btnY, width: ADD_SIZE, height: ADD_SIZE, radius: ADD_SIZE / 2 });
-    });
   };
 
   return (
@@ -58,9 +51,7 @@ function GlassTabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
       style={[glassStyles.container, { bottom: Math.max(insets.bottom, 16) + 8 }]}
       accessibilityRole="tablist"
     >
-      {/* collapsable={false} keeps this View in the native hierarchy so
-          measureInWindow always returns the correct screen coordinates. */}
-      <View ref={pillRef} collapsable={false}>
+      <View collapsable={false} style={glassStyles.pillWrap}>
         <Host matchContents ignoreSafeArea="all">
           {/* One Liquid Glass capsule behind the whole row — the pill. The tab
               icons are plain buttons sitting on it; only the + carries its own
@@ -102,22 +93,32 @@ function GlassTabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
             {/* Add button — a circular accent-tinted glass marks it as the
                 primary action. Explicit circle shape (not glassProminent, which
                 renders a capsule/oval) keeps it perfectly round. */}
-            <Button
-              onPress={handleAdd}
-              modifiers={[
-                frame({ width: ADD_SIZE, height: ADD_SIZE }),
-                glassEffect({
-                  glass: { variant: 'regular', interactive: true, tint: theme.accent.dot },
-                  shape: 'circle',
-                }),
-                buttonStyle('plain'),
-                accessibilityLabel('Add expense'),
-              ]}
-            >
-              <Image systemName="plus" size={24} color={theme.accent.ink} />
-            </Button>
+            <Image systemName="plus" size={1} color="transparent" modifiers={[frame({ width: ADD_SIZE, height: ADD_SIZE })]} />
           </HStack>
         </Host>
+        <Link href="/expense?mode=voice" asChild>
+          <Link.Trigger>
+            <Pressable
+              onPressIn={handleAdd}
+              pointerEvents="box-only"
+              accessibilityRole="button"
+              accessibilityLabel="Add expense"
+              style={glassStyles.addOverlay}
+            >
+              <Link.AppleZoom>
+                <View collapsable={false} style={glassStyles.addZoomSource}>
+                  <GlassCircleIcon
+                    systemImage="plus"
+                    size={ADD_SIZE}
+                    iconSize={24}
+                    iconColor={theme.accent.ink}
+                    glassTint={theme.accent.dot}
+                  />
+                </View>
+              </Link.AppleZoom>
+            </Pressable>
+          </Link.Trigger>
+        </Link>
       </View>
     </View>
   );
@@ -131,18 +132,31 @@ const glassStyles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 30,
   },
+  pillWrap: {
+    position: 'relative',
+  },
+  addOverlay: {
+    position: 'absolute',
+    right: PILL_PAD + 2,
+    top: PILL_PAD + 2,
+    width: ADD_SIZE,
+    height: ADD_SIZE,
+    borderRadius: ADD_SIZE / 2,
+  },
+  addZoomSource: {
+    width: ADD_SIZE,
+    height: ADD_SIZE,
+  },
 });
 
 // ─── Fallback tab bar (iOS < 26, Android) ────────────────────────────────────
 
 const EASE_OUT_EXPO = Easing.bezier(0.16, 1, 0.3, 1);
 
-function FallbackTabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
+function FallbackTabBar({ theme, active, onTabPress }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const scales = useRef(TABS.map(() => new Animated.Value(1))).current;
   const [localActive, setLocalActive] = useState(active);
-  const addBtnRef      = useRef<View>(null);
-  const addSourceCache = useRef<SourceRect | null>(null);
 
   useEffect(() => { setLocalActive(active); }, [active]);
 
@@ -187,35 +201,23 @@ function FallbackTabBar({ theme, active, onAdd, onTabPress }: TabBarProps) {
 
       <View style={[fallbackStyles.divider, { backgroundColor: theme.hairline }]} />
 
-      <Pressable
-        ref={addBtnRef}
-        onPressIn={() => {
-          addBtnRef.current?.measureInWindow((x, y, w, h) => {
-            addSourceCache.current = { x, y, width: w, height: h, radius: TAB_W / 2 };
-          });
-        }}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          const src = addSourceCache.current ?? null;
-          addSourceCache.current = null;
-          if (src) {
-            onAdd(src);
-          } else {
-            addBtnRef.current?.measureInWindow((x, y, w, h) => {
-              onAdd({ x, y, width: w, height: h, radius: TAB_W / 2 });
-            });
-          }
-        }}
-        pointerEvents="box-only"
-        accessibilityRole="button"
-        accessibilityLabel="Add expense"
-        style={[
-          fallbackStyles.tabBtn,
-          { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
-        ]}
-      >
-        <Icon name="plus" size={24} color={theme.text} stroke={2} />
-      </Pressable>
+      <Link href="/expense?mode=voice" asChild>
+        <Link.Trigger withAppleZoom>
+          <Pressable
+            onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+            pointerEvents="box-only"
+            accessibilityRole="button"
+            accessibilityLabel="Add expense"
+            style={[
+              fallbackStyles.tabBtn,
+              fallbackStyles.addNudge,
+              { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
+            ]}
+          >
+            <Icon name="plus" size={24} color={theme.text} stroke={2} />
+          </Pressable>
+        </Link.Trigger>
+      </Link>
     </View>
   );
 
@@ -281,6 +283,9 @@ const fallbackStyles = StyleSheet.create({
     borderRadius: TAB_W / 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addNudge: {
+    transform: [{ translateX: -2 }, { translateY: 2 }],
   },
   divider: {
     width: 1,

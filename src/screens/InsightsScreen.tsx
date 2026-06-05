@@ -61,7 +61,7 @@ import {
 import { buildSavedMetric } from '../selectors/savings';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
-import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS } from '../components/GlassButton';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
@@ -463,19 +463,28 @@ function InsightBottomSheet({
             />
 
             <View style={styles.insightSheetHero}>
-              <View
-                style={[
-                  styles.insightSheetMark,
-                  { backgroundColor: `${d.color}2B` },
-                ]}
-              >
-                <Icon
-                  name={d.icon ?? 'tag'}
-                  size={24}
+              {d.merchant ? (
+                <MerchantMark
+                  merchant={d.merchant}
+                  catIcon={d.icon ?? 'tag'}
                   color={d.color}
-                  stroke={1.7}
+                  size={48}
                 />
-              </View>
+              ) : (
+                <View
+                  style={[
+                    styles.insightSheetMark,
+                    { backgroundColor: `${d.color}2B` },
+                  ]}
+                >
+                  <Icon
+                    name={d.icon ?? 'tag'}
+                    size={24}
+                    color={d.color}
+                    stroke={1.7}
+                  />
+                </View>
+              )}
               <Text style={[TYPE.label, { color: theme.textTer }]}>
                 {d.eyebrow}
               </Text>
@@ -846,6 +855,7 @@ export function InsightsScreen({
           amount: money(topMerchant.spent, dec(topMerchant.spent)),
           color: catColor(topMerchant.cat),
           icon: topMerchant.icon,
+          merchant: topMerchant.merchant,
           description: isBill
             ? `Recurring bill · ${Math.round(topMerchant.pct * 100)}% of spend.`
             : `${share}% of your variable spend across ${topMerchant.txCount} ${topMerchant.txCount === 1 ? 'charge' : 'charges'}.`,
@@ -1266,6 +1276,7 @@ export function InsightsScreen({
             amount: money(r.spent, dec),
             color,
             icon: r.icon,
+            merchant: r.merchant,
             description: r.recurring
               ? `Recurring bill · ${share}% of spend.`
               : `${share}% of spend across ${r.txCount} ${r.txCount === 1 ? 'charge' : 'charges'}.`,
@@ -1493,16 +1504,29 @@ export function InsightsScreen({
             />
           </Animated.View>
           <View style={styles.headerRow}>
-            <IconBtn onPress={onOpenDrawer} label="Open menu">
-              <HeaderIcon
-                name="menu"
-                wallpaperColor={pWall.text}
-                scrolledColor={p.text}
-                scrolledOpacity={iconScrolledOpacity}
+            {SUPPORTS_GLASS ? (
+              <GlassCircleButton
+                onPress={onOpenDrawer}
+                systemImage="line.3.horizontal"
+                size={40}
+                iconSize={18}
+                iconColor={theme.dark ? MEDIA.text : '#0E0C18'}
+                glassTint={theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'}
+                colorScheme={theme.dark ? 'dark' : 'light'}
+                accessibilityLabel="Open menu"
               />
-            </IconBtn>
+            ) : (
+              <IconBtn onPress={onOpenDrawer} label="Open menu">
+                <HeaderIcon
+                  name="menu"
+                  wallpaperColor={pWall.text}
+                  scrolledColor={p.text}
+                  scrolledOpacity={iconScrolledOpacity}
+                />
+              </IconBtn>
+            )}
 
-            <Text style={[styles.headerTitle, { color: pWall.text }, shadow]}>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>
               Insights
             </Text>
 
@@ -1618,8 +1642,51 @@ export function InsightsScreen({
                 </View>
               </BentoTile>
 
-              {/* Row: Spending trends | Total saved */}
+              {/* Row: Total saved | Spending trends */}
               <View style={styles.bentoRow}>
+                <BentoTile
+                  dark={theme.dark}
+                  style={styles.tileHalf}
+                  onPress={() =>
+                    onOpenInsight({
+                      kind: 'savings',
+                      title: 'Total saved',
+                      subtitle: rangeContextLabel,
+                      icon: 'chart',
+                      accentColor: savingsTint,
+                    })
+                  }
+                  accessibilityLabel={`Total saved, ${money(savedAmount)}`}
+                >
+                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                    Total saved
+                  </Text>
+                  <Text
+                    style={[styles.tileValue, { color: savingsTint }]}
+                    numberOfLines={1}
+                  >
+                    {money(savedAmount)}
+                  </Text>
+                  <Text
+                    style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
+                    numberOfLines={1}
+                  >
+                    {savedSubLabel}
+                  </Text>
+                  <View style={styles.tileMiniChart}>
+                    <SpendChart
+                      data={savedMetric.cumulativeSeries}
+                      width={HALF_CHART_W}
+                      height={40}
+                      color={savingsTint}
+                      fillColor={savingsTint}
+                      ringColor={theme.surface}
+                      strokeWidth={2}
+                      onScrub={setSavedScrubIdx}
+                    />
+                  </View>
+                </BentoTile>
+
                 <BentoTile
                   dark={theme.dark}
                   style={styles.tileHalf}
@@ -1663,97 +1730,52 @@ export function InsightsScreen({
                     />
                   </View>
                 </BentoTile>
-
-                <BentoTile
-                  dark={theme.dark}
-                  style={styles.tileHalf}
-                  onPress={() =>
-                    onOpenInsight({
-                      kind: 'savings',
-                      title: 'Total saved',
-                      subtitle: rangeContextLabel,
-                      icon: 'chart',
-                      accentColor: savingsTint,
-                    })
-                  }
-                  accessibilityLabel={`Total saved, ${money(savedAmount)}`}
-                >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                    Total saved
-                  </Text>
-                  <Text
-                    style={[styles.tileValue, { color: savingsTint }]}
-                    numberOfLines={1}
-                  >
-                    {money(savedAmount)}
-                  </Text>
-                  <Text
-                    style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
-                    numberOfLines={1}
-                  >
-                    {savedSubLabel}
-                  </Text>
-                  <View style={styles.tileMiniChart}>
-                    <SpendChart
-                      data={savedMetric.cumulativeSeries}
-                      width={HALF_CHART_W}
-                      height={40}
-                      color={savingsTint}
-                      fillColor={savingsTint}
-                      ringColor={theme.surface}
-                      strokeWidth={2}
-                      onScrub={setSavedScrubIdx}
-                    />
-                  </View>
-                </BentoTile>
               </View>
 
               {/* What changed — movement vs the previous period */}
               {changeSnapshots.length > 0 ? (
-                <>
-                  <Text style={[styles.bentoSection, { color: pWall.text }, shadow]}>
+                <BentoTile dark={theme.dark}>
+                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]}>
                     What changed
                   </Text>
-                  <BentoTile dark={theme.dark}>
-                    {changeSnapshots.map((s, i) => (
-                      <Pressable
-                        key={s.key}
-                        onPress={() => setInsightDetail(s.detail)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${s.label}. ${s.title}`}
-                        style={({ pressed }) => [
-                          styles.changeRow,
-                          {
-                            borderBottomWidth:
-                              i < changeSnapshots.length - 1
-                                ? StyleSheet.hairlineWidth
-                                : 0,
-                            borderBottomColor: p.hairline,
-                            opacity: pressed ? 0.6 : 1,
-                          },
-                        ]}
+                  {changeSnapshots.map((s, i) => (
+                    <Pressable
+                      key={s.key}
+                      onPress={() => setInsightDetail(s.detail)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${s.label}. ${s.title}`}
+                      style={({ pressed }) => [
+                        styles.changeRow,
+                        {
+                          borderBottomWidth:
+                            i < changeSnapshots.length - 1
+                              ? StyleSheet.hairlineWidth
+                              : 0,
+                          borderBottomColor: p.hairline,
+                          opacity: pressed ? 0.6 : 1,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[styles.changeIcon, { backgroundColor: `${s.color}26` }]}
                       >
-                        <View
-                          style={[styles.changeIcon, { backgroundColor: `${s.color}26` }]}
+                        <Icon name={s.icon} size={15} color={s.color} stroke={1.8} />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                          {s.label}
+                        </Text>
+                        <Text
+                          style={[TYPE.bodySmEm, { color: p.text, marginTop: 2 }]}
+                          numberOfLines={1}
                         >
-                          <Icon name={s.icon} size={15} color={s.color} stroke={1.8} />
-                        </View>
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                            {s.label}
-                          </Text>
-                          <Text
-                            style={[TYPE.bodySmEm, { color: p.text, marginTop: 2 }]}
-                            numberOfLines={1}
-                          >
-                            {s.title}
-                          </Text>
-                        </View>
-                        <Icon name="chevR" size={14} color={p.textTer} stroke={2.1} />
-                      </Pressable>
-                    ))}
-                  </BentoTile>
-                </>
+                          {s.title}
+                        </Text>
+                      </View>
+                      <Icon name="chevR" size={14} color={p.textTer} stroke={2.1} />
+                    </Pressable>
+                  ))}
+                </BentoTile>
               ) : null}
 
               {/* Where it went — switchable top categories / merchants. Carries
@@ -1761,11 +1783,10 @@ export function InsightsScreen({
                   lists read as a matched pair; the picker switches the sub-view
                   and a row tap opens the same insight sheet. */}
               {hasSpending ? (
-                <>
-                  <Text style={[styles.bentoSection, { color: pWall.text }, shadow]}>
+                <BentoTile dark={theme.dark}>
+                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]}>
                     Where it went
                   </Text>
-                  <BentoTile dark={theme.dark}>
                   <SegmentedControl
                     values={WHERE_TABS as unknown as string[]}
                     selectedIndex={whereTab}
@@ -1877,8 +1898,7 @@ export function InsightsScreen({
                       })
                     )}
                   </View>
-                  </BentoTile>
-                </>
+                </BentoTile>
               ) : (
                 <EmptyState
                   theme={theme}
@@ -2029,7 +2049,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   // "Where it went" tile: segmented picker at the top, list below.
-  whereSeg: { height: 30, borderRadius: RADIUS.field, overflow: 'hidden' },
+  whereSeg: { height: 30, borderRadius: RADIUS.field, overflow: 'hidden', marginTop: 4, marginBottom: 10 },
   whereList: { marginTop: 4 },
   tileBar: {
     height: 6,

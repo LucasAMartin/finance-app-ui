@@ -93,9 +93,25 @@ export function DashboardApp() {
   // the bottom of the screen to itself (the pad mirrors the system keyboard slot).
   const tabBarAnim = useRef(new Animated.Value(1)).current;
   const handleKeypadOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      Animated.timing(tabBarAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Wait for the keypad (190ms hide) to finish sliding down before showing the tab bar.
+      Animated.sequence([
+        Animated.delay(190),
+        Animated.timing(tabBarAnim, { toValue: 1, duration: 240, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [tabBarAnim]);
+  const handleOverlayOpenChange = useCallback((open: boolean) => {
+    tabBarAnim.stopAnimation();
     Animated.timing(tabBarAnim, {
       toValue: open ? 0 : 1,
-      duration: open ? 200 : 240,
+      duration: open ? 180 : 160,
       useNativeDriver: true,
     }).start();
   }, [tabBarAnim]);
@@ -262,10 +278,11 @@ export function DashboardApp() {
       onOpenDrawer={openDrawer}
       onOpenTx={openTx}
       onPrepareTx={prepareTx}
+      onOverlayOpenChange={handleOverlayOpenChange}
       initialFilter={activityFilter}
       filterToken={activityFilterToken}
     />
-  ), [activityFilter, activityFilterToken, openDrawer, openTx, prepareTx, theme]);
+  ), [activityFilter, activityFilterToken, handleOverlayOpenChange, openDrawer, openTx, prepareTx, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen

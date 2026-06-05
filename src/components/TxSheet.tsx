@@ -396,10 +396,10 @@ export function TxSheet({
           <>
             <ScreenExitButton
               variant="close"
-              onPress={onClose}
+              onPress={() => { setAmountKeypadOpen(false); onClose(); }}
               tint={theme.textSec}
               fallbackBg={theme.chipBg}
-              style={EXIT_FLOAT_STYLE}
+              style={[EXIT_FLOAT_STYLE, { zIndex: 50 }]}
               accessibilityLabel="Close"
             />
             <View
@@ -615,7 +615,7 @@ function EditSection({
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
           <View style={S.amountDisplay}>
             <Text numberOfLines={1} style={[S.amountValue, { color: editAmt ? theme.text : theme.textTer }]}>
-              ${editAmt || '0.00'}
+              <Text style={{ color: theme.textSec }}>$</Text>{editAmt || '0.00'}
             </Text>
           </View>
         </Pressable>

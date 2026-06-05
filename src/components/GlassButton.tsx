@@ -163,7 +163,8 @@ export interface ScreenExitButtonProps {
    * own SwiftUI `Host` (a `UIHostingController`); inside an `@expo/ui`
    * BottomSheet that host is created/torn down on every present/dismiss, which
    * shows up as open latency and a frame-pause near the end of the close
-   * animation. Sheets pass `glass={false}` to avoid that.
+   * animation. Pass `glass={false}` only for sheet buttons that need the
+   * lighter fallback.
    */
   glass?: boolean;
 }

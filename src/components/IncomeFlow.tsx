@@ -378,7 +378,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                     </Pressable>
                   </View>
                 ) : (
-                  <Pressable onPress={() => setEndDate(monthEndDate(CURRENT_MONTH))} accessibilityRole="button">
+                  <Pressable onPress={() => setEndDate(monthEndDate(CURRENT_MONTH))} accessibilityRole="button" style={{ minHeight: 34, justifyContent: 'center' }}>
                     <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set end date</Text>
                   </Pressable>
                 )}

@@ -35,6 +35,7 @@ export interface InsightDetail {
   color: string;
   description: string;
   icon?: string;
+  merchant?: string;
   // Snapshot details lead with `viz`; chart-scrub details fall back to `metrics`.
   metrics?: InsightMetric[];
   viz?: SnapshotVizSpec;

@@ -664,14 +664,27 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             }]} />
           </Animated.View>
           <View style={styles.headerRow}>
-            <IconBtn onPress={onOpenDrawer} accessibilityLabel="Open menu">
-              <HeaderIcon
-                name="menu"
-                wallpaperColor={pWallpaper.text}
-                scrolledColor={p.text}
-                scrolledOpacity={iconScrolledOpacity}
+            {SUPPORTS_GLASS ? (
+              <GlassCircleButton
+                onPress={onOpenDrawer}
+                systemImage="line.3.horizontal"
+                size={40}
+                iconSize={18}
+                iconColor={quickActionColors(theme, pWallpaper).iconFg}
+                glassTint={quickActionColors(theme, pWallpaper).glassTint}
+                colorScheme={theme.dark ? 'dark' : 'light'}
+                accessibilityLabel="Open menu"
               />
-            </IconBtn>
+            ) : (
+              <IconBtn onPress={onOpenDrawer} accessibilityLabel="Open menu">
+                <HeaderIcon
+                  name="menu"
+                  wallpaperColor={pWallpaper.text}
+                  scrolledColor={p.text}
+                  scrolledOpacity={iconScrolledOpacity}
+                />
+              </IconBtn>
+            )}
             <View style={{ flexDirection: 'row', gap: 4 }}>
               <View
                 style={[styles.iconBtn, { width: 40, height: 40 }]}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import Reanimated, {
@@ -15,59 +15,88 @@ import { SheetPrimaryButton } from './shared';
 
 const DONE_AREA = 76;
 
+export interface PopupNumericKeypadHandle {
+  open: (duration?: number) => void;
+  close: (duration?: number) => void;
+}
+
 interface PopupNumericKeypadProps {
   visible: boolean;
   theme: Theme;
   onKey: (key: KeypadKey) => void;
   onDone: () => void;
   borderColor?: string;
+  openDuration?: number;
+  closeDuration?: number;
   onHeightChange?: (height: number) => void;
   zIndex?: number;
 }
 
-export function PopupNumericKeypad({
+export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, PopupNumericKeypadProps>(function PopupNumericKeypad({
   visible,
   theme,
   onKey,
   onDone,
   borderColor,
+  openDuration = 280,
+  closeDuration = 190,
   onHeightChange,
   zIndex = 40,
-}: PopupNumericKeypadProps) {
+}, ref) {
   const insets = useSafeAreaInsets();
+  const [interactive, setInteractive] = useState(visible);
   const [keypadH, setKeypadH] = useState(300);
-  const progress = useSharedValue(visible ? 1 : 0);
+  const measuredHeightRef = useRef(0);
+  const targetRef = useRef(0);
+  const progress = useSharedValue(0);
 
-  useEffect(() => {
-    progress.value = withTiming(visible ? 1 : 0, {
-      duration: visible ? 280 : 190,
+  const handleLayout = useCallback((height: number) => {
+    if (Math.abs(measuredHeightRef.current - height) < 0.5) return;
+    measuredHeightRef.current = height;
+    setKeypadH(height);
+    onHeightChange?.(height);
+  }, [onHeightChange]);
+
+  const animateTo = useCallback((target: 0 | 1, duration: number) => {
+    if (targetRef.current === target) return;
+    targetRef.current = target;
+    setInteractive(target === 1);
+    progress.value = withTiming(target, {
+      duration,
       easing: ReEasing.out(ReEasing.cubic),
     });
-  }, [progress, visible]);
+  }, [progress]);
+
+  useImperativeHandle(ref, () => ({
+    open: (duration = openDuration) => animateTo(1, duration),
+    close: (duration = closeDuration) => animateTo(0, duration),
+  }), [animateTo, closeDuration, openDuration]);
+
+  useEffect(() => {
+    animateTo(visible ? 1 : 0, visible ? openDuration : closeDuration);
+  }, [animateTo, closeDuration, openDuration, visible]);
 
   const keypadStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: interpolate(progress.value, [0, 1], [keypadH + DONE_AREA + 40, 0]) }],
   }));
 
   const doneStyle = useAnimatedStyle(() => ({
-    bottom: interpolate(progress.value, [0, 1], [-DONE_AREA, keypadH + 12]),
     opacity: progress.value,
+    transform: [{ translateY: interpolate(progress.value, [0, 1], [keypadH + DONE_AREA + 12, 0]) }],
   }));
 
   return (
     <>
       <TouchableWithoutFeedback onPress={onDone} accessible={false}>
         <View
-          pointerEvents={visible ? 'auto' : 'none'}
+          pointerEvents={interactive ? 'auto' : 'none'}
           style={[styles.backdrop, { zIndex: zIndex - 1 }]}
         />
       </TouchableWithoutFeedback>
       <Reanimated.View
-        pointerEvents={visible ? 'box-none' : 'none'}
+        pointerEvents={interactive ? 'box-none' : 'none'}
         onLayout={event => {
-          const height = event.nativeEvent.layout.height;
-          setKeypadH(height);
-          onHeightChange?.(height);
+          handleLayout(event.nativeEvent.layout.height);
         }}
         style={[styles.keypadOverlay, { zIndex }, keypadStyle]}
       >
@@ -83,16 +112,16 @@ export function PopupNumericKeypad({
       </Reanimated.View>
 
       <Reanimated.View
-        pointerEvents={visible ? 'box-none' : 'none'}
-        style={[styles.doneFloat, { zIndex: zIndex + 1 }, doneStyle]}
+        pointerEvents={interactive ? 'box-none' : 'none'}
+        style={[styles.doneFloat, { bottom: keypadH + 12, zIndex: zIndex + 1 }, doneStyle]}
       >
-        <View style={styles.doneWrap} pointerEvents={visible ? 'auto' : 'none'}>
+        <View style={styles.doneWrap} pointerEvents={interactive ? 'auto' : 'none'}>
           <SheetPrimaryButton label="Done" onPress={onDone} theme={theme} />
         </View>
       </Reanimated.View>
     </>
   );
-}
+}));
 
 const styles = StyleSheet.create({
   backdrop: {

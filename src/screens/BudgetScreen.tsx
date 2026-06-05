@@ -28,7 +28,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
 import { Icon } from '../components/Icon';
-import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS } from '../components/GlassButton';
 import { applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { Collapsible } from '../components/Collapsible';
@@ -339,7 +339,7 @@ function LiveDraftText({ color }: { color: string }) {
   const draft = useSyncExternalStore(store!.subscribe, store!.getSnapshot);
   return (
     <Text maxFontSizeMultiplier={MAX_FONT_SCALE} numberOfLines={1} style={[styles.catBudgetText, { color }]}>
-      ${formatDraft(draft)}
+      <Text style={{ opacity: 0.55 }}>$</Text>{formatDraft(draft)}
     </Text>
   );
 }
@@ -411,7 +411,7 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
           numberOfLines={1}
           style={[styles.catBudgetText, { color }]}
         >
-          ${fmtMoney(value)}
+          <Text style={{ opacity: 0.55 }}>$</Text>{fmtMoney(value)}
         </Text>
         <View style={styles.catBudgetCaretSpacer} />
       </View>
@@ -786,9 +786,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     nextDateValue: string,
     cadenceValue: CategoryRecurringCadence,
   ) => {
-    const existing = recurringRules.find(rule => (
-      rule.cat === catId && rule.meta?.source === 'budget-category'
-    ));
+    // Prefer a rule this editor created, but fall back to any active rule for the
+    // same category so a rule that originated elsewhere gets updated in place
+    // rather than spawning a duplicate.
+    const existing =
+      recurringRules.find(rule => rule.cat === catId && rule.meta?.source === 'budget-category') ??
+      recurringRules.find(rule => rule.active && rule.cat === catId);
     if (!enabled) {
       if (existing) recurringRulesRepo.update(existing.id, { active: false, updatedByUserId: 'local' });
       return;
@@ -811,7 +814,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       meta: { source: 'budget-category' },
     };
     if (existing) {
-      recurringRulesRepo.update(existing.id, payload);
+      // Merge meta so fields owned elsewhere (e.g. partialPaid) survive while we
+      // mark the rule as managed by the budget editor.
+      recurringRulesRepo.update(existing.id, {
+        ...payload,
+        meta: { ...existing.meta, source: 'budget-category' },
+      });
     } else {
       recurringRulesRepo.create({
         ...payload,
@@ -952,7 +960,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         : 'monthly',
     );
     setCategoryGoalDeadline(typeof meta.goalDeadline === 'string' ? meta.goalDeadline : '');
-    const amt = budgets[bKey(category.group, category.label)] ?? category.defaultBudget ?? 0;
+    // For a recurring category the source of truth is the recurring rule's amount
+    // (what the inline bill row edits and what BillSheet shows), not the category
+    // budget record — read from there so the editor stays in sync with the row.
+    const recurringBill = upcomingBills.find(bl => bl.cat === category.id);
+    const amt = recurringBill
+      ? budgets[billKey(category.group, recurringBill.id)] ?? recurringBill.amount
+      : budgets[bKey(category.group, category.label)] ?? category.defaultBudget ?? 0;
     setCategoryBudgetDraft(amt > 0 ? String(amt) : '');
     setCategoryNotes(typeof meta.notes === 'string' ? meta.notes : '');
     setCategoryGroupDraft(category.group);
@@ -1268,10 +1282,23 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
             style={[styles.header, { paddingTop: insets.top + 8 }]}
             onLayout={e => setHeaderH(e.nativeEvent.layout.height)}
           >
-            <IconBtn onPress={onOpenDrawer}>
-              <Icon name="menu" size={22} color={pWallpaper.text} stroke={1.7} />
-            </IconBtn>
-            <Text style={[TYPE.pageTitle, { color: pWallpaper.text }, shadow]}>Budget</Text>
+            {SUPPORTS_GLASS ? (
+              <GlassCircleButton
+                onPress={onOpenDrawer}
+                systemImage="line.3.horizontal"
+                size={40}
+                iconSize={18}
+                iconColor={theme.dark ? MEDIA.text : '#0E0C18'}
+                glassTint={theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'}
+                colorScheme={theme.dark ? 'dark' : 'light'}
+                accessibilityLabel="Open menu"
+              />
+            ) : (
+              <IconBtn onPress={onOpenDrawer}>
+                <Icon name="menu" size={22} color={pWallpaper.text} stroke={1.7} />
+              </IconBtn>
+            )}
+            <Text style={[TYPE.pageTitle, { color: theme.text }]}>Budget</Text>
             <ThemeToggle />
           </View>
 
@@ -1408,9 +1435,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
 	                return (
 	                  <SectionCard key={g.key} dark={theme.dark}>
-	                    <Pressable
+	                    <TouchableOpacity
 	                      onPress={() => toggleGroupCollapsed(g.key)}
-	                      pointerEvents="box-only"
+	                      activeOpacity={0.7}
+	                      delayPressIn={0}
 	                      accessibilityRole="button"
 	                      accessibilityState={{ expanded: !isCollapsed }}
 	                      accessibilityLabel={`${isCollapsed ? 'Expand' : 'Collapse'} ${g.label} budget group`}
@@ -1429,7 +1457,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                        <Text style={[TYPE.subsectionTitle, { color: groupColor }]}>${groupTotal.toLocaleString()}</Text>
 	                        <RotatingChevron open={!isCollapsed} color={p.textTer} />
 	                      </View>
-	                    </Pressable>
+	                    </TouchableOpacity>
 
 	                    <Collapsible open={!isCollapsed}>
 	                    <View>
@@ -1447,7 +1475,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                           <SwipeRow onRemove={() => handleRemoveSub(g.key, sub)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                             <TouchableOpacity
                               onPress={() => openCategoryEditor(sub.cat)}
-                              activeOpacity={0.68}
+                              activeOpacity={0.7}
+                              delayPressIn={0}
                               style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                               accessibilityRole="button"
                               accessibilityLabel={`Edit ${sub.label} category`}
@@ -1496,7 +1525,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                           <SwipeRow onRemove={() => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                             <TouchableOpacity
                               onPress={() => customCat && openCategoryEditor(customCat.id)}
-                              activeOpacity={customCat ? 0.68 : 1}
+                              activeOpacity={customCat ? 0.7 : 1}
+                              delayPressIn={0}
                               style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                             >
                               <View style={[styles.rowIcon, { backgroundColor: theme.dark ? 'rgba(180,160,240,0.18)' : 'rgba(14,12,24,0.08)' }]}>
@@ -1539,7 +1569,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                              <SwipeRow onRemove={() => handleRemoveSub(g.key, sub)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
 	                                <TouchableOpacity
                                   onPress={() => openCategoryEditor(sub.cat)}
-                                  activeOpacity={0.68}
+                                  activeOpacity={0.7}
+                                  delayPressIn={0}
                                   style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                                 >
                                   <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
@@ -1577,7 +1608,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                               <SwipeRow onRemove={() => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                                 <TouchableOpacity
                                   onPress={() => customCat && openCategoryEditor(customCat.id)}
-                                  activeOpacity={customCat ? 0.68 : 1}
+                                  activeOpacity={customCat ? 0.7 : 1}
+                                  delayPressIn={0}
                                   style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                                 >
                                   <View style={[styles.rowIcon, { backgroundColor: theme.dark ? 'rgba(180,160,240,0.18)' : 'rgba(14,12,24,0.08)' }]}>
@@ -1610,7 +1642,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                             <SwipeRow onRemove={() => handleRemoveBill(bill)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                               <TouchableOpacity
                                 onPress={() => openCategoryEditor(bill.cat)}
-                                activeOpacity={0.68}
+                                activeOpacity={0.7}
+                                delayPressIn={0}
                                 style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
                               >
                                 <View style={[styles.rowIcon, { backgroundColor: `${categoryGroupColor(bill.cat, categories, theme.dark)}26` }]}>
@@ -1786,7 +1819,7 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
     return (
       <View style={[styles.catBudgetWrap, { borderBottomColor: accentColor }]}>
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.catBudgetText, { color }]}>
-          {draft ? `$${formatDraft(draft)}` : '$'}
+          <Text style={{ opacity: 0.55 }}>$</Text>{draft ? formatDraft(draft) : ''}
         </Text>
         <EditCaret color={accentColor} />
       </View>
@@ -1797,7 +1830,7 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
     <TouchableOpacity onPress={onActivate} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 12, right: 6 }}>
       <View style={[styles.catBudgetWrap, { borderBottomColor: underlineColor }]}>
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.catBudgetText, { color: isPlaceholder ? underlineColor : color }]}>
-          {isPlaceholder ? placeholder : `$${fmtMoney(isNaN(num) ? 0 : num)}`}
+          {isPlaceholder ? placeholder : <><Text style={{ opacity: 0.55 }}>$</Text>{fmtMoney(isNaN(num) ? 0 : num)}</>}
         </Text>
         <View style={styles.catBudgetCaretSpacer} />
       </View>
@@ -2045,8 +2078,7 @@ function CategoryEditSheet({
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={handleIndicatorStyle}
       backgroundStyle={backgroundStyle}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
+      keyboardBehavior="fillParent"
     >
       <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); if (activeNumField) closeNumKeypad(); }} accessible={false}>
       <View style={[styles.categorySheet, {
@@ -2059,7 +2091,7 @@ function CategoryEditSheet({
           tint={theme.textSec}
           fallbackBg={theme.chipBg}
           accessibilityLabel="Close category editor"
-          style={EXIT_FLOAT_STYLE}
+          style={[EXIT_FLOAT_STYLE, { zIndex: 25 }]}
         />
         <BottomSheetScrollView
           ref={sheetScrollRef}
@@ -2073,8 +2105,7 @@ function CategoryEditSheet({
               // creates scroll range to lift a bottom field above the pad.
               paddingBottom: activeNumField
                 ? sheetKbH + KEYPAD_DONE_AREA + 200
-                : sheetBottomPadding,
-              minHeight: '100%',
+                : 16,
             },
           ]}
           showsVerticalScrollIndicator={false}
@@ -2317,26 +2348,29 @@ function CategoryEditSheet({
             </>
           )}
 
-          <View style={styles.catSheetFooter}>
-            <SheetPrimaryButton
-              label={isAddMode ? 'Add category' : 'Save category'}
-              onPress={handleSave}
-              theme={theme}
-              disabled={!canSaveCategory}
-            />
-            {!isAddMode && (
-              <Pressable
-                onPress={onDelete}
-                pointerEvents="box-only"
-                accessibilityRole="button"
-                accessibilityLabel="Delete category"
-                style={styles.categoryDeleteButton}
-              >
-                <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
-              </Pressable>
-            )}
-          </View>
         </BottomSheetScrollView>
+
+        {/* Fixed footer — outside the scroll view so it never shifts when
+            content height changes, groups switch, or the numeric keypad opens. */}
+        <View style={[styles.catSheetFooter, { paddingBottom: sheetBottomPadding }]}>
+          <SheetPrimaryButton
+            label={isAddMode ? 'Add category' : 'Save category'}
+            onPress={handleSave}
+            theme={theme}
+            disabled={!canSaveCategory}
+          />
+          {!isAddMode && (
+            <Pressable
+              onPress={onDelete}
+              pointerEvents="box-only"
+              accessibilityRole="button"
+              accessibilityLabel="Delete category"
+              style={styles.categoryDeleteButton}
+            >
+              <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Delete category</Text>
+            </Pressable>
+          )}
+        </View>
 
         <PopupNumericKeypad
           visible={activeNumField !== null}
@@ -2537,9 +2571,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   catSheetFooter: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
   },
   categoryDeleteButton: {
     alignItems: 'center',

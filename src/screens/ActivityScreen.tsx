@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -23,11 +23,11 @@ const AnimatedGHFlatList = Animated.createAnimatedComponent(GHFlatList);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomSheet, {
-  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetScrollView,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 import {
   Calendar,
   buildCalendar,
@@ -57,7 +57,7 @@ const FILTER_COMMIT_DELAY_MS = 90;
 
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
-import { ScreenExitButton } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS } from '../components/GlassButton';
 import { SearchFilterBar } from '../components/SearchFilterBar';
 import { MerchantMark } from '../components/MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
@@ -80,6 +80,10 @@ type DateFilter = DateFilterPreset | { from: Date; to: Date } | null;
 type AmountFilter = { min?: number; max?: number } | null;
 type SortOrder = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'cat';
 type CalendarSelectMode = 'day' | 'range';
+type SheetHandle = {
+  open: () => void;
+  close: () => void;
+};
 
 const SORT_OPTIONS: { id: SortOrder; label: string }[] = [
   { id: 'date-desc',   label: 'Newest first'  },
@@ -248,6 +252,38 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced;
 }
 
+// ─── FilterPill ──────────────────────────────────────────────────────────────
+
+function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
+  dark: boolean;
+  overlay?: string;
+  onPress: () => void;
+  accessibilityLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <BlurView
+        intensity={dark ? 55 : 72}
+        tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+        style={[S.filterPill, S.filterPillBlur, {
+          borderColor: dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)',
+        }]}
+      >
+        {overlay ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: overlay }]} pointerEvents="none" />
+        ) : null}
+        {children}
+      </BlurView>
+    </TouchableOpacity>
+  );
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -255,11 +291,12 @@ interface Props {
   onOpenDrawer?: () => void;
   onOpenTx?: (tx: Transaction) => void;
   onPrepareTx?: (tx: Transaction) => void;
+  onOverlayOpenChange?: (open: boolean) => void;
   initialFilter?: ActivityInitialFilter | null;
   filterToken?: number;
 }
 
-export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, initialFilter, filterToken }: Props) {
+export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken }: Props) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
@@ -274,11 +311,11 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
   const [amountFilter, setAmountFilter]     = useState<AmountFilter>(null);
   const [sortBy, setSortBy]                 = useState<SortOrder>('date-desc');
   const [pendingUndo, setPendingUndo]       = useState<{ tx: Transaction } | null>(null);
-  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  const [calendarSheetOpen, setCalendarSheetOpen] = useState(false);
   const [selectedDay, setSelectedDay]       = useState<number | null>(null);
   const [calViewYear, setCalViewYear]       = useState(CALENDAR_YEAR);
   const [calViewMonth, setCalViewMonth]     = useState(CALENDAR_MONTH);
+  const filterSheetRef = useRef<SheetHandle>(null);
+  const calendarSheetRef = useRef<SheetHandle>(null);
 
   // Loading / refresh lifecycle mirrors HomeScreen: a simulated settle today,
   // the seam where the async data source (CloudKit) hooks in later.
@@ -313,7 +350,8 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
     if (d !== null) setSelectedDay(null);
   }, []);
   const clearSelectedDay = useCallback(() => setSelectedDay(null), []);
-  const closeFilterSheet = useCallback(() => setFilterSheetOpen(false), []);
+  const openFilterSheet = useCallback(() => filterSheetRef.current?.open(), []);
+  const openCalendarSheet = useCallback(() => calendarSheetRef.current?.open(), []);
 
   const resetCal = () => {
     setSelectedDay(null);
@@ -565,20 +603,17 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
       setSelectedDay(pressed.getDate());
       setDateFilter(null);
     }
-    setCalendarSheetOpen(false);
   }, [selectedDateId]);
   const handleCalendarSelectRange = useCallback(({ from, to }: { from: Date; to: Date }) => {
     setSelectedDay(null);
     setDateFilter({ from, to });
     setCalViewYear(from.getFullYear());
     setCalViewMonth(from.getMonth());
-    setCalendarSheetOpen(false);
   }, []);
   const handleCalendarClear = useCallback(() => {
     setSelectedDay(null);
     setDateFilter(null);
   }, []);
-  const closeCalendarSheet = useCallback(() => setCalendarSheetOpen(false), []);
 
   return (
     <View style={{ flex: 1, backgroundColor: floorColor }}>
@@ -624,6 +659,18 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
               backgroundColor: theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)',
             }]} />
           </Animated.View>
+          {SUPPORTS_GLASS ? (
+            <GlassCircleButton
+              onPress={() => onOpenDrawer?.()}
+              systemImage="line.3.horizontal"
+              size={40}
+              iconSize={18}
+              iconColor={theme.dark ? MEDIA.text : '#0E0C18'}
+              glassTint={theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'}
+              colorScheme={theme.dark ? 'dark' : 'light'}
+              accessibilityLabel="Open menu"
+            />
+          ) : (
           <Pressable
             onPress={onOpenDrawer}
             pointerEvents="box-only"
@@ -639,15 +686,8 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
               scrolledOpacity={iconScrolledOpacity}
             />
           </Pressable>
-          <View style={S.titleStack}>
-            <Text style={[S.title, { color: pWallpaper.text }, DARK_TEXT_SHADOW]}>History</Text>
-            <Animated.Text
-              style={[S.title, S.titleScrolled, { color: p.text, opacity: iconScrolledOpacity }]}
-              pointerEvents="none"
-            >
-              History
-            </Animated.Text>
-          </View>
+          )}
+          <Text style={[S.title, { color: theme.text }]}>Transactions</Text>
           <ThemeToggle />
         </View>
 
@@ -704,8 +744,8 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
                 onChangeQuery={setQuery}
                 activeCount={activeCount}
                 calendarActive={selectedDay !== null || (dateFilter !== null && typeof dateFilter !== 'string')}
-                onOpenCalendar={() => setCalendarSheetOpen(true)}
-                onOpenFilter={() => setFilterSheetOpen(true)}
+                onOpenCalendar={openCalendarSheet}
+                onOpenFilter={openFilterSheet}
               />
 
               {/* Active filter pills */}
@@ -718,83 +758,48 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
                   keyboardShouldPersistTaps="handled"
                 >
                   {selectedDay !== null && (
-                    <View style={[S.filterPill, { backgroundColor: theme.dark ? 'rgba(255,255,255,0.15)' : 'rgba(14,12,24,0.08)', borderWidth: 1, borderColor: p.hairline }]}>
+                    <FilterPill dark={theme.dark} onPress={() => setSelectedDay(null)} accessibilityLabel="Clear day selection">
                       <Icon name="cal" size={10} color={p.textSec} stroke={1.7} />
                       <Text style={[S.filterPillText, { color: p.text }]}>
                         {MONTHS[calViewMonth]} {selectedDay}
                       </Text>
-                      <TouchableOpacity
-                        onPress={() => setSelectedDay(null)}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Clear day selection"
-                      >
-                        <Icon name="close" size={10} color={p.textSec} stroke={2} />
-                      </TouchableOpacity>
-                    </View>
+                      <Icon name="close" size={10} color={p.textSec} stroke={2} />
+                    </FilterPill>
                   )}
                   {dateFilter && typeof dateFilter === 'string' && (
-                    <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
+                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => setDateFilter(null)} accessibilityLabel="Remove date filter">
                       <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
                         {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
                       </Text>
-                      <TouchableOpacity
-                        onPress={() => setDateFilter(null)}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Remove date filter"
-                      >
-                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                      </TouchableOpacity>
-                    </View>
+                      <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                    </FilterPill>
                   )}
                   {dateFilter && typeof dateFilter !== 'string' && (
-                    <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
+                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => setDateFilter(null)} accessibilityLabel="Remove date filter">
                       <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
                         {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
                       </Text>
-                      <TouchableOpacity
-                        onPress={() => setDateFilter(null)}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Remove date filter"
-                      >
-                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                      </TouchableOpacity>
-                    </View>
+                      <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                    </FilterPill>
                   )}
                   {amountFilterActive(amountFilter) && (
-                    <View style={[S.filterPill, { backgroundColor: theme.accent.fill }]}>
+                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => setAmountFilter(null)} accessibilityLabel="Remove amount filter">
                       <Icon name="wallet" size={10} color={theme.accent.ink} stroke={1.7} />
                       <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
                         {amountFilterLabel(amountFilter)}
                       </Text>
-                      <TouchableOpacity
-                        onPress={() => setAmountFilter(null)}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Remove amount filter"
-                      >
-                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                      </TouchableOpacity>
-                    </View>
+                      <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                    </FilterPill>
                   )}
                   {catFilter.map(catId => {
                     const cat = cats[catId];
                     const groupColor = categoryGroupColor(catId, categories, theme.dark);
                     return (
-                      <View key={catId} style={[S.filterPill, { backgroundColor: groupColor + '30' }]}>
+                      <FilterPill key={catId} dark={theme.dark} overlay={groupColor + '50'} onPress={() => setCatFilter(catFilter.filter(c => c !== catId))} accessibilityLabel={`Remove ${cat?.label} filter`}>
                         <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
                         <Text style={[S.filterPillText, { color: p.text }]}>{cat?.label}</Text>
-                        <TouchableOpacity
-                          onPress={() => setCatFilter(catFilter.filter(c => c !== catId))}
-                          hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Remove ${cat?.label} filter`}
-                        >
-                          <Icon name="close" size={10} color={groupColor} stroke={2} />
-                        </TouchableOpacity>
-                      </View>
+                        <Icon name="close" size={10} color={groupColor} stroke={2} />
+                      </FilterPill>
                     );
                   })}
                 </ScrollView>
@@ -896,7 +901,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
         />
 
         <CalendarSheet
-          visible={calendarSheetOpen}
+          ref={calendarSheetRef}
           theme={theme}
           selectedDateId={selectedDateId}
           dateFilter={dateFilter}
@@ -911,11 +916,11 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
           onSelectDate={handleCalendarSelectDate}
           onSelectRange={handleCalendarSelectRange}
           onClear={handleCalendarClear}
-          onClose={closeCalendarSheet}
+          onOpenChange={onOverlayOpenChange}
         />
 
         <FilterSheet
-          visible={filterSheetOpen}
+          ref={filterSheetRef}
           theme={theme}
           catFilter={catFilter}
           dateFilter={dateFilter}
@@ -928,7 +933,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, ini
           setAmountFilter={setAmountFilter}
           setSortBy={setSortBy}
           clearDay={clearSelectedDay}
-          onClose={closeFilterSheet}
+          onOpenChange={onOverlayOpenChange}
         />
 
         <Toast
@@ -963,25 +968,7 @@ function formatCalendarMonth(date: Date) {
   return `${MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-function CalendarSheet({
-  visible,
-  theme,
-  selectedDateId,
-  dateFilter,
-  initialMonthDate,
-  transactionsRepo,
-  repoVersion,
-  categories,
-  catFilter,
-  merchantQuery,
-  searchCategoryIds,
-  amountFilter,
-  onSelectDate,
-  onSelectRange,
-  onClear,
-  onClose,
-}: {
-  visible: boolean;
+const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   theme: Theme;
   selectedDateId?: string;
   dateFilter: DateFilter;
@@ -996,10 +983,27 @@ function CalendarSheet({
   onSelectDate: (dateId: string) => void;
   onSelectRange: (range: { from: Date; to: Date }) => void;
   onClear: () => void;
-  onClose: () => void;
-}) {
+  onOpenChange?: (open: boolean) => void;
+}>(function CalendarSheet({
+  theme,
+  selectedDateId,
+  dateFilter,
+  initialMonthDate,
+  transactionsRepo,
+  repoVersion,
+  categories,
+  catFilter,
+  merchantQuery,
+  searchCategoryIds,
+  amountFilter,
+  onSelectDate,
+  onSelectRange,
+  onClear,
+  onOpenChange,
+}, ref) {
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<BottomSheet>(null);
+  const animatedIndex = useSharedValue(-1);
   const presentedRef = useRef(false);
   const [contentReady, setContentReady] = useState(false);
   const activeRange = dateFilter && typeof dateFilter !== 'string'
@@ -1017,34 +1021,58 @@ function CalendarSheet({
 
   useEffect(() => {
     if (contentReady) return;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const task = InteractionManager.runAfterInteractions(() => {
-      timeout = setTimeout(() => setContentReady(true), visible ? 80 : 420);
-    });
-    return () => {
-      task.cancel?.();
-      if (timeout !== null) clearTimeout(timeout);
-    };
-  }, [contentReady, visible]);
+    const task = InteractionManager.runAfterInteractions(() => setContentReady(true));
+    return () => task.cancel?.();
+  }, [contentReady]);
 
-  useEffect(() => {
-    if (visible) {
-      if (!presentedRef.current) {
-        presentedRef.current = true;
-        sheetRef.current?.snapToIndex(0);
-      }
-    } else if (presentedRef.current) {
-      presentedRef.current = false;
-      sheetRef.current?.close();
-    }
-  }, [visible]);
+  const markOpen = useCallback(() => {
+    if (presentedRef.current) return;
+    presentedRef.current = true;
+    onOpenChange?.(true);
+  }, [onOpenChange]);
+
+  const markClosed = useCallback(() => {
+    if (!presentedRef.current) return;
+    presentedRef.current = false;
+    onOpenChange?.(false);
+  }, [onOpenChange]);
+
+  const close = useCallback(() => {
+    markClosed();
+    sheetRef.current?.close();
+  }, [markClosed]);
+
+  const open = useCallback(() => {
+    if (!contentReady) setContentReady(true);
+    if (presentedRef.current) return;
+    markOpen();
+    sheetRef.current?.snapToIndex(0);
+  }, [contentReady, markOpen]);
+
+  useImperativeHandle(ref, () => ({ open, close }), [close, open]);
+
+  useAnimatedReaction(
+    () => {
+      const index = animatedIndex.value;
+      if (index <= -0.35) return 'closed';
+      if (index >= -0.02) return 'open';
+      return 'moving';
+    },
+    (state, previous) => {
+      if (state === previous) return;
+      if (state === 'closed') runOnJS(markClosed)();
+      if (state === 'open') runOnJS(markOpen)();
+    },
+    [markClosed, markOpen],
+  );
 
   const handleSheetChange = useCallback((idx: number) => {
-    if (idx === -1 && presentedRef.current) {
-      presentedRef.current = false;
-      onClose();
-    }
-  }, [onClose]);
+    if (idx === -1) markClosed();
+  }, [markClosed]);
+
+  const handleSheetAnimate = useCallback((_fromIndex: number, toIndex: number) => {
+    if (toIndex === -1) markClosed();
+  }, [markClosed]);
 
   const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
     <BottomSheetBackdrop
@@ -1067,6 +1095,7 @@ function CalendarSheet({
   const handleDatePress = useCallback((dateId: string) => {
     if (mode === 'day') {
       onSelectDate(dateId);
+      close();
       return;
     }
     if (!rangeStartId || rangeEndId) {
@@ -1082,7 +1111,8 @@ function CalendarSheet({
     const ordered = start <= end ? { from: start, to: end } : { from: end, to: start };
     setDraftRange({ startId: toDateId(ordered.from), endId: toDateId(ordered.to) });
     onSelectRange(ordered);
-  }, [mode, onSelectDate, onSelectRange, rangeEndId, rangeStartId]);
+    close();
+  }, [close, mode, onSelectDate, onSelectRange, rangeEndId, rangeStartId]);
   const handleClear = useCallback(() => {
     setDraftRange({});
     onClear();
@@ -1107,6 +1137,46 @@ function CalendarSheet({
   const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
   const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
   const calendarInitialMonthId = useMemo(() => toDateId(initialMonthDate), [initialMonthDate]);
+  const marksQueryKey = useMemo(() => [
+    repoVersion,
+    catFilter.join('|'),
+    merchantQuery ?? '',
+    searchCategoryIds.join('|'),
+    amountFilterLabel(amountFilter),
+  ].join('::'), [amountFilter, catFilter, merchantQuery, repoVersion, searchCategoryIds]);
+  const marksCacheRef = useRef(new Map<string, Record<number, string[]>>());
+
+  useEffect(() => {
+    marksCacheRef.current.clear();
+  }, [marksQueryKey]);
+
+  const getMarksByDay = useCallback((year: number, month: number) => {
+    const cacheKey = `${marksQueryKey}:${year}-${month}`;
+    const cached = marksCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
+    const rows = transactionsRepo.getCalendarMarks({
+      year,
+      month,
+      categoryIds: catFilter.length > 0 ? catFilter : undefined,
+      merchantQuery,
+      searchCategoryIds,
+      ...amountBounds(amountFilter),
+    });
+    const groupedRows: Record<number, string[]> = {};
+    rows.forEach(mark => {
+      if (!groupedRows[mark.day]) groupedRows[mark.day] = [];
+      groupedRows[mark.day].push(mark.cat);
+    });
+    marksCacheRef.current.set(cacheKey, groupedRows);
+    return groupedRows;
+  }, [amountFilter, catFilter, marksQueryKey, merchantQuery, searchCategoryIds, transactionsRepo]);
+  const colorForCat = useMemo(() => {
+    const cache: Record<string, string> = {};
+    return (catId: string) => (
+      cache[catId] ??= categoryGroupColor(catId, categories, theme.dark)
+    );
+  }, [categories, theme.dark]);
   const listExtraData = useMemo(
     () => ({
       selectedDateId,
@@ -1126,28 +1196,18 @@ function CalendarSheet({
     <HistoryCalendarMonth
       item={item}
       theme={theme}
-      transactionsRepo={transactionsRepo}
-      repoVersion={repoVersion}
-      categories={categories}
-      catFilter={catFilter}
-      merchantQuery={merchantQuery}
-      searchCategoryIds={searchCategoryIds}
-      amountFilter={amountFilter}
+      colorForCat={colorForCat}
+      getMarksByDay={getMarksByDay}
       selectedDateId={selectedDateId}
       mode={mode}
       onSelectDate={handleDatePress}
     />
   ), [
-    catFilter,
-    categories,
-    merchantQuery,
-    amountFilter,
-    repoVersion,
-    searchCategoryIds,
+    colorForCat,
+    getMarksByDay,
     selectedDateId,
     mode,
     theme,
-    transactionsRepo,
     handleDatePress,
   ]);
   const hasCalendarSelection = Boolean(selectedDateId || rangeStartId);
@@ -1155,15 +1215,19 @@ function CalendarSheet({
   return (
     <BottomSheet
       ref={sheetRef}
+      animatedIndex={animatedIndex}
       index={-1}
       snapPoints={['82%']}
       animateOnMount={false}
       enableDynamicSizing={false}
       enablePanDownToClose
       onChange={handleSheetChange}
+      onClose={markClosed}
+      onAnimate={handleSheetAnimate}
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={handleIndicatorStyle}
       backgroundStyle={backgroundStyle}
+      containerStyle={CS.sheetLayer}
     >
       {!contentReady ? (
         <View style={{ flex: 1, backgroundColor: theme.surface }} />
@@ -1173,7 +1237,7 @@ function CalendarSheet({
             <View style={CS.headerLeft}>
               <ScreenExitButton
                 variant="close"
-                onPress={onClose}
+                onPress={close}
                 tint={theme.textSec}
                 fallbackBg={theme.chipBg}
                 accessibilityLabel="Close calendar"
@@ -1235,7 +1299,7 @@ function CalendarSheet({
             getCalendarDayFormat={formatCalendarDay}
             getCalendarWeekDayFormat={formatCalendarWeekDay}
             getCalendarMonthFormat={formatCalendarMonth}
-            onCalendarDayPress={onSelectDate}
+            onCalendarDayPress={handleDatePress}
             renderItem={renderMonth}
             theme={calendarTheme}
           />
@@ -1243,31 +1307,21 @@ function CalendarSheet({
       )}
     </BottomSheet>
   );
-}
+}));
 
 const HistoryCalendarMonth = React.memo(function HistoryCalendarMonth({
   item,
   theme,
-  transactionsRepo,
-  repoVersion,
-  categories,
-  catFilter,
-  merchantQuery,
-  searchCategoryIds,
-  amountFilter,
+  colorForCat,
+  getMarksByDay,
   selectedDateId,
   mode,
   onSelectDate,
 }: {
   item: CalendarMonthEnhanced;
   theme: Theme;
-  transactionsRepo: TransactionsRepo;
-  repoVersion: number;
-  categories: Category[];
-  catFilter: string[];
-  merchantQuery?: string;
-  searchCategoryIds: string[];
-  amountFilter: AmountFilter;
+  colorForCat: (catId: string) => string;
+  getMarksByDay: (year: number, month: number) => Record<number, string[]>;
   selectedDateId?: string;
   mode: CalendarSelectMode;
   onSelectDate: (dateId: string) => void;
@@ -1287,22 +1341,7 @@ const HistoryCalendarMonth = React.memo(function HistoryCalendarMonth({
     getCalendarMonthFormat: item.calendarProps.getCalendarMonthFormat,
     getCalendarWeekDayFormat: item.calendarProps.getCalendarWeekDayFormat,
   }), [item]);
-  const marksByDay = useMemo(() => {
-    const rows = transactionsRepo.getCalendarMarks({
-      year,
-      month,
-      categoryIds: catFilter.length > 0 ? catFilter : undefined,
-      merchantQuery,
-      searchCategoryIds,
-      ...amountBounds(amountFilter),
-    });
-    const groupedRows: Record<number, string[]> = {};
-    rows.forEach(mark => {
-      if (!groupedRows[mark.day]) groupedRows[mark.day] = [];
-      groupedRows[mark.day].push(mark.cat);
-    });
-    return groupedRows;
-  }, [amountFilter, catFilter, merchantQuery, month, repoVersion, searchCategoryIds, transactionsRepo, year]);
+  const marksByDay = useMemo(() => getMarksByDay(year, month), [getMarksByDay, month, year]);
 
   return (
     <View style={{ paddingBottom: HISTORY_CAL_MONTH_GAP }}>
@@ -1352,7 +1391,7 @@ const HistoryCalendarMonth = React.memo(function HistoryCalendarMonth({
                   <DayActivityMarks
                     catIds={dayCats}
                     theme={theme}
-                    categories={categories}
+                    colorForCat={colorForCat}
                     textColor={mutedText}
                     selected={selected}
                   />
@@ -1369,13 +1408,13 @@ const HistoryCalendarMonth = React.memo(function HistoryCalendarMonth({
 const DayActivityMarks = React.memo(function DayActivityMarks({
   catIds,
   theme,
-  categories,
+  colorForCat,
   textColor,
   selected,
 }: {
   catIds: string[];
   theme: Theme;
-  categories: Category[];
+  colorForCat: (catId: string) => string;
   textColor: string;
   selected: boolean;
 }) {
@@ -1383,7 +1422,7 @@ const DayActivityMarks = React.memo(function DayActivityMarks({
 
   const visible = catIds.slice(0, 2);
   const remaining = catIds.length - visible.length;
-  const uniqueColors = visible.map(catId => categoryGroupColor(catId, categories, theme.dark));
+  const uniqueColors = visible.map(colorForCat);
   const countLabel = remaining > 0 ? `+${remaining}` : '';
 
   return (
@@ -1411,11 +1450,7 @@ const DayActivityMarks = React.memo(function DayActivityMarks({
 
 // ─── FilterSheet ─────────────────────────────────────────────────────────────
 
-const FilterSheet = React.memo(function FilterSheet({
-  visible, theme, catFilter, dateFilter, amountFilter, sortBy,
-  categories, cats, setCatFilter, setDateFilter, setAmountFilter, setSortBy, clearDay, onClose,
-}: {
-  visible: boolean;
+const FilterSheet = React.memo(React.forwardRef<SheetHandle, {
   theme: Theme;
   catFilter: string[];
   dateFilter: DateFilter;
@@ -1428,10 +1463,15 @@ const FilterSheet = React.memo(function FilterSheet({
   setAmountFilter: (a: AmountFilter) => void;
   setSortBy: (s: SortOrder) => void;
   clearDay: () => void;
-  onClose: () => void;
-}) {
+  onOpenChange?: (open: boolean) => void;
+}>(
+function FilterSheet({
+  theme, catFilter, dateFilter, amountFilter, sortBy,
+  categories, cats, setCatFilter, setDateFilter, setAmountFilter, setSortBy, clearDay, onOpenChange,
+}, ref) {
   const insets = useSafeAreaInsets();
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const sheetRef = useRef<BottomSheet>(null);
+  const animatedIndex = useSharedValue(-1);
   const presentedRef = useRef(false);
   const [localCatFilter, setLocalCatFilter] = useState(catFilter);
   const pendingLocalCatCommitRef = useRef(false);
@@ -1445,25 +1485,60 @@ const FilterSheet = React.memo(function FilterSheet({
   const amountCommitTaskRef = useRef<{ cancel?: () => void } | null>(null);
   const localMinDraftRef = useRef(localMinDraft);
   const localMaxDraftRef = useRef(localMaxDraft);
+  const [everVisible, setEverVisible] = useState(false);
+  const everVisibleRef = useRef(false);
 
-  useEffect(() => {
-    if (visible) {
-      if (!presentedRef.current) {
-        presentedRef.current = true;
-        sheetRef.current?.present();
-      }
-    } else {
-      if (presentedRef.current) {
-        presentedRef.current = false;
-        sheetRef.current?.dismiss();
-      }
-    }
-  }, [visible]);
+  const markOpen = useCallback(() => {
+    if (presentedRef.current) return;
+    presentedRef.current = true;
+    onOpenChange?.(true);
+  }, [onOpenChange]);
 
-  const handleDismiss = useCallback(() => {
+  const markClosed = useCallback(() => {
+    if (!presentedRef.current) return;
     presentedRef.current = false;
-    onClose();
-  }, [onClose]);
+    onOpenChange?.(false);
+  }, [onOpenChange]);
+
+  const close = useCallback(() => {
+    markClosed();
+    sheetRef.current?.close();
+  }, [markClosed]);
+
+  const open = useCallback(() => {
+    if (!everVisibleRef.current) {
+      everVisibleRef.current = true;
+      setEverVisible(true);
+    }
+    if (presentedRef.current) return;
+    markOpen();
+    sheetRef.current?.snapToIndex(0);
+  }, [markOpen]);
+
+  useImperativeHandle(ref, () => ({ open, close }), [close, open]);
+
+  useAnimatedReaction(
+    () => {
+      const index = animatedIndex.value;
+      if (index <= -0.35) return 'closed';
+      if (index >= -0.02) return 'open';
+      return 'moving';
+    },
+    (state, previous) => {
+      if (state === previous) return;
+      if (state === 'closed') runOnJS(markClosed)();
+      if (state === 'open') runOnJS(markOpen)();
+    },
+    [markClosed, markOpen],
+  );
+
+  const handleSheetChange = useCallback((idx: number) => {
+    if (idx === -1) markClosed();
+  }, [markClosed]);
+
+  const handleSheetAnimate = useCallback((_fromIndex: number, toIndex: number) => {
+    if (toIndex === -1) markClosed();
+  }, [markClosed]);
 
   const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
     <BottomSheetBackdrop
@@ -1481,14 +1556,17 @@ const FilterSheet = React.memo(function FilterSheet({
   // The sheet sits in the tree from the moment History mounts, but its body —
   // every category row plus two SwiftUI menu Hosts — is warmed after the screen
   // settles so the first presentation does not pay that mount cost.
-  const [everVisible, setEverVisible] = useState(visible);
   useEffect(() => {
-    if (visible && !everVisible) setEverVisible(true);
-  }, [visible, everVisible]);
-  useEffect(() => {
-    if (everVisible) return;
-    const task = InteractionManager.runAfterInteractions(() => setEverVisible(true));
+    if (everVisibleRef.current) return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      everVisibleRef.current = true;
+      setEverVisible(true);
+    });
     return () => task.cancel?.();
+  }, []);
+
+  useEffect(() => {
+    if (everVisible) everVisibleRef.current = true;
   }, [everVisible]);
 
   useEffect(() => {
@@ -1701,16 +1779,21 @@ const FilterSheet = React.memo(function FilterSheet({
   ), [datePickerIdx, dateMenuLabel, theme.text, theme.accent.dot, handleDatePickerChange]);
 
   return (
-    <BottomSheetModal
+    <BottomSheet
       ref={sheetRef}
-      index={0}
+      animatedIndex={animatedIndex}
+      index={-1}
       snapPoints={['88%']}
+      animateOnMount={false}
       enableDynamicSizing={false}
       enablePanDownToClose
-      onDismiss={handleDismiss}
+      onChange={handleSheetChange}
+      onClose={markClosed}
+      onAnimate={handleSheetAnimate}
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={handleIndicatorStyle}
       backgroundStyle={backgroundStyle}
+      containerStyle={CS.sheetLayer}
     >
       {!everVisible ? (
         <View style={{ flex: 1, backgroundColor: theme.surface }} />
@@ -1722,7 +1805,7 @@ const FilterSheet = React.memo(function FilterSheet({
             <View style={FS.headerLeft}>
               <ScreenExitButton
                 variant="close"
-                onPress={onClose}
+                onPress={close}
                 tint={theme.textSec}
                 fallbackBg={theme.chipBg}
                 accessibilityLabel="Done"
@@ -1747,11 +1830,12 @@ const FilterSheet = React.memo(function FilterSheet({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* ── Sort by — UIKit menu (styled trigger) ──────── */}
-            {sortMenu}
-
-            {/* ── Date — UIKit menu (styled trigger) ─────────── */}
-            {dateMenu}
+            {/* ── Sort by + Date — grouped control card ───────── */}
+            <View style={[FS.controlsCard, { backgroundColor: theme.chipBg }]}>
+              {sortMenu}
+              <View style={[FS.controlsDivider, { backgroundColor: theme.sep }]} />
+              {dateMenu}
+            </View>
 
             {/* ── Amount range ───────────────────────────────── */}
             <View style={FS.amountSection}>
@@ -1797,12 +1881,9 @@ const FilterSheet = React.memo(function FilterSheet({
               const groupColor = theme.dark ? GROUP_COLORS[g.key].dark : GROUP_COLORS[g.key].light;
               return (
                 <View key={g.key}>
-                  <View style={FS.groupDivider}>
-                    <View style={{ height: 1, width: 14, backgroundColor: groupColor + '55' }} />
-                    <Text style={[FS.groupDividerLabel, { color: groupColor, fontWeight: '600' }]}>
-                      {g.label}
-                    </Text>
-                    <View style={{ height: 1, flex: 1, backgroundColor: groupColor + '55' }} />
+                  <View style={FS.groupEyebrow}>
+                    <View style={[FS.groupDot, { backgroundColor: groupColor }]} />
+                    <Text style={[FS.groupEyebrowText, { color: theme.textSec }]}>{g.label}</Text>
                   </View>
 
                   {g.cats.length === 0 ? (
@@ -1864,9 +1945,9 @@ const FilterSheet = React.memo(function FilterSheet({
           />
         </View>
       )}
-    </BottomSheetModal>
+    </BottomSheet>
   );
-});
+}));
 
 function AmountRangeField({
   label, value, active, theme, onPress,
@@ -1895,7 +1976,7 @@ function AmountRangeField({
         numberOfLines={1}
         style={[FS.amountFieldValue, { color: active ? theme.accent.ink : hasValue ? theme.text : theme.textTer }]}
       >
-        {hasValue ? `$${value}` : 'Any'}
+        {hasValue ? `$${value}` : '$0.00'}
       </Text>
     </Pressable>
   );
@@ -1938,10 +2019,12 @@ function DayGroup({
   return (
     <View style={[{ marginBottom: 16 }, style]}>
       <View style={S.dayHeader}>
-        <Text style={[S.dayLabel, { color: p.textTer }]}>{label}</Text>
-        <Text style={[S.dayTotal, { color: expenseCount > 1 ? dayTotalColor : p.textTer }]}>
-          {expenseCount > 1 ? `$${spendTotal.toFixed(2)} total` : `${txs.length} ${txs.length === 1 ? 'transaction' : 'transactions'}`}
-        </Text>
+        <Text style={[S.dayLabel, { color: p.text }]}>{label}</Text>
+        {expenseCount > 1 && (
+          <Text style={[S.dayTotal, { color: p.text }]}>
+            {`$${spendTotal.toFixed(2)} total`}
+          </Text>
+        )}
       </View>
       <View style={{ overflow: 'hidden' }}>
         {txs.map((tx, i) => (
@@ -2066,7 +2149,7 @@ function TxRow({
         weight="500"
         theme={theme}
         prefix={isIncome ? '+$' : '−$'}
-        color={isIncome ? incomeColor : p.text}
+        color={isIncome ? incomeColor : p.textSec}
       />
     </Pressable>
   );
@@ -2260,19 +2343,9 @@ const S = StyleSheet.create({
     width: 40, height: 40,
     alignItems: 'center', justifyContent: 'center',
   },
-  titleStack: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   title: {
+    flex: 1,
     ...TYPE.pageTitle,
-  },
-  titleScrolled: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    textAlign: 'center',
   },
 
   // Section stack
@@ -2311,6 +2384,10 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     paddingLeft: 12, paddingRight: 8, paddingVertical: 8,
     borderRadius: 100, gap: 8,
+  },
+  filterPillBlur: {
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
   },
   filterPillText: {
     ...TYPE.caption,
@@ -2386,6 +2463,10 @@ const S = StyleSheet.create({
 // ─── CalendarSheet styles ───────────────────────────────────────────────────
 
 const CS = StyleSheet.create({
+  sheetLayer: {
+    zIndex: 80,
+    elevation: 80,
+  },
   sheetContent: {
     flex: 1,
     paddingTop: 8,
@@ -2523,14 +2604,25 @@ const FS = StyleSheet.create({
     ...TYPE.bodySmEm,
   },
 
-  // Sort by / Date — single row with a styled UIKit menu trigger
+  // Sort by + Date — grouped card container
+  controlsCard: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  controlsDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
+  },
+
+  // Single row inside the controls card
   sortRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     minHeight: 44,
   },
   sortRowLabel: {
@@ -2591,16 +2683,21 @@ const FS = StyleSheet.create({
   },
 
   // Category section
-  groupDivider: {
+  groupEyebrow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 12,
-    gap: 12,
+    paddingTop: 24,
+    paddingBottom: 10,
+    gap: 8,
   },
-  groupDividerLabel: {
-    ...TYPE.labelSmPlain,
+  groupDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  groupEyebrowText: {
+    ...TYPE.labelLg,
   },
   catGrid: {
     flexDirection: 'row',

@@ -274,10 +274,10 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   return (
     <View style={[S.root, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
         {/* Header */}
-        <View style={S.header}>
+        <View style={[S.header, { zIndex: 50 }]}>
           <Host colorScheme={darkScheme} matchContents ignoreSafeArea="all" style={S.backBtnHost}>
             <Button
-              onPress={() => { voice.abort(); onClose(); }}
+              onPress={() => { voice.abort(); setKeypadOpen(false); onClose(); }}
               modifiers={[
                 buttonStyle('glass'),
                 controlSize('regular'),

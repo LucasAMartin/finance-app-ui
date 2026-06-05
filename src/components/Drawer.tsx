@@ -8,8 +8,9 @@ import {
   Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Host, Image } from '@expo/ui/swift-ui';
+import type { SFSymbol } from 'sf-symbols-typescript';
 import { Theme } from '../theme';
-import { Icon } from './Icon';
 import { ScreenExitButton } from './GlassButton';
 import { TYPE } from '../typography';
 import { RADIUS } from '../radius';
@@ -17,7 +18,7 @@ import { RADIUS } from '../radius';
 export interface DrawerItem {
   id: string;
   label: string;
-  icon: string;
+  systemIcon: SFSymbol;
   badge?: string | number;
   highlight?: boolean;
 }
@@ -38,23 +39,23 @@ interface Props {
 const SECTIONS: DrawerSection[] = [
   {
     items: [
-      { id: 'home',       label: 'Dashboard',      icon: 'home' },
-      { id: 'budget',     label: 'Budgets',        icon: 'chart' },
-      { id: 'insights',   label: 'Insights',       icon: 'chart' },
-      { id: 'activity',   label: 'Activity',       icon: 'note', badge: 3 },
+      { id: 'home',       label: 'Dashboard',      systemIcon: 'house' },
+      { id: 'budget',     label: 'Budgets',        systemIcon: 'chart.pie' },
+      { id: 'insights',   label: 'Insights',       systemIcon: 'lightbulb' },
+      { id: 'activity',   label: 'Activity',       systemIcon: 'list.bullet', badge: 3 },
     ],
   },
   {
     title: 'Preferences',
     items: [
-      { id: 'settings',   label: 'Settings',       icon: 'settings' },
+      { id: 'settings',   label: 'Settings',       systemIcon: 'gearshape' },
     ],
   },
   {
     title: 'Support',
     items: [
-      { id: 'help',       label: 'Help & support', icon: 'note' },
-      { id: 'signout',    label: 'Sign out',       icon: 'repeat' },
+      { id: 'help',       label: 'Help & support', systemIcon: 'questionmark.circle' },
+      { id: 'signout',    label: 'Sign out',       systemIcon: 'rectangle.portrait.and.arrow.right' },
     ],
   },
 ];
@@ -132,21 +133,13 @@ export function Drawer({ theme, width, progress, onNavigate, onClose }: Props) {
                 accessibilityRole="button"
                 style={styles.item}
               >
-                <View
-                  style={[
-                    styles.itemIcon,
-                    {
-                      backgroundColor: item.highlight ? theme.accent.fill : theme.chipBg,
-                    },
-                  ]}
-                >
-                  <Icon
-                    name={item.icon}
-                    size={17}
-                    color={item.highlight ? theme.accent.ink : theme.text}
-                    stroke={1.5}
+                <Host style={styles.iconHost} ignoreSafeArea="all">
+                  <Image
+                    systemName={item.systemIcon}
+                    size={20}
+                    color={item.highlight ? theme.accent.dot : theme.textSec}
                   />
-                </View>
+                </Host>
                 <Text style={[TYPE.subsectionTitle, { flex: 1, color: theme.text }]}>
                   {item.label}
                 </Text>
@@ -208,14 +201,13 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 14,
     paddingVertical: 12,
     paddingHorizontal: 4,
   },
-  itemIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.chip,
+  iconHost: {
+    width: 24,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
