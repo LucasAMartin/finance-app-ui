@@ -340,7 +340,13 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
   }
 
   delete(id: string): void {
-    getDb().runSync('DELETE FROM transactions WHERE id = ?', id);
-    this.emit();
+    const db = getDb();
+    let changed = false;
+    db.withTransactionSync(() => {
+      const attachmentResult = db.runSync('DELETE FROM attachments WHERE transaction_id = ?', id);
+      const result = db.runSync('DELETE FROM transactions WHERE id = ?', id);
+      changed = attachmentResult.changes > 0 || result.changes > 0;
+    });
+    if (changed) this.emit();
   }
 }

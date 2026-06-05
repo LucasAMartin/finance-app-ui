@@ -1,4 +1,4 @@
-import { getDb, json, nextId } from './db';
+import { getDb, json, nextId, parseJson } from './db';
 import { SQLiteRepository } from './base';
 import type { Budget } from '../types';
 
@@ -23,7 +23,7 @@ export class SQLiteBudgetsRepo extends SQLiteRepository<Budget> {
       label: row.label ?? undefined,
       icon: row.icon ?? undefined,
       amount: row.amount,
-      meta: row.meta ? JSON.parse(row.meta) : undefined,
+      meta: parseJson(row.meta),
     }));
   }
 

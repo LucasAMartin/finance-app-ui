@@ -1,4 +1,4 @@
-import { getDb, json, nextId } from './db';
+import { getDb, json, nextId, parseJson } from './db';
 import { SQLiteRepository } from './base';
 import type { Attachment } from '../types';
 
@@ -21,7 +21,7 @@ export class SQLiteAttachmentsRepo extends SQLiteRepository<Attachment> {
       type: row.type,
       createdAt: row.created_at,
       cloudAssetId: row.cloud_asset_id ?? undefined,
-      meta: row.meta ? JSON.parse(row.meta) : undefined,
+      meta: parseJson(row.meta),
     }));
   }
 

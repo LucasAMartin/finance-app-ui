@@ -1,4 +1,4 @@
-import { getDb, json } from './db';
+import { getDb, json, parseJson } from './db';
 import { SQLiteRepository } from './base';
 import type { AppSettings } from '../types';
 
@@ -19,7 +19,7 @@ export class SQLiteSettingsRepo extends SQLiteRepository<AppSettings, AppSetting
       accentKey: row.accent_key,
       cardStyle: row.card_style,
       wallpaperId: row.wallpaper_id ?? undefined,
-      meta: row.meta ? JSON.parse(row.meta) : undefined,
+      meta: parseJson(row.meta),
     }));
   }
 

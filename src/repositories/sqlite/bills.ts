@@ -1,4 +1,4 @@
-import { getDb, json, nextId } from './db';
+import { getDb, json, nextId, parseJson } from './db';
 import { SQLiteRepository } from './base';
 import type { Bill } from '../types';
 
@@ -29,7 +29,7 @@ export class SQLiteBillsRepo extends SQLiteRepository<Bill> {
       recurring: Boolean(row.recurring),
       daysUntil: row.days_until,
       estimate: Boolean(row.estimate),
-      meta: row.meta ? JSON.parse(row.meta) : undefined,
+      meta: parseJson(row.meta),
     }));
   }
 

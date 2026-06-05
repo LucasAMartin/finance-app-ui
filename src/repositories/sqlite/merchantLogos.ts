@@ -1,4 +1,4 @@
-import { getDb, json } from './db';
+import { getDb, json, parseJson } from './db';
 import { SQLiteRepository } from './base';
 import type { MerchantLogo, UpsertMerchantLogoInput } from '../types';
 
@@ -28,7 +28,7 @@ const fromRow = (row: MerchantLogoRow): MerchantLogo => ({
   lastCheckedAt: row.last_checked_at,
   retryAfter: row.retry_after ?? undefined,
   failureCount: row.failure_count,
-  meta: row.meta ? JSON.parse(row.meta) : undefined,
+  meta: parseJson(row.meta),
 });
 
 export class SQLiteMerchantLogosRepo extends SQLiteRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>> {

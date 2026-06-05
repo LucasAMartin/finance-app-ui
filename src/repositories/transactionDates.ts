@@ -1,4 +1,5 @@
 import type { CreateTransactionInput, Transaction, UpdateTransactionInput } from './types';
+import { parseJson } from './json';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -46,7 +47,7 @@ export function transactionFromStored(row: {
     visibility: row.visibility ?? 'shared',
     createdByUserId: row.createdByUserId ?? undefined,
     updatedByUserId: row.updatedByUserId ?? undefined,
-    meta: row.meta ? JSON.parse(row.meta) : undefined,
+    meta: parseJson(row.meta ?? null),
     ...deriveTransactionDisplay(row.occurredAt),
   };
 }

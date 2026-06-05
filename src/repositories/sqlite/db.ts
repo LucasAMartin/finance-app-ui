@@ -9,20 +9,31 @@ import {
   SEED_TRANSACTIONS,
 } from '../../data';
 import { shiftedSeedDate } from '../transactionDates';
+export { parseJson } from '../json';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let db: SQLiteDatabase | null = null;
 
 export function getDb(): SQLiteDatabase {
   if (!db) {
     db = SQLite.openDatabaseSync(DB_NAME);
+    configureDb(db);
     migrate(db);
     seedIfEmpty(db);
   }
   return db;
+}
+
+function configureDb(database: SQLiteDatabase) {
+  database.execSync(`
+    PRAGMA foreign_keys = ON;
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
+  `);
 }
 
 function migrate(database: SQLiteDatabase) {
@@ -120,7 +131,8 @@ function migrate(database: SQLiteDatabase) {
           type TEXT NOT NULL,
           created_at TEXT NOT NULL,
           cloud_asset_id TEXT,
-          meta TEXT
+          meta TEXT,
+          FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS bills (
@@ -142,6 +154,7 @@ function migrate(database: SQLiteDatabase) {
           display_name TEXT,
           domain TEXT,
           logo_url TEXT,
+          bg_color TEXT,
           status TEXT NOT NULL,
           source TEXT,
           last_checked_at TEXT NOT NULL,
@@ -190,20 +203,21 @@ function migrate(database: SQLiteDatabase) {
           type TEXT NOT NULL,
           created_at TEXT NOT NULL,
           cloud_asset_id TEXT,
-          meta TEXT
+          meta TEXT,
+          FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
         );
 
-        ALTER TABLE incomes ADD COLUMN kind TEXT NOT NULL DEFAULT 'regular';
-        ALTER TABLE incomes ADD COLUMN received_at TEXT;
-        ALTER TABLE incomes ADD COLUMN created_by_user_id TEXT;
-        ALTER TABLE incomes ADD COLUMN updated_by_user_id TEXT;
-
-        ALTER TABLE transactions ADD COLUMN type TEXT NOT NULL DEFAULT 'expense';
-        ALTER TABLE transactions ADD COLUMN recurring_rule_id TEXT;
-        ALTER TABLE transactions ADD COLUMN visibility TEXT NOT NULL DEFAULT 'shared';
-        ALTER TABLE transactions ADD COLUMN created_by_user_id TEXT;
-        ALTER TABLE transactions ADD COLUMN updated_by_user_id TEXT;
       `);
+      addColumnIfMissing(database, 'incomes', 'kind', "TEXT NOT NULL DEFAULT 'regular'");
+      addColumnIfMissing(database, 'incomes', 'received_at', 'TEXT');
+      addColumnIfMissing(database, 'incomes', 'created_by_user_id', 'TEXT');
+      addColumnIfMissing(database, 'incomes', 'updated_by_user_id', 'TEXT');
+
+      addColumnIfMissing(database, 'transactions', 'type', "TEXT NOT NULL DEFAULT 'expense'");
+      addColumnIfMissing(database, 'transactions', 'recurring_rule_id', 'TEXT');
+      addColumnIfMissing(database, 'transactions', 'visibility', "TEXT NOT NULL DEFAULT 'shared'");
+      addColumnIfMissing(database, 'transactions', 'created_by_user_id', 'TEXT');
+      addColumnIfMissing(database, 'transactions', 'updated_by_user_id', 'TEXT');
     }
     if (version < 3) {
       database.execSync(`
@@ -255,7 +269,38 @@ function migrate(database: SQLiteDatabase) {
       // Resolver now returns a server-sampled `bgColor` per logo; add the column.
       // (A one-time cache flush ran here too for the only device, now removed; the
       // column add stays — the repo reads/writes bg_color, so it must exist.)
-      database.execSync('ALTER TABLE merchant_logos ADD COLUMN bg_color TEXT');
+      addColumnIfMissing(database, 'merchant_logos', 'bg_color', 'TEXT');
+    }
+    if (version < 8) {
+      database.execSync(`
+        CREATE INDEX IF NOT EXISTS idx_transactions_occurred_asc_id_asc
+        ON transactions (occurred_at ASC, id ASC);
+
+        CREATE INDEX IF NOT EXISTS idx_transactions_amount_asc_occurred_id
+        ON transactions (amount ASC, occurred_at DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_attachments_transaction_id
+        ON attachments (transaction_id);
+
+        CREATE INDEX IF NOT EXISTS idx_budgets_month_group_category
+        ON budgets (month DESC, group_key, category);
+
+        CREATE INDEX IF NOT EXISTS idx_incomes_start_id
+        ON incomes (start_date DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_recurring_rules_active_due
+        ON recurring_rules (active DESC, next_due_date ASC, merchant);
+
+        CREATE INDEX IF NOT EXISTS idx_bills_due_id
+        ON bills (days_until ASC, id);
+
+        CREATE INDEX IF NOT EXISTS idx_categories_active_sort
+        ON categories (archived, group_key, sort_order, label);
+      `);
+      database.runSync(`
+        DELETE FROM attachments
+        WHERE transaction_id NOT IN (SELECT id FROM transactions)
+      `);
     }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });
@@ -267,7 +312,7 @@ function migrate(database: SQLiteDatabase) {
 function insertSeedTransactions(database: SQLiteDatabase) {
   SEED_TRANSACTIONS.forEach(tx => {
     database.runSync(
-      'INSERT INTO transactions (id, type, amount, merchant, category, occurred_at, note, recurring, recurring_rule_id, visibility, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR IGNORE INTO transactions (id, type, amount, merchant, category, occurred_at, note, recurring, recurring_rule_id, visibility, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       tx.id,
       tx.type ?? 'expense',
       tx.amount,
@@ -423,6 +468,18 @@ function insertCategory(database: SQLiteDatabase, cat: (typeof SEED_CATEGORIES)[
     cat.updatedByUserId ?? 'local',
     json(cat.meta),
   );
+}
+
+function columnExists(database: SQLiteDatabase, table: string, column: string): boolean {
+  return database
+    .getAllSync<{ name: string }>(`PRAGMA table_info(${table})`)
+    .some(row => row.name === column);
+}
+
+function addColumnIfMissing(database: SQLiteDatabase, table: string, column: string, definition: string) {
+  if (!columnExists(database, table, column)) {
+    database.execSync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 function nextDueFromSeed(dayOfMonth: number): string {

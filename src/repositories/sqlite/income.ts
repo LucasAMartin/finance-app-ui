@@ -1,4 +1,4 @@
-import { getDb, json, nextId } from './db';
+import { getDb, json, nextId, parseJson } from './db';
 import { SQLiteRepository } from './base';
 import type { Income } from '../types';
 
@@ -29,7 +29,7 @@ export class SQLiteIncomeRepo extends SQLiteRepository<Income> {
       receivedAt: row.received_at ?? undefined,
       createdByUserId: row.created_by_user_id ?? undefined,
       updatedByUserId: row.updated_by_user_id ?? undefined,
-      meta: row.meta ? JSON.parse(row.meta) : undefined,
+      meta: parseJson(row.meta),
     }));
   }
 
