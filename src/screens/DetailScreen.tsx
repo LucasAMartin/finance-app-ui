@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, getCardStyle, OVER_DOT } from '../theme';
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
+import { memberDisplayName } from '../repositories/memberLabels';
 import type { Transaction } from '../repositories/types';
 import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
@@ -21,6 +22,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   const { transactionsRepo, categoriesRepo } = useRepositories();
   const [repoVersion, setRepoVersion] = useState(0);
   const categories = useRepositoryList(categoriesRepo);
+  const ledgerMembers = useLedgerMembers();
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const card = getCardStyle(theme);
@@ -42,8 +44,11 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   }, [currentTx?.id, currentTx?.merchant, currentTx?.amount, currentTx?.note, repoVersion]);
 
   if (!currentTx) return null;
+  const canEdit = transactionsRepo.canEdit(currentTx);
+  const ownerName = memberDisplayName(ledgerMembers, currentTx.createdByUserId);
 
   const saveEdit = () => {
+    if (!canEdit) return;
     const amount = parseFloat(amountDraft.replace(/[$,\s]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
     transactionsRepo.update(currentTx.id, {
@@ -65,6 +70,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
   };
 
   const deleteTx = () => {
+    if (!canEdit) return;
     setAmountKeypadOpen(false);
     transactionsRepo.delete(currentTx.id);
     onBack();
@@ -104,7 +110,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
         <TouchableOpacity
           onPress={() => {
             setAmountKeypadOpen(false);
-            setEditing(e => !e);
+            if (canEdit) setEditing(e => !e);
           }}
           delayPressIn={0}
           hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
@@ -159,7 +165,8 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
               {'setter' in r ? (
                 r.label === 'Amount' ? (
                   <TouchableOpacity
-                    onPress={openAmountKeypad}
+                    onPress={canEdit ? openAmountKeypad : undefined}
+                    disabled={!canEdit}
                     activeOpacity={0.75}
                     accessibilityRole="button"
                     accessibilityLabel="Edit transaction amount"
@@ -170,9 +177,10 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
                     </Text>
                   </TouchableOpacity>
                 ) : (
-                  <TextInput
-                    value={r.value}
-                    onChangeText={r.setter}
+	                  <TextInput
+	                    value={r.value}
+	                    onChangeText={r.setter}
+                    editable={canEdit}
                     placeholderTextColor={theme.textTer}
                     onFocus={() => setAmountKeypadOpen(false)}
                     style={{ fontSize: 13, color: theme.text, fontWeight: '500', textAlign: 'right', flex: 1, padding: 0 }}
@@ -187,16 +195,21 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
 
         {/* Action buttons */}
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          {(editing
-            ? [{ icon: null, label: 'Save', onPress: saveEdit }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
-            : [{ icon: 'chevR', label: 'Edit', onPress: () => setEditing(true) }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
-          ).map(a => (
+	          {(editing
+	            ? [{ icon: null, label: 'Save', onPress: saveEdit }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }]
+	            : canEdit ? [{ icon: 'chevR', label: 'Edit', onPress: () => setEditing(true) }, { icon: 'trash', label: 'Delete', onPress: deleteTx, danger: true }] : []
+	          ).map(a => (
             <TouchableOpacity key={a.label} onPress={a.onPress} accessibilityRole="button" style={[card, styles.actionBtn]}>
               {a.icon && <Icon name={a.icon} size={16} color={theme.text} stroke={1.5} />}
               <Text style={{ fontSize: 13, fontWeight: '600', color: a.danger ? OVER_DOT : theme.text, marginLeft: a.icon ? 8 : 0 }}>{a.label}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+	        </View>
+          {!canEdit && (
+            <Text style={{ fontSize: 12, color: theme.textSec, textAlign: 'center', marginBottom: 16 }}>
+              {ownerName ?? 'This member'} has locked edits for this transaction.
+            </Text>
+          )}
 
         {/* Category context — data only */}
         <View style={styles.catContext}>

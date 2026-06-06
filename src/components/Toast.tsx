@@ -1,13 +1,28 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  interpolate,
+  Extrapolation,
+  Easing,
+} from 'react-native-reanimated';
+import { Button, GlassEffectContainer, Host, RNHostView } from '@expo/ui/swift-ui';
+import { buttonStyle, glassEffect } from '@expo/ui/swift-ui/modifiers';
+import { SUPPORTS_GLASS, glassTintForTheme } from './GlassButton';
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
 import { RADIUS } from '../radius';
+import { SPACE } from '../spacing';
 
-// Tab-bar pill height (52 button + 2×8 padding) so the toast clears it.
-const TAB_BAR_HEIGHT = 68;
+const SWIPE_DISMISS_DISTANCE = -44;
+const SWIPE_DISMISS_VELOCITY = -400;
 
 interface ToastProps {
   theme: Theme;
@@ -18,11 +33,6 @@ interface ToastProps {
   duration?: number;
 }
 
-/**
- * Small transient confirmation that sits just above the floating tab bar.
- * Holds the last message through its exit animation so the text doesn't blank
- * out as it slides away.
- */
 export function Toast({
   theme,
   message,
@@ -32,71 +42,146 @@ export function Toast({
   duration = 4000,
 }: ToastProps) {
   const insets = useSafeAreaInsets();
-  const anim = useRef(new Animated.Value(0)).current;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Hold the last message through the exit animation so text doesn't blank mid-slide.
   const [shown, setShown] = useState<string | null>(message);
 
+  const enterProgress = useSharedValue(0);
+  const dragY = useSharedValue(0);
+
+  const clearTimer = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  }, []);
+
+  const animateOut = useCallback((onDone?: () => void) => {
+    enterProgress.value = withTiming(0, { duration: 200, easing: Easing.in(Easing.quad) }, (done) => {
+      if (done) {
+        runOnJS(setShown)(null);
+        if (onDone) runOnJS(onDone)();
+      }
+    });
+  }, [enterProgress]);
+
   useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
+    clearTimer();
     if (message) {
       setShown(message);
-      Animated.timing(anim, {
-        toValue: 1,
-        duration: 260,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }).start();
+      dragY.value = 0;
+      enterProgress.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
       timer.current = setTimeout(onDismiss, duration);
     } else {
-      Animated.timing(anim, {
-        toValue: 0,
-        duration: 200,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }).start(({ finished }) => { if (finished) setShown(null); });
+      animateOut();
     }
-    return () => { if (timer.current) clearTimeout(timer.current); };
+    return clearTimer;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message]);
+
+  // Called from the swipe gesture (UI thread) — commits and clears.
+  const commitDismiss = useCallback(() => {
+    clearTimer();
+    onDismiss();
+  }, [clearTimer, onDismiss]);
+
+  const handleAction = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    clearTimer();
+    onAction?.();
+  }, [clearTimer, onAction]);
+
+  const pan = Gesture.Pan()
+    .minDistance(8)
+    .onUpdate((e) => {
+      'worklet';
+      // Only track upward movement.
+      dragY.value = Math.min(0, e.translationY);
+    })
+    .onEnd((e) => {
+      'worklet';
+      if (e.translationY < SWIPE_DISMISS_DISTANCE || e.velocityY < SWIPE_DISMISS_VELOCITY) {
+        // Swipe far enough or fast enough — fly off and commit.
+        dragY.value = withTiming(-160, { duration: 200 });
+        enterProgress.value = withTiming(0, { duration: 200 }, (done) => {
+          if (done) runOnJS(commitDismiss)();
+        });
+      } else {
+        // Not far enough — spring back.
+        dragY.value = withSpring(0, { damping: 20, stiffness: 300 });
+      }
+    });
+
+  const animatedStyle = useAnimatedStyle(() => {
+    'worklet';
+    const enterOffset = interpolate(enterProgress.value, [0, 1], [-20, 0], Extrapolation.CLAMP);
+    const opacity = interpolate(enterProgress.value, [0, 1], [0, 1], Extrapolation.CLAMP);
+    // Fade out progressively as the user drags up.
+    const dragOpacity = interpolate(Math.abs(dragY.value), [0, 60], [1, 0.25], Extrapolation.CLAMP);
+    return {
+      opacity: opacity * dragOpacity,
+      transform: [{ translateY: enterOffset + dragY.value }],
+    };
+  });
 
   if (!shown) return null;
 
-  const bottom = Math.max(insets.bottom, 16) + 8 + TAB_BAR_HEIGHT + 12;
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
+  const top = insets.top + 8;
+  const colorScheme = theme.dark ? 'dark' : 'light';
 
-  const handleAction = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    onAction?.();
-  };
+  const content = (
+    <View style={S.inner}>
+      <Text style={[TYPE.bodySmEm, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
+        {shown}
+      </Text>
+      {onAction && (
+        <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>{actionLabel}</Text>
+      )}
+    </View>
+  );
 
   return (
-    <Animated.View pointerEvents="box-none" style={[S.wrap, { bottom }]}>
-      <Animated.View
-        style={[
-          S.pill,
-          {
-            backgroundColor: theme.surface,
-            borderColor: theme.hairline,
-            opacity: anim,
-            transform: [{ translateY }],
-            shadowOpacity: theme.dark ? 0.5 : 0.18,
-          },
-        ]}
+    <GestureDetector gesture={pan}>
+      <Reanimated.View
+        style={[S.wrap, { top }, animatedStyle]}
+        pointerEvents="box-none"
       >
-        <Text style={[TYPE.bodySmEm, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
-          {shown}
-        </Text>
-        {onAction && (
-          <Pressable
-            onPress={handleAction}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={actionLabel}
+        {SUPPORTS_GLASS ? (
+          <Host matchContents ignoreSafeArea="all" colorScheme={colorScheme}>
+            <GlassEffectContainer>
+              <Button
+                onPress={onAction ? handleAction : commitDismiss}
+                modifiers={[
+                  buttonStyle('plain'),
+                  glassEffect({
+                    glass: {
+                      variant: 'regular',
+                      interactive: true,
+                      tint: glassTintForTheme(theme.dark),
+                    },
+                    shape: 'capsule',
+                  }),
+                ]}
+              >
+                <RNHostView matchContents>
+                  {content}
+                </RNHostView>
+              </Button>
+            </GlassEffectContainer>
+          </Host>
+        ) : (
+          <View
+            style={[
+              S.pill,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.hairline,
+                shadowOpacity: theme.dark ? 0.5 : 0.18,
+              },
+            ]}
           >
-            <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>{actionLabel}</Text>
-          </Pressable>
+            {content}
+          </View>
         )}
-      </Animated.View>
-    </Animated.View>
+      </Reanimated.View>
+    </GestureDetector>
   );
 }
 
@@ -107,20 +192,28 @@ const S = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     paddingHorizontal: 16,
-    zIndex: 40,
+    zIndex: 100,
+    pointerEvents: 'box-none',
+  },
+  inner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.xl,
+    paddingVertical: SPACE.md,
+    paddingHorizontal: SPACE.xl,
   },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 20,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    gap: SPACE.xl,
+    paddingVertical: SPACE.md,
+    paddingHorizontal: SPACE.xl,
     borderRadius: RADIUS.full,
     borderWidth: 1,
     maxWidth: 440,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
     elevation: 8,
   },
 });

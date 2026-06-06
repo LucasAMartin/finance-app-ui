@@ -21,13 +21,14 @@ import {
 
 const AnimatedGHFlatList = Animated.createAnimatedComponent(GHFlatList);
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
-import { runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
+import Reanimated, { FadeIn, FadeOut, LinearTransition, runOnJS, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
 import {
   Calendar,
   buildCalendar,
@@ -36,12 +37,13 @@ import {
   type CalendarMonthEnhanced,
   type CalendarTheme,
 } from '@marceloterreiro/flash-calendar';
-import { Button as SwiftButton, ContentUnavailableView, Host, Menu, Picker, Text as SwiftText } from '@expo/ui/swift-ui';
-import { environment, pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
+import { Button as SwiftButton, ContentUnavailableView, GlassEffectContainer, Host, Menu, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
+import { buttonStyle, environment, glassEffect, pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
-import type { Bill, Category, Transaction, TransactionCursor, TransactionQuery, TransactionsRepo, TransactionSummary, TransactionSummaryQuery } from '../repositories/types';
+import { appendMemberLabel, memberDisplayName } from '../repositories/memberLabels';
+import type { Bill, Category, LedgerMember, Transaction, TransactionCursor, TransactionQuery, TransactionsRepo, TransactionSummary, TransactionSummaryQuery } from '../repositories/types';
 import { txToCreateInput, upcomingBillsFromRecurring } from '../selectors/finance';
 import type { ActivityInitialFilter } from '../selectors/spending';
 
@@ -85,6 +87,10 @@ type DateFilter = DateFilterPreset | { from: Date; to: Date } | null;
 type AmountFilter = { min?: number; max?: number } | null;
 type SortOrder = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'cat';
 type CalendarSelectMode = 'day' | 'range';
+type CalendarPreviewSelection =
+  | { kind: 'day'; dateId: string }
+  | { kind: 'range'; startId: string; endId: string }
+  | null;
 type SheetHandle = {
   open: () => void;
   close: () => void;
@@ -267,6 +273,38 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
   accessibilityLabel: string;
   children: React.ReactNode;
 }) {
+  // iOS 26+: a real interactive Liquid Glass capsule. The press grow / finger-
+  // tracking / refraction only happens when the glass lives on a native `Button`
+  // (the touch target) wrapped in a `GlassEffectContainer` — a glass layer behind
+  // a JS Pressable renders the material but stays inert. The RN label (custom SVG
+  // icons + Inter text) is embedded via `RNHostView`, and `matchContents` sizes
+  // the capsule to hug it. The active-filter tint maps to the glass's native tint.
+  if (SUPPORTS_GLASS) {
+    return (
+      <Host matchContents ignoreSafeArea="all" colorScheme={dark ? 'dark' : 'light'}>
+        <GlassEffectContainer>
+          <SwiftButton
+            onPress={onPress}
+            modifiers={[
+              buttonStyle('plain'),
+              glassEffect({
+                glass: overlay
+                  ? { variant: 'regular', interactive: true, tint: overlay }
+                  : { variant: 'regular', interactive: true },
+                shape: 'capsule',
+              }),
+            ]}
+          >
+            <RNHostView matchContents>
+              <View style={S.filterPill}>{children}</View>
+            </RNHostView>
+          </SwiftButton>
+        </GlassEffectContainer>
+      </Host>
+    );
+  }
+
+  // Pre-iOS-26 fallback: the prior BlurView capsule with a tint overlay.
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -300,12 +338,15 @@ interface Props {
   onOverlayOpenChange?: (open: boolean) => void;
   initialFilter?: ActivityInitialFilter | null;
   filterToken?: number;
+  /** App-level optimistic delete: hide this row immediately before the repo commit lands. */
+  pendingDeleteId?: string | null;
 }
 
-export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken }: Props) {
+export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken, pendingDeleteId: externalPendingDeleteId }: Props) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
+  const ledgerMembers = useLedgerMembers();
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
   const insets = useSafeAreaInsets();
@@ -317,6 +358,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
   const [amountFilter, setAmountFilter]     = useState<AmountFilter>(null);
   const [sortBy, setSortBy]                 = useState<SortOrder>('date-desc');
   const [pendingUndo, setPendingUndo]       = useState<{ tx: Transaction } | null>(null);
+  const [deniedMessage, setDeniedMessage]   = useState<string | null>(null);
   const [selectedDay, setSelectedDay]       = useState<number | null>(null);
   const [calViewYear, setCalViewYear]       = useState(CALENDAR_YEAR);
   const [calViewMonth, setCalViewMonth]     = useState(CALENDAR_MONTH);
@@ -367,10 +409,37 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
     calendarSheetRef.current?.resetSelection?.();
   }, []);
 
+  // Removing a filter pill triggers a full transaction-list rebuild, which holds
+  // the JS thread for a beat on long lists. Fire the haptic tick synchronously so
+  // the touch is acknowledged instantly, then defer the state change one frame so
+  // the pill's exit animation paints before that rebuild blocks the thread —
+  // motion and touch carry the "removed" feedback, no spinner needed.
+  const removeFilter = useCallback((apply: () => void) => {
+    Haptics.selectionAsync();
+    requestAnimationFrame(apply);
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    setCatFilter([]);
+    setDateFilter(null);
+    setAmountFilter(null);
+    setSelectedDay(null);
+    calendarSheetRef.current?.resetSelection?.();
+  }, []);
+
+  // Optimistic delete: hide the row immediately (via pendingUndo filter in
+  // `grouped`) without touching the repo. The actual delete fires when the toast
+  // auto-dismisses or the user swipes it away — so the row is already gone from
+  // the UI by the time any async work lands. Undo just restores local state;
+  // no re-create needed since the repo was never modified.
   const handleDeleteTx = useCallback((t: Transaction) => {
-    transactionsRepo.delete(t.id);
+    if (!transactionsRepo.canEdit(t)) {
+      const owner = memberDisplayName(ledgerMembers, t.createdByUserId);
+      setDeniedMessage(`${owner ?? 'This member'} has locked edits for this transaction.`);
+      return;
+    }
     setPendingUndo({ tx: t });
-  }, [transactionsRepo]);
+  }, [ledgerMembers, transactionsRepo]);
 
   const handleOpenTx = useCallback((selected: Transaction) => {
     onOpenTx?.(selected);
@@ -379,10 +448,14 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
     onPrepareTx?.(selected);
   }, [onPrepareTx]);
 
-  const handleUndoDelete = () => {
-    if (pendingUndo) transactionsRepo.create(txToCreateInput(pendingUndo.tx));
+  const handleUndoDelete = useCallback(() => {
+    setPendingUndo(null); // row reappears — never left the repo
+  }, []);
+
+  const commitDelete = useCallback(() => {
+    if (pendingUndo) transactionsRepo.delete(pendingUndo.tx.id);
     setPendingUndo(null);
-  };
+  }, [pendingUndo, transactionsRepo]);
 
   // Swipe-to-delete coordination (mirrors BudgetScreen): only one row open at a
   // time, and any open row closes when the user scrolls or taps elsewhere.
@@ -485,14 +558,18 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
   }, [loadFirstActivityPage]);
 
   const grouped = useMemo(() => {
+    // Merge internal swipe-delete pending ID with the external App-level signal so
+    // any delete path (TxSheet, HomeScreen, swipe) hides the row in the same frame.
+    const pendingId = pendingUndo?.tx.id ?? externalPendingDeleteId;
     const g: Record<string, { txs: Transaction[]; total: number }> = {};
     activityRows.forEach(t => {
+      if (pendingId && t.id === pendingId) return;
       if (!g[t.fullDate]) g[t.fullDate] = { txs: [], total: 0 };
       g[t.fullDate].txs.push(t);
       g[t.fullDate].total += t.amount;
     });
     return g;
-  }, [activityRows]);
+  }, [activityRows, pendingUndo?.tx.id, externalPendingDeleteId]);
 
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
   const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
@@ -550,7 +627,8 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
     extrapolate: 'clamp',
   });
 
-  const hasFilterPills = selectedDay !== null || dateFilter !== null || amountFilterActive(amountFilter) || catFilter.length > 0;
+  const filterPillCount = (selectedDay !== null ? 1 : 0) + (dateFilter !== null ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0) + catFilter.length;
+  const hasFilterPills = filterPillCount > 0;
   const activityDayKeys = useMemo(
     () => !loading && !loadError && selectedDay === null && dayKeys.length > 0 ? dayKeys : [],
     [dayKeys, loadError, loading, selectedDay],
@@ -564,10 +642,12 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
         theme={theme}
         cats={cats}
         categories={categories}
+        members={ledgerMembers}
         p={p}
         onPress={handleOpenTx}
         onPrepare={handlePrepareTx}
         onDelete={handleDeleteTx}
+        canEditTx={(tx) => transactionsRepo.canEdit(tx)}
         onSwipeOpen={handleSwipeOpen}
         onSwipeClose={handleSwipeClose}
         scrollRef={scrollViewRef}
@@ -585,8 +665,10 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
     handlePrepareTx,
     handleSwipeClose,
     handleSwipeOpen,
+    ledgerMembers,
     p,
     theme,
+    transactionsRepo,
   ]);
 
   // Stable renderItem identity. An inline `({item}) => ...` here gives the list a
@@ -761,53 +843,70 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  style={{ marginHorizontal: -16, marginTop: 12 }}
-                  contentContainerStyle={[S.filterStripScroll, { paddingHorizontal: 16 }]}
+                  style={{ marginHorizontal: -16, marginTop: 4, marginVertical: -6 }}
+                  contentContainerStyle={[S.filterStripScroll, { paddingHorizontal: 16, paddingVertical: 6 }]}
                   keyboardShouldPersistTaps="handled"
                 >
+                  {filterPillCount >= 2 && (
+                    <Reanimated.View key="pill-clear-all" entering={FadeIn.duration(160)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                      <FilterPill dark={theme.dark} onPress={() => removeFilter(clearAllFilters)} accessibilityLabel="Clear all filters">
+                        <Text style={[S.filterPillText, S.filterPillClearAll, { color: theme.accent.dot }]}>Clear all</Text>
+                      </FilterPill>
+                    </Reanimated.View>
+                  )}
                   {selectedDay !== null && (
-                    <FilterPill dark={theme.dark} onPress={() => setSelectedDay(null)} accessibilityLabel="Clear day selection">
-                      <Icon name="cal" size={10} color={p.textSec} stroke={1.7} />
-                      <Text style={[S.filterPillText, { color: p.text }]}>
-                        {MONTHS[calViewMonth]} {selectedDay}
-                      </Text>
-                      <Icon name="close" size={10} color={p.textSec} stroke={2} />
-                    </FilterPill>
+                    <Reanimated.View key="pill-day" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                      <FilterPill dark={theme.dark} onPress={() => removeFilter(() => setSelectedDay(null))} accessibilityLabel="Clear day selection">
+                        <Icon name="cal" size={10} color={p.textSec} stroke={1.7} />
+                        <Text style={[S.filterPillText, { color: p.text }]}>
+                          {MONTHS[calViewMonth]} {selectedDay}
+                        </Text>
+                        <Icon name="close" size={10} color={p.textSec} stroke={2} />
+                      </FilterPill>
+                    </Reanimated.View>
                   )}
                   {dateFilter && typeof dateFilter === 'string' && (
-                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={clearDateRange} accessibilityLabel="Remove date filter">
-                      <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
-                        {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
-                      </Text>
-                      <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                    </FilterPill>
+                    <Reanimated.View key="pill-date" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                      <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
+                        <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
+                          {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
+                        </Text>
+                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                      </FilterPill>
+                    </Reanimated.View>
                   )}
                   {dateFilter && typeof dateFilter !== 'string' && (
-                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={clearDateRange} accessibilityLabel="Remove date filter">
-                      <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
-                        {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
-                      </Text>
-                      <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                    </FilterPill>
+                    <Reanimated.View key="pill-date-range" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                      <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
+                        <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
+                          {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
+                        </Text>
+                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                      </FilterPill>
+                    </Reanimated.View>
                   )}
                   {amountFilterActive(amountFilter) && (
-                    <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => setAmountFilter(null)} accessibilityLabel="Remove amount filter">
-                      <Icon name="wallet" size={10} color={theme.accent.ink} stroke={1.7} />
-                      <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
-                        {amountFilterLabel(amountFilter)}
-                      </Text>
-                      <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                    </FilterPill>
+                    <Reanimated.View key="pill-amount" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                      <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => removeFilter(() => setAmountFilter(null))} accessibilityLabel="Remove amount filter">
+                        <Icon name="wallet" size={10} color={theme.accent.ink} stroke={1.7} />
+                        <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
+                          {amountFilterLabel(amountFilter)}
+                        </Text>
+                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                      </FilterPill>
+                    </Reanimated.View>
                   )}
                   {catFilter.map(catId => {
                     const cat = cats[catId];
                     const groupColor = categoryGroupColor(catId, categories, theme.dark);
                     return (
-                      <FilterPill key={catId} dark={theme.dark} overlay={groupColor + '50'} onPress={() => setCatFilter(catFilter.filter(c => c !== catId))} accessibilityLabel={`Remove ${cat?.label} filter`}>
-                        <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
-                        <Text style={[S.filterPillText, { color: p.text }]}>{cat?.label}</Text>
-                        <Icon name="close" size={10} color={groupColor} stroke={2} />
-                      </FilterPill>
+                      <Reanimated.View key={catId} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                        <FilterPill dark={theme.dark} overlay={groupColor + '50'} onPress={() => removeFilter(() => setCatFilter(catFilter.filter(c => c !== catId)))} accessibilityLabel={`Remove ${cat?.label} filter`}>
+                          <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
+                          <Text style={[S.filterPillText, { color: p.text }]}>{cat?.label}</Text>
+                          <Icon name="close" size={10} color={groupColor} stroke={2} />
+                        </FilterPill>
+                      </Reanimated.View>
                     );
                   })}
                 </ScrollView>
@@ -866,6 +965,7 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
                           theme={theme}
                           cats={cats}
                           categories={categories}
+                          members={ledgerMembers}
                           p={p}
                           onPress={() => handleOpenTx(tx)}
                           last={i === dayDetail.txs.length - 1 && dayDetail.bills.length === 0}
@@ -959,10 +1059,10 @@ export function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onO
 
         <Toast
           theme={theme}
-          message={pendingUndo ? 'Transaction deleted' : null}
-          actionLabel="Undo"
-          onAction={handleUndoDelete}
-          onDismiss={() => setPendingUndo(null)}
+          message={pendingUndo ? 'Transaction deleted' : deniedMessage}
+          actionLabel={pendingUndo ? 'Undo' : undefined}
+          onAction={pendingUndo ? handleUndoDelete : undefined}
+          onDismiss={pendingUndo ? commitDelete : () => setDeniedMessage(null)}
         />
     </View>
   );
@@ -1034,7 +1134,9 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     : null;
   const [mode, setMode] = useState<CalendarSelectMode>(activeRange ? 'range' : 'day');
   const [draftRange, setDraftRange] = useState<{ startId?: string; endId?: string }>({});
+  const [previewSelection, setPreviewSelection] = useState<CalendarPreviewSelection>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (activeRange) {
@@ -1053,6 +1155,10 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     if (closeTimerRef.current !== null) {
       clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
+    }
+    if (commitTimerRef.current !== null) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
     }
   }, []);
 
@@ -1073,7 +1179,12 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
+    if (commitTimerRef.current !== null) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
     markClosed();
+    setPreviewSelection(null);
     sheetRef.current?.close();
   }, [markClosed]);
 
@@ -1082,8 +1193,13 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
+    if (commitTimerRef.current !== null) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
     setMode('day');
     setDraftRange({});
+    setPreviewSelection(null);
   }, []);
 
   const open = useCallback(() => {
@@ -1131,32 +1247,65 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   const rangeStartId = draftRange.startId ?? activeRange?.startId;
   const rangeEndId = draftRange.endId ?? activeRange?.endId;
   const activeRanges = useMemo(() => {
+    if (previewSelection?.kind === 'day') {
+      return [{ startId: previewSelection.dateId, endId: previewSelection.dateId }];
+    }
+    if (previewSelection?.kind === 'range') {
+      return [{ startId: previewSelection.startId, endId: previewSelection.endId }];
+    }
     if (mode === 'range' && rangeStartId) {
       return [{ startId: rangeStartId, endId: rangeEndId ?? rangeStartId }];
     }
     return selectedDateId ? [{ startId: selectedDateId, endId: selectedDateId }] : [];
-  }, [mode, rangeEndId, rangeStartId, selectedDateId]);
+  }, [mode, previewSelection, rangeEndId, rangeStartId, selectedDateId]);
   const handleDatePress = useCallback((dateId: string) => {
+    const commitSelection = (commit: () => void) => {
+      if (commitTimerRef.current !== null) {
+        clearTimeout(commitTimerRef.current);
+        commitTimerRef.current = null;
+      }
+      requestAnimationFrame(() => {
+        commitTimerRef.current = setTimeout(() => {
+          commitTimerRef.current = null;
+          commit();
+        }, 0);
+      });
+    };
+
     if (mode === 'day') {
-      onSelectDate(dateId);
-      close();
+      setPreviewSelection({ kind: 'day', dateId });
+      commitSelection(() => {
+        onSelectDate(dateId);
+        if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = setTimeout(() => {
+          closeTimerRef.current = null;
+          close();
+        }, 160);
+      });
       return;
     }
     if (!rangeStartId || rangeEndId) {
       setDraftRange({ startId: dateId });
+      setPreviewSelection({ kind: 'day', dateId });
       return;
     }
     if (dateId === rangeStartId) {
       setDraftRange({});
+      setPreviewSelection(null);
       return;
     }
     const start = fromDateId(rangeStartId);
     const end = fromDateId(dateId);
     const ordered = start <= end ? { from: start, to: end } : { from: end, to: start };
     setDraftRange({ startId: toDateId(ordered.from), endId: toDateId(ordered.to) });
-    onSelectRange(ordered);
-    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
-    requestAnimationFrame(() => {
+    setPreviewSelection({
+      kind: 'range',
+      startId: toDateId(ordered.from),
+      endId: toDateId(ordered.to),
+    });
+    commitSelection(() => {
+      onSelectRange(ordered);
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
       closeTimerRef.current = setTimeout(() => {
         closeTimerRef.current = null;
         close();
@@ -1165,6 +1314,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   }, [close, mode, onSelectDate, onSelectRange, rangeEndId, rangeStartId]);
   const handleClear = useCallback(() => {
     setDraftRange({});
+    setPreviewSelection(null);
     resetSelection();
     if (rangeStartId) {
       onClearRange();
@@ -2047,7 +2197,7 @@ function AmountRangeField({
 // ─── DayGroup ────────────────────────────────────────────────────────────────
 
 const DayGroup = React.memo(function DayGroup({
-  day, group, theme, cats, categories, p, onPress, onDelete,
+  day, group, theme, cats, categories, members, p, onPress, onDelete, canEditTx,
   onPrepare, onSwipeOpen, onSwipeClose, scrollRef, avgDaySpend, style,
 }: {
   day: string;
@@ -2055,10 +2205,12 @@ const DayGroup = React.memo(function DayGroup({
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  members: LedgerMember[];
   p: WallpaperP;
   onPress: (tx: Transaction) => void;
   onPrepare?: (tx: Transaction) => void;
   onDelete: (tx: Transaction) => void;
+  canEditTx: (tx: Transaction) => boolean;
   onSwipeOpen: (ref: Swipeable) => void;
   onSwipeClose: () => void;
   scrollRef: React.RefObject<any>;
@@ -2089,27 +2241,31 @@ const DayGroup = React.memo(function DayGroup({
         )}
       </View>
       <View style={{ overflow: 'hidden' }}>
-        {txs.map((tx, i) => (
-          <SwipeRow
-            key={tx.id}
-            onDelete={() => onDelete(tx)}
-            onOpen={onSwipeOpen}
-            onClose={onSwipeClose}
-            scrollRef={scrollRef}
-          >
-            <TxRow
-              tx={tx}
-              theme={theme}
-              cats={cats}
-              categories={categories}
-              p={p}
-              onPrepare={() => onPrepare?.(tx)}
-              onPress={() => onPress(tx)}
-              last={i === txs.length - 1}
-              onDelete={() => onDelete(tx)}
-            />
-          </SwipeRow>
-        ))}
+        {txs.map((tx, i) => {
+          const canDelete = canEditTx(tx);
+          return (
+            <SwipeRow
+              key={tx.id}
+              onDelete={canDelete ? () => onDelete(tx) : undefined}
+              onOpen={onSwipeOpen}
+              onClose={onSwipeClose}
+              scrollRef={scrollRef}
+            >
+              <TxRow
+                tx={tx}
+                theme={theme}
+                cats={cats}
+                categories={categories}
+                members={members}
+                p={p}
+                onPrepare={() => onPrepare?.(tx)}
+                onPress={() => onPress(tx)}
+                last={i === txs.length - 1}
+                onDelete={canDelete ? () => onDelete(tx) : undefined}
+              />
+            </SwipeRow>
+          );
+        })}
       </View>
     </View>
   );
@@ -2119,12 +2275,13 @@ const DayGroup = React.memo(function DayGroup({
 
 function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
   children: React.ReactNode;
-  onDelete: () => void;
+  onDelete?: () => void;
   onOpen: (ref: Swipeable) => void;
   onClose: () => void;
   scrollRef: React.RefObject<any>;
 }) {
   const swipeRef = useRef<Swipeable>(null);
+  if (!onDelete) return <>{children}</>;
 
   const renderRightActions = useCallback(
     (progress: Animated.AnimatedInterpolation<number>) => {
@@ -2132,7 +2289,10 @@ function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
       return (
         <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
           <TouchableOpacity
-            onPress={() => { swipeRef.current?.close(); onDelete(); }}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              onDelete();
+            }}
             style={S.swipeActionBtn}
             accessibilityRole="button"
             accessibilityLabel="Delete transaction"
@@ -2166,12 +2326,13 @@ function SwipeRow({ children, onDelete, onOpen, onClose, scrollRef }: {
 // ─── TxRow ───────────────────────────────────────────────────────────────────
 
 const TxRow = React.memo(function TxRow({
-  tx, theme, cats, categories, p, onPress, onPrepare, last, onDelete,
+  tx, theme, cats, categories, members, p, onPress, onPrepare, last, onDelete,
 }: {
   tx: Transaction;
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  members: LedgerMember[];
   p: WallpaperP;
   onPress: () => void;
   onPrepare?: () => void;
@@ -2182,6 +2343,7 @@ const TxRow = React.memo(function TxRow({
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const isIncome   = tx.type === 'income';
   const incomeColor = theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light;
+  const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
 
   return (
     <Pressable
@@ -2189,7 +2351,7 @@ const TxRow = React.memo(function TxRow({
       onPress={onPress}
       style={({ pressed }) => [S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline, opacity: pressed ? 0.6 : 1 }]}
       accessibilityRole="button"
-      accessibilityLabel={`${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
+      accessibilityLabel={`${tx.merchant}, ${meta}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
       accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
       onAccessibilityAction={onDelete ? (e) => { if (e.nativeEvent.actionName === 'delete') onDelete(); } : undefined}
     >
@@ -2207,7 +2369,7 @@ const TxRow = React.memo(function TxRow({
           </Text>
           {tx.recurring && <Icon name="repeat" size={11} color={p.textTer} stroke={1.7} />}
         </View>
-        <Text style={[S.txMeta, { color: p.textSec }]}>{cat?.label ?? UNCATEGORIZED_LABEL} · {tx.time}</Text>
+        <Text style={[S.txMeta, { color: p.textSec }]}>{meta} · {tx.time}</Text>
       </View>
       <Money
         value={tx.amount}
@@ -2454,11 +2616,16 @@ const S = StyleSheet.create({
     borderRadius: RADIUS.full, gap: SPACE.sm,
   },
   filterPillBlur: {
+    borderRadius: RADIUS.full,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
   },
   filterPillText: {
     ...TYPE.caption,
+  },
+  filterPillClearAll: {
+    ...TYPE.captionEm,
+    paddingHorizontal: SPACE.xs,
   },
   filterStripScroll: {
     flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingRight: SPACE.xs,

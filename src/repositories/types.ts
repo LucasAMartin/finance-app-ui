@@ -3,8 +3,46 @@ import { AccentKey, CardStyle } from '../theme';
 export type GroupKey = 'needs' | 'wants' | 'savings';
 export type TransactionType = 'expense' | 'income';
 export type Visibility = 'shared' | 'private';
+export type SyncStatus = 'local' | 'pending' | 'synced' | 'conflicted';
+export type LedgerMemberRole = 'owner' | 'member';
+export type LedgerMemberStatus = 'active' | 'removed';
 
-export interface Category {
+export interface SyncFields {
+  ledgerId?: string;
+  createdByUserId?: string;
+  updatedByUserId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string;
+  cloudRecordName?: string;
+  cloudZoneName?: string;
+  recordChangeTag?: string;
+  syncStatus?: SyncStatus;
+}
+
+export interface Ledger extends SyncFields {
+  id: string;
+  name: string;
+  ownerUserId: string;
+  active: boolean;
+}
+
+export interface LedgerMember extends SyncFields {
+  id: string;
+  ledgerId: string;
+  userId: string;
+  displayName: string;
+  role: LedgerMemberRole;
+  status: LedgerMemberStatus;
+  allowOthersToEditMyItems: boolean;
+}
+
+export interface AppSession {
+  activeLedgerId: string;
+  currentUserId: string;
+}
+
+export interface Category extends SyncFields {
   id: string;
   label: string;
   icon: string;
@@ -12,12 +50,10 @@ export interface Category {
   defaultBudget: number;
   sortOrder: number;
   archived?: boolean;
-  createdByUserId?: string;
-  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
-export interface Transaction {
+export interface Transaction extends SyncFields {
   id: string;
   merchant: string;
   cat: string;
@@ -32,12 +68,10 @@ export interface Transaction {
   recurring?: boolean;
   recurringRuleId?: string;
   visibility?: Visibility;
-  createdByUserId?: string;
-  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
-export interface CreateTransactionInput {
+export interface CreateTransactionInput extends SyncFields {
   merchant: string;
   cat: string;
   amount: number;
@@ -47,14 +81,12 @@ export interface CreateTransactionInput {
   recurring?: boolean;
   recurringRuleId?: string;
   visibility?: Visibility;
-  createdByUserId?: string;
-  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
 export type UpdateTransactionInput = Partial<CreateTransactionInput>;
 
-export interface Income {
+export interface Income extends SyncFields {
   id: string;
   kind?: 'regular' | 'irregular';
   amount: number;
@@ -63,12 +95,10 @@ export interface Income {
   startDate: string;
   endDate?: string;
   receivedAt?: string;
-  createdByUserId?: string;
-  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
-export interface Bill {
+export interface Bill extends SyncFields {
   id: string;
   name: string;
   merchant: string;
@@ -82,7 +112,7 @@ export interface Bill {
   meta?: Record<string, unknown>;
 }
 
-export interface Budget {
+export interface Budget extends SyncFields {
   id: string;
   month: string;
   group?: GroupKey;
@@ -94,7 +124,7 @@ export interface Budget {
   meta?: Record<string, unknown>;
 }
 
-export interface RecurringRule {
+export interface RecurringRule extends SyncFields {
   id: string;
   merchant: string;
   cat: string;
@@ -106,12 +136,10 @@ export interface RecurringRule {
   monthOfYear?: number;
   estimate?: boolean;
   active: boolean;
-  createdByUserId?: string;
-  updatedByUserId?: string;
   meta?: Record<string, unknown>;
 }
 
-export interface Attachment {
+export interface Attachment extends SyncFields {
   id: string;
   transactionId: string;
   localUri: string;
@@ -247,6 +275,7 @@ export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'
 }
 
 export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, UpdateTransactionInput> & {
+  canEdit(tx: Transaction): boolean;
   listPage(query: TransactionQuery): TransactionPage;
   getSummary(query: TransactionSummaryQuery): TransactionSummary;
   /** Aggregate expense spend grouped into ordered day/month buckets, computed in
@@ -277,6 +306,16 @@ export interface DevDataRepo {
   subscribe(listener: RepoListener): Unsubscribe;
 }
 
+export interface SessionRepo {
+  getSession(): AppSession;
+  setCurrentUserId(userId: string): void;
+  listLedgers(): Ledger[];
+  listMembers(ledgerId?: string): LedgerMember[];
+  updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>): LedgerMember | undefined;
+  canEdit(createdByUserId?: string, ledgerId?: string): boolean;
+  subscribe(listener: RepoListener): Unsubscribe;
+}
+
 export interface Repositories {
   transactionsRepo: TransactionsRepo;
   incomeRepo: IncomeRepo;
@@ -288,6 +327,7 @@ export interface Repositories {
   attachmentsRepo: AttachmentsRepo;
   merchantLogosRepo: MerchantLogosRepo;
   devDataRepo: DevDataRepo;
+  sessionRepo: SessionRepo;
 }
 
 export interface SpendSub {

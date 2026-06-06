@@ -15,6 +15,7 @@ import { Theme } from '../theme';
 import { ScreenExitButton } from './GlassButton';
 import { TYPE } from '../typography';
 import { RADIUS } from '../radius';
+import type { LedgerMember } from '../repositories/types';
 
 export interface DrawerItem {
   id: string;
@@ -37,6 +38,11 @@ interface Props {
   onClose: () => void;
   sampleDataEnabled: boolean;
   onSampleDataEnabledChange: (enabled: boolean) => void;
+  activeLedgerName?: string;
+  currentUserId: string;
+  ledgerMembers: LedgerMember[];
+  onCurrentUserChange: (userId: string) => void;
+  onCurrentMemberEditLockChange: (allow: boolean) => void;
 }
 
 const SECTIONS: DrawerSection[] = [
@@ -71,8 +77,16 @@ export function Drawer({
   onClose,
   sampleDataEnabled,
   onSampleDataEnabledChange,
+  activeLedgerName,
+  currentUserId,
+  ledgerMembers,
+  onCurrentUserChange,
+  onCurrentMemberEditLockChange,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const currentMember = ledgerMembers.find(member => member.userId === currentUserId);
+  const profileName = currentMember?.displayName ?? currentUserId;
+  const initial = profileName.trim().slice(0, 1).toUpperCase() || 'U';
 
   const translateX = (progress as Animated.Value).interpolate
     ? (progress as Animated.Value).interpolate({
@@ -113,13 +127,13 @@ export function Drawer({
       {/* Profile */}
       <View style={styles.profile}>
         <View style={[styles.avatar, { backgroundColor: theme.accent.fill }]}>
-          <Text style={[TYPE.headline, { color: theme.accent.ink }]}>A</Text>
+          <Text style={[TYPE.headline, { color: theme.accent.ink }]}>{initial}</Text>
         </View>
         <Text style={[TYPE.headline, { color: theme.text, marginTop: 12 }]}>
-          Alex Martin
+          {profileName}
         </Text>
         <Text style={[TYPE.bodySmEm, { color: theme.textSec, marginTop: 2 }]}>
-          View profile
+          {activeLedgerName ?? 'Shared ledger'}
         </Text>
       </View>
 
@@ -195,6 +209,83 @@ export function Drawer({
                 accessibilityLabel="Toggle sample data"
               />
             </View>
+            <View style={styles.devBlock}>
+              <View style={styles.devHeaderRow}>
+                <Host style={styles.iconHost} ignoreSafeArea="all">
+                  <Image
+                    systemName="person.2"
+                    size={20}
+                    color={theme.textSec}
+                  />
+                </Host>
+                <View style={styles.devCopy}>
+                  <Text style={[TYPE.subsectionTitle, { color: theme.text }]}>
+                    Dev identity
+                  </Text>
+                  <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
+                    Switch local member for shared ledger testing.
+                  </Text>
+                </View>
+              </View>
+              {ledgerMembers.length > 0 ? (
+                <View style={styles.memberGrid}>
+                  {ledgerMembers.map(member => {
+                    const selected = member.userId === currentUserId;
+                    return (
+                      <TouchableOpacity
+                        key={member.id}
+                        onPress={() => onCurrentUserChange(member.userId)}
+                        activeOpacity={0.65}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        style={[
+                          styles.memberPill,
+                          {
+                            backgroundColor: selected ? theme.accent.fill : theme.chipBg,
+                            borderColor: selected ? theme.accent.dot : theme.hairline,
+                          },
+                        ]}
+                      >
+                        <Text style={[TYPE.labelLg, { color: selected ? theme.accent.ink : theme.text }]}>
+                          {member.displayName}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={[TYPE.caption, styles.emptyMembers, { color: theme.textSec }]}>
+                  Reload sample data to seed local members.
+                </Text>
+              )}
+            </View>
+            {currentMember && (
+              <View style={styles.devRow}>
+                <Host style={styles.iconHost} ignoreSafeArea="all">
+                  <Image
+                    systemName={currentMember.allowOthersToEditMyItems ? 'lock.open' : 'lock'}
+                    size={20}
+                    color={theme.textSec}
+                  />
+                </Host>
+                <View style={styles.devCopy}>
+                  <Text style={[TYPE.subsectionTitle, { color: theme.text }]}>
+                    Others can edit my items
+                  </Text>
+                  <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
+                    Off protects rows created by this member.
+                  </Text>
+                </View>
+                <Switch
+                  value={currentMember.allowOthersToEditMyItems}
+                  onValueChange={onCurrentMemberEditLockChange}
+                  trackColor={{ false: theme.chipBg, true: theme.accent.fill }}
+                  thumbColor={currentMember.allowOthersToEditMyItems ? theme.accent.ink : theme.surface}
+                  ios_backgroundColor={theme.chipBg}
+                  accessibilityLabel="Toggle whether others can edit my items"
+                />
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -272,5 +363,32 @@ const styles = StyleSheet.create({
   devCopy: {
     flex: 1,
     minWidth: 0,
+  },
+  devBlock: {
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    gap: 10,
+  },
+  devHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  memberGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingLeft: 38,
+  },
+  memberPill: {
+    minHeight: 34,
+    borderRadius: RADIUS.chip,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyMembers: {
+    paddingLeft: 38,
   },
 });

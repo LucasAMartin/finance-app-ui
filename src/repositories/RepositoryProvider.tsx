@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { createInMemoryRepositories } from './inMemory';
 import { createSQLiteRepositories } from './sqlite';
-import type { Repositories, Repository } from './types';
+import type { LedgerMember, Repositories, Repository } from './types';
 
 const RepositoryContext = createContext<Repositories | null>(null);
 
@@ -27,6 +27,39 @@ export function useRepositoryList<T extends { id: string }>(repo: Repository<T, 
   const subscribe = useCallback((listener: () => void) => repo.subscribe(listener), [repo]);
   const getSnapshot = useCallback(() => repo.list(), [repo]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+export function useLedgerMembers(): LedgerMember[] {
+  const { sessionRepo } = useRepositories();
+  const snapshotRef = useRef<LedgerMember[]>([]);
+  const snapshotKeyRef = useRef('');
+  const subscribe = useCallback((listener: () => void) => sessionRepo.subscribe(listener), [sessionRepo]);
+  const getSnapshot = useCallback(() => {
+    const session = sessionRepo.getSession();
+    const next = sessionRepo.listMembers(session.activeLedgerId);
+    const key = ledgerMembersSnapshotKey(next);
+    if (snapshotKeyRef.current === key) return snapshotRef.current;
+    snapshotKeyRef.current = key;
+    snapshotRef.current = next;
+    return next;
+  }, [sessionRepo]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+function ledgerMembersSnapshotKey(members: LedgerMember[]): string {
+  return members
+    .map(member => [
+      member.id,
+      member.ledgerId,
+      member.userId,
+      member.displayName,
+      member.role,
+      member.status,
+      member.allowOthersToEditMyItems ? '1' : '0',
+      member.updatedAt ?? '',
+      member.deletedAt ?? '',
+    ].join('\u001f'))
+    .join('\u001e');
 }
 
 function shallowEqualRecord<T extends object>(a: T, b: T): boolean {

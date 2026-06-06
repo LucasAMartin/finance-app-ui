@@ -26,9 +26,10 @@ import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, deriveFloor, WallpaperP as P } from '../wallpaperPalette';
 import { Skeleton } from '../components/Skeleton';
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
-import type { Bill, Category, Transaction, TransactionCursor } from '../repositories/types';
+import { appendMemberLabel } from '../repositories/memberLabels';
+import type { Bill, Category, LedgerMember, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
@@ -313,7 +314,7 @@ interface Props {
 }
 
 export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
-  const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
+  const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   // Morph sources — all measured at press time from the circle (radius 28).
   const voiceMorph  = useMorphSource(28);
   const manualMorph = useMorphSource(28);
@@ -328,6 +329,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   const budgets = useRepositoryList(budgetsRepo);
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
+  const ledgerMembers = useLedgerMembers();
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
   const { wallpaper, wallpaperFloorBase } = useTheme();
@@ -426,6 +428,8 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
 
   const markBillPaid = useCallback((bill: Bill) => {
     const ruleId = bill.id.startsWith('bill-') ? bill.id.slice(5) : bill.id;
+    const rule = recurringRulesRepo.get(ruleId);
+    if (rule && !sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId)) return;
     transactionsRepo.create({
       merchant: bill.merchant,
       cat: bill.cat,
@@ -438,14 +442,13 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
       createdByUserId: 'local',
       updatedByUserId: 'local',
     });
-    const rule = recurringRulesRepo.get(ruleId);
     if (rule) {
       recurringRulesRepo.update(ruleId, {
         nextDueDate: advanceDueDate(rule),
         meta: { ...rule.meta, partialPaid: undefined },
       });
     }
-  }, [transactionsRepo, recurringRulesRepo]);
+  }, [transactionsRepo, recurringRulesRepo, sessionRepo]);
 
   const handleEditTheme = () => {
     onOpenTheme();
@@ -803,13 +806,16 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                     No recurring bills tracked. Mark an expense as repeating to add one.
                   </Text>
                 ) : visibleUpcomingBills.map((b, i) => {
-                  const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
-                  const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
-                  const billIconColor = categoryGroupColor(b.cat, categories, theme.dark);
-                  return (
-                    <SwipeBillRow
-                      key={b.id}
-                      onPaid={() => markBillPaid(b)}
+	                  const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
+	                  const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
+	                  const billIconColor = categoryGroupColor(b.cat, categories, theme.dark);
+                    const ruleId = b.id.startsWith('bill-') ? b.id.slice(5) : b.id;
+                    const rule = recurringRules.find(item => item.id === ruleId);
+                    const canMarkPaid = !rule || sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId);
+	                  return (
+	                    <SwipeBillRow
+	                      key={b.id}
+	                      onPaid={canMarkPaid ? () => markBillPaid(b) : undefined}
                       onOpen={handleSwipeOpen}
                       onClose={handleSwipeClose}
                     >
@@ -821,13 +827,13 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                           styles.billRow,
                           { borderBottomWidth: i < visibleUpcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
                         ]}
-                        accessible
-                        accessibilityLabel={a11y}
-                        accessibilityHint="Swipe right to mark paid"
-                        accessibilityActions={[{ name: 'paid', label: 'Mark as paid' }]}
-                        onAccessibilityAction={(e) => {
-                          if (e.nativeEvent.actionName === 'paid') markBillPaid(b);
-                        }}
+	                        accessible
+	                        accessibilityLabel={a11y}
+	                        accessibilityHint={canMarkPaid ? 'Swipe right to mark paid' : undefined}
+	                        accessibilityActions={canMarkPaid ? [{ name: 'paid', label: 'Mark as paid' }] : undefined}
+	                        onAccessibilityAction={canMarkPaid ? (e) => {
+	                          if (e.nativeEvent.actionName === 'paid') markBillPaid(b);
+	                        } : undefined}
                       >
                         <MerchantMark
                           merchant={b.merchant}
@@ -877,16 +883,16 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                       {group.txs.map((tx, i, arr) => (
                         <SwipeTxRow
                           key={tx.id}
-                          onDelete={() => onDeleteTx(tx)}
+                          onDelete={transactionsRepo.canEdit(tx) ? () => onDeleteTx(tx) : undefined}
                           onOpen={handleSwipeOpen}
                           onClose={handleSwipeClose}
                         >
                           <TxRow tx={tx}
                             onPress={() => onOpenTx(tx)}
                             onPrepare={onPrepareTx ? () => onPrepareTx(tx) : undefined}
-                            onDelete={() => onDeleteTx(tx)}
+                            onDelete={transactionsRepo.canEdit(tx) ? () => onDeleteTx(tx) : undefined}
                             last={i === arr.length - 1}
-                            dark={theme.dark} p={p} cats={cats} categories={categories} />
+                            dark={theme.dark} p={p} cats={cats} categories={categories} members={ledgerMembers} />
                         </SwipeTxRow>
                       ))}
                     </View>
@@ -993,11 +999,12 @@ function ActivitySkeleton({ dark }: { dark: boolean }) {
 // ── SwipeBillRow ──────────────────────────────────────────────────
 function SwipeBillRow({ children, onPaid, onOpen, onClose }: {
   children: React.ReactNode;
-  onPaid: () => void;
+  onPaid?: () => void;
   onOpen: (ref: Swipeable) => void;
   onClose: () => void;
 }) {
   const swipeRef = useRef<Swipeable>(null);
+  if (!onPaid) return <>{children}</>;
   const renderRightActions = useCallback(
     (progress: Animated.AnimatedInterpolation<number>) => {
       const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
@@ -1034,18 +1041,22 @@ function SwipeBillRow({ children, onPaid, onOpen, onClose }: {
 // ── SwipeTxRow ────────────────────────────────────────────────────
 function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
   children: React.ReactNode;
-  onDelete: () => void;
+  onDelete?: () => void;
   onOpen: (ref: Swipeable) => void;
   onClose: () => void;
 }) {
   const swipeRef = useRef<Swipeable>(null);
+  if (!onDelete) return <>{children}</>;
   const renderRightActions = useCallback(
     (progress: Animated.AnimatedInterpolation<number>) => {
       const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
       return (
         <Animated.View style={{ width: 78, transform: [{ translateX }] }}>
           <TouchableOpacity
-            onPress={() => { swipeRef.current?.close(); onDelete(); }}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              onDelete();
+            }}
             style={[styles.deleteAction, { marginLeft: 8 }]}
             accessibilityRole="button"
             accessibilityLabel="Delete transaction"
@@ -1076,7 +1087,7 @@ function SwipeTxRow({ children, onDelete, onOpen, onClose }: {
 
 // ── TxRow ─────────────────────────────────────────────────────────
 const TxRow = React.memo(function TxRow({
-  tx, onPress, onPrepare, onDelete, last, dark, p, cats, categories,
+  tx, onPress, onPrepare, onDelete, last, dark, p, cats, categories, members,
 }: {
   tx: Transaction;
   onPress: () => void;
@@ -1087,9 +1098,11 @@ const TxRow = React.memo(function TxRow({
   p: P;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  members: LedgerMember[];
 }) {
   const cat = cats[tx.cat];
-  const a11yLabel = `${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${tx.time}, $${fmtAmount(tx.amount)}`;
+  const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
+  const a11yLabel = `${tx.merchant}, ${meta}, ${tx.time}, $${fmtAmount(tx.amount)}`;
   return (
     <GHTouchableOpacity
       onPressIn={onPrepare}
@@ -1098,11 +1111,11 @@ const TxRow = React.memo(function TxRow({
       style={[styles.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline }]}
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
-      accessibilityHint="Swipe left to delete"
-      accessibilityActions={[{ name: 'delete', label: 'Delete transaction' }]}
-      onAccessibilityAction={(e: { nativeEvent: { actionName: string } }) => {
+      accessibilityHint={onDelete ? 'Swipe left to delete' : undefined}
+      accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
+      onAccessibilityAction={onDelete ? (e: { nativeEvent: { actionName: string } }) => {
         if (e.nativeEvent.actionName === 'delete') onDelete?.();
-      }}
+      } : undefined}
     >
       <MerchantMark
         merchant={tx.merchant}
@@ -1113,7 +1126,7 @@ const TxRow = React.memo(function TxRow({
       />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.rowTitle, { color: p.text }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
-        <Text style={[styles.rowSub, { color: p.textSec }]}>{cat?.label ?? UNCATEGORIZED_LABEL} · {tx.time}</Text>
+        <Text style={[styles.rowSub, { color: p.textSec }]}>{meta} · {tx.time}</Text>
       </View>
       <Money value={tx.amount} theme={{ text: p.text } as Theme} color={p.text} prefix="$" />
     </GHTouchableOpacity>

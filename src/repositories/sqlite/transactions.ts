@@ -1,4 +1,16 @@
-import { getDb, json, nextId } from './db';
+import {
+  canEditRecord,
+  getActiveLedgerId,
+  getCurrentUserId,
+  getDb,
+  json,
+  ledgerParam,
+  ledgerWhere,
+  nextId,
+  prepareCreateFields,
+  prepareUpdateFields,
+  syncStatus,
+} from './db';
 import { SQLiteRepository } from './base';
 import { normalizeTransactionInput, transactionFromStored } from '../transactionDates';
 import type {
@@ -29,6 +41,14 @@ interface TxRow {
   visibility: Transaction['visibility'];
   created_by_user_id: string | null;
   updated_by_user_id: string | null;
+  ledger_id: string;
+  created_at: string | null;
+  updated_at: string | null;
+  deleted_at: string | null;
+  cloud_record_name: string | null;
+  cloud_zone_name: string | null;
+  record_change_tag: string | null;
+  sync_status: Transaction['syncStatus'] | null;
   meta: string | null;
 }
 
@@ -48,6 +68,14 @@ function txFromRow(row: TxRow): Transaction {
     visibility: row.visibility,
     createdByUserId: row.created_by_user_id ?? undefined,
     updatedByUserId: row.updated_by_user_id ?? undefined,
+    ledgerId: row.ledger_id,
+    createdAt: row.created_at ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
+    deletedAt: row.deleted_at ?? undefined,
+    cloudRecordName: row.cloud_record_name ?? undefined,
+    cloudZoneName: row.cloud_zone_name ?? undefined,
+    recordChangeTag: row.record_change_tag ?? undefined,
+    syncStatus: syncStatus(row.sync_status),
     meta: row.meta,
   });
 }
@@ -170,13 +198,20 @@ function whereSql(parts: string[]): string {
 
 export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, CreateTransactionInput, UpdateTransactionInput> {
   get(id: string): Transaction | undefined {
-    const row = getDb().getFirstSync<TxRow>('SELECT * FROM transactions WHERE id = ?', id);
+    const row = getDb().getFirstSync<TxRow>(
+      `SELECT * FROM transactions WHERE id = ? AND ${ledgerWhere()}`,
+      id,
+      ledgerParam(),
+    );
     return row ? txFromRow(row) : undefined;
   }
 
   protected readAll(): Transaction[] {
     return getDb()
-      .getAllSync<TxRow>('SELECT * FROM transactions ORDER BY occurred_at DESC, id DESC')
+      .getAllSync<TxRow>(
+        `SELECT * FROM transactions WHERE ${ledgerWhere()} ORDER BY occurred_at DESC, id DESC`,
+        ledgerParam(),
+      )
       .map(txFromRow);
   }
 
@@ -185,6 +220,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     const limit = Math.max(1, Math.min(query.limit, 200));
     const parts: string[] = [];
     const params: any[] = [];
+    parts.push(ledgerWhere());
+    params.push(ledgerParam());
     appendBaseWhere(parts, params, query);
     appendCursorWhere(parts, params, sort, query.cursor);
     const rows = getDb()
@@ -205,6 +242,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
   getSummary(query: TransactionSummaryQuery): TransactionSummary {
     const parts: string[] = [];
     const params: any[] = [];
+    parts.push(ledgerWhere());
+    params.push(ledgerParam());
     appendBaseWhere(parts, params, query);
     const row = getDb().getFirstSync<{
       transaction_count: number;
@@ -232,6 +271,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
   getSpendSeries(query: SpendSeriesQuery): SpendSeriesPoint[] {
     const parts: string[] = [];
     const params: any[] = [];
+    parts.push(ledgerWhere());
+    params.push(ledgerParam());
     appendBaseWhere(parts, params, {
       categoryIds: query.categoryIds,
       merchantQuery: query.merchantQuery,
@@ -272,6 +313,8 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     const to = new Date(query.year, query.month + 1, 0, 23, 59, 59, 999).toISOString();
     const parts: string[] = [];
     const params: any[] = [];
+    parts.push(ledgerWhere());
+    params.push(ledgerParam());
     appendBaseWhere(parts, params, {
       categoryIds: query.categoryIds,
       merchantQuery: query.merchantQuery,
@@ -294,9 +337,15 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
 
   create(input: CreateTransactionInput): Transaction {
     const normalized = normalizeTransactionInput(input);
+    const sync = prepareCreateFields(normalized);
     const id = nextId('tx');
     getDb().runSync(
-      'INSERT INTO transactions (id, type, amount, merchant, category, occurred_at, note, recurring, recurring_rule_id, visibility, created_by_user_id, updated_by_user_id, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO transactions (
+        id, type, amount, merchant, category, occurred_at, note, recurring,
+        recurring_rule_id, visibility, created_by_user_id, updated_by_user_id,
+        ledger_id, created_at, updated_at, cloud_record_name, cloud_zone_name,
+        record_change_tag, sync_status, meta
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       normalized.type ?? 'expense',
       normalized.amount ?? 0,
@@ -307,8 +356,15 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
       normalized.recurring ? 1 : 0,
       normalized.recurringRuleId ?? null,
       normalized.visibility ?? 'shared',
-      normalized.createdByUserId ?? 'local',
-      normalized.updatedByUserId ?? 'local',
+      sync.createdByUserId,
+      sync.updatedByUserId,
+      sync.ledgerId,
+      sync.createdAt,
+      sync.updatedAt,
+      sync.cloudRecordName ?? null,
+      sync.cloudZoneName ?? null,
+      sync.recordChangeTag ?? null,
+      sync.syncStatus,
       json(normalized.meta),
     );
     this.emit();
@@ -318,9 +374,17 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
   update(id: string, patch: UpdateTransactionInput): Transaction | undefined {
     const current = this.get(id);
     if (!current) return undefined;
+    if (!canEditRecord(current.createdByUserId, current.ledgerId)) return undefined;
     const normalized = normalizeTransactionInput({ ...current, ...patch });
+    const sync = prepareUpdateFields(normalized);
     getDb().runSync(
-      'UPDATE transactions SET type = ?, amount = ?, merchant = ?, category = ?, occurred_at = ?, note = ?, recurring = ?, recurring_rule_id = ?, visibility = ?, created_by_user_id = ?, updated_by_user_id = ?, meta = ? WHERE id = ?',
+      `UPDATE transactions
+       SET type = ?, amount = ?, merchant = ?, category = ?, occurred_at = ?,
+           note = ?, recurring = ?, recurring_rule_id = ?, visibility = ?,
+           created_by_user_id = ?, updated_by_user_id = ?, updated_at = ?,
+           cloud_record_name = ?, cloud_zone_name = ?, record_change_tag = ?,
+           sync_status = ?, meta = ?
+       WHERE id = ? AND ${ledgerWhere()}`,
       normalized.type ?? current.type ?? 'expense',
       normalized.amount ?? current.amount,
       normalized.merchant || current.merchant,
@@ -331,9 +395,15 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
       normalized.recurringRuleId ?? current.recurringRuleId ?? null,
       normalized.visibility ?? current.visibility ?? 'shared',
       normalized.createdByUserId ?? current.createdByUserId ?? 'local',
-      normalized.updatedByUserId ?? 'local',
+      sync.updatedByUserId,
+      sync.updatedAt,
+      normalized.cloudRecordName ?? current.cloudRecordName ?? null,
+      normalized.cloudZoneName ?? current.cloudZoneName ?? null,
+      normalized.recordChangeTag ?? current.recordChangeTag ?? null,
+      sync.syncStatus,
       json(normalized.meta),
       id,
+      ledgerParam(),
     );
     this.emit();
     return this.get(id);
@@ -341,12 +411,35 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
 
   delete(id: string): void {
     const db = getDb();
+    const current = this.get(id);
+    if (!current || !canEditRecord(current.createdByUserId, current.ledgerId)) return;
     let changed = false;
+    const now = new Date().toISOString();
     db.withTransactionSync(() => {
-      const attachmentResult = db.runSync('DELETE FROM attachments WHERE transaction_id = ?', id);
-      const result = db.runSync('DELETE FROM transactions WHERE id = ?', id);
+      const attachmentResult = db.runSync(
+        `UPDATE attachments SET deleted_at = ?, updated_by_user_id = ?, updated_at = ?, sync_status = 'pending'
+         WHERE transaction_id = ? AND ${ledgerWhere()}`,
+        now,
+        getCurrentUserId(),
+        now,
+        id,
+        getActiveLedgerId(),
+      );
+      const result = db.runSync(
+        `UPDATE transactions SET deleted_at = ?, updated_by_user_id = ?, updated_at = ?, sync_status = 'pending'
+         WHERE id = ? AND ${ledgerWhere()}`,
+        now,
+        getCurrentUserId(),
+        now,
+        id,
+        ledgerParam(),
+      );
       changed = attachmentResult.changes > 0 || result.changes > 0;
     });
     if (changed) this.emit();
+  }
+
+  canEdit(tx: Transaction): boolean {
+    return canEditRecord(tx.createdByUserId, tx.ledgerId);
   }
 }

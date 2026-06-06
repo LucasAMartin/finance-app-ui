@@ -39,6 +39,8 @@ interface Props {
   strokeWidth?: number;
   /** Extra top/bottom breathing room so high/low points and the scrub dot do not clip. */
   verticalInset?: number;
+  /** Starts the draw animation only when true; false holds the chart hidden. */
+  play?: boolean;
   /** Fires with the active point index while scrubbing, `null` on release. */
   onScrub?: (index: number | null) => void;
 }
@@ -71,6 +73,7 @@ export function SpendChart({
   ringColor = '#FFFFFF',
   strokeWidth = 2.5,
   verticalInset,
+  play = true,
   onScrub,
 }: Props) {
   const padX = strokeWidth + 1;
@@ -115,16 +118,23 @@ export function SpendChart({
   const cursorOn = useSharedValue(0);
   const lastIdx = useSharedValue(-1);
 
-  // Replay the draw-on whenever the series (period) changes.
+  // Hold inactive charts at the hidden start state. The Insights screen stays
+  // mounted off-screen, so this prevents a completed chart from flashing before
+  // the next replay begins.
   useEffect(() => {
+    if (!play) {
+      drawn.value = geo.dashLen;
+      fillIn.value = 0;
+      cursorOn.value = 0;
+      lastIdx.value = -1;
+      return;
+    }
     drawn.value = geo.dashLen;
-    drawn.value = withTiming(0, {
-      duration: 950,
-      easing: Easing.out(Easing.cubic),
-    });
     fillIn.value = 0;
+    drawn.value = withTiming(0, { duration: 950, easing: Easing.out(Easing.cubic) });
     fillIn.value = withDelay(260, withTiming(1, { duration: 650 }));
-  }, [geo.dashLen, geo.lineD, drawn, fillIn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [play, geo.dashLen]);
 
   const tick = () => Haptics.selectionAsync();
   const emit = (idx: number | null) => onScrub?.(idx);

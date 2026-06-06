@@ -16,11 +16,14 @@ import type {
   CreateTransactionInput,
   DevDataRepo,
   Income,
+  Ledger,
+  LedgerMember,
   MerchantLogo,
   RecurringRule,
   Repositories,
   RepoListener,
   Repository,
+  SessionRepo,
   SpendSeriesPoint,
   SpendSeriesQuery,
   Transaction,
@@ -35,6 +38,78 @@ import type {
   UpsertMerchantLogoInput,
 } from './types';
 
+const DEFAULT_LEDGER_ID = 'ledger-default';
+const DEFAULT_OWNER_USER_ID = 'alex';
+const DEV_PARTNER_USER_ID = 'partner';
+let activeLedgerId = DEFAULT_LEDGER_ID;
+let currentUserId = DEFAULT_OWNER_USER_ID;
+
+const nowIso = () => new Date().toISOString();
+
+const SEED_LEDGER: Ledger = {
+  id: DEFAULT_LEDGER_ID,
+  name: 'Shared finances',
+  ownerUserId: DEFAULT_OWNER_USER_ID,
+  active: true,
+  ledgerId: DEFAULT_LEDGER_ID,
+  createdByUserId: DEFAULT_OWNER_USER_ID,
+  updatedByUserId: DEFAULT_OWNER_USER_ID,
+  createdAt: nowIso(),
+  updatedAt: nowIso(),
+  syncStatus: 'local',
+};
+
+const SEED_MEMBERS: LedgerMember[] = [
+  {
+    id: `member-${DEFAULT_LEDGER_ID}-${DEFAULT_OWNER_USER_ID}`,
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: DEFAULT_OWNER_USER_ID,
+    displayName: 'Alex',
+    role: 'owner',
+    status: 'active',
+    allowOthersToEditMyItems: true,
+    createdByUserId: DEFAULT_OWNER_USER_ID,
+    updatedByUserId: DEFAULT_OWNER_USER_ID,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    syncStatus: 'local',
+  },
+  {
+    id: `member-${DEFAULT_LEDGER_ID}-${DEV_PARTNER_USER_ID}`,
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: DEV_PARTNER_USER_ID,
+    displayName: 'Partner',
+    role: 'member',
+    status: 'active',
+    allowOthersToEditMyItems: true,
+    createdByUserId: DEFAULT_OWNER_USER_ID,
+    updatedByUserId: DEFAULT_OWNER_USER_ID,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    syncStatus: 'local',
+  },
+];
+
+function withCreateFields<T extends object>(row: T): T {
+  const now = nowIso();
+  const existing = row as any;
+  return {
+    ...row,
+    ledgerId: existing.ledgerId ?? activeLedgerId,
+    createdByUserId: existing.createdByUserId && existing.createdByUserId !== 'local' ? existing.createdByUserId : currentUserId,
+    updatedByUserId: existing.updatedByUserId && existing.updatedByUserId !== 'local' ? existing.updatedByUserId : currentUserId,
+    createdAt: existing.createdAt ?? now,
+    updatedAt: existing.updatedAt ?? now,
+    syncStatus: existing.syncStatus ?? 'pending',
+  };
+}
+
+function canEditRow(row: any, members = SEED_MEMBERS): boolean {
+  if (!row?.createdByUserId || row.createdByUserId === currentUserId) return true;
+  const member = members.find(m => m.ledgerId === (row.ledgerId ?? activeLedgerId) && m.userId === row.createdByUserId);
+  return member ? member.allowOthersToEditMyItems !== false : false;
+}
+
 class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, UpdateInput = Partial<Omit<T, 'id'>>>
   implements Repository<T, CreateInput, UpdateInput> {
   protected rows: T[];
@@ -45,17 +120,22 @@ class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, 
   }
 
   list(): T[] {
-    return this.rows;
+    return this.rows.filter(row => {
+      const item = row as any;
+      if (item.deletedAt) return false;
+      if (item.ledgerId && item.ledgerId !== activeLedgerId) return false;
+      return true;
+    });
   }
 
   get(id: string): T | undefined {
-    const row = this.rows.find(item => item.id === id);
+    const row = this.list().find(item => item.id === id);
     return row ? { ...row } : undefined;
   }
 
   create(input: CreateInput): T {
     const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const row = { id, ...(input as object) } as T;
+    const row = withCreateFields({ id, ...(input as object) }) as T;
     this.rows = [row, ...this.rows];
     this.emit();
     return { ...row };
@@ -65,7 +145,14 @@ class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, 
     let next: T | undefined;
     this.rows = this.rows.map(row => {
       if (row.id !== id) return row;
-      next = { ...row, ...(patch as object) };
+      if (!canEditRow(row)) return row;
+      next = {
+        ...row,
+        ...(patch as object),
+        updatedByUserId: currentUserId,
+        updatedAt: nowIso(),
+        syncStatus: 'pending',
+      };
       return next;
     });
     if (next) this.emit();
@@ -73,13 +160,27 @@ class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, 
   }
 
   delete(id: string): void {
-    const before = this.rows.length;
-    this.rows = this.rows.filter(row => row.id !== id);
-    if (this.rows.length !== before) this.emit();
+    let changed = false;
+    this.rows = this.rows.map(row => {
+      if (row.id !== id || !canEditRow(row)) return row;
+      changed = true;
+      return {
+        ...row,
+        deletedAt: nowIso(),
+        updatedByUserId: currentUserId,
+        updatedAt: nowIso(),
+        syncStatus: 'pending',
+      };
+    });
+    if (changed) this.emit();
   }
 
   replaceAll(rows: T[]) {
     this.rows = rows.map(row => ({ ...row }));
+    this.emit();
+  }
+
+  refresh() {
     this.emit();
   }
 
@@ -135,9 +236,13 @@ function matchesTxQuery(tx: Transaction, query: TransactionSummaryQuery): boolea
 class InMemoryTransactionsRepo
   extends InMemoryRepository<Transaction, CreateTransactionInput, UpdateTransactionInput>
   implements TransactionsRepo {
+  canEdit(tx: Transaction): boolean {
+    return canEditRow(tx);
+  }
+
   listPage(query: TransactionQuery): TransactionPage {
     const sort = query.sort ?? DEFAULT_TX_SORT;
-    const filtered = this.rows
+    const filtered = this.list()
       .filter(tx => matchesTxQuery(tx, query))
       .sort((a, b) => compareTx(a, b, sort));
     const startIdx = query.cursor
@@ -154,7 +259,7 @@ class InMemoryTransactionsRepo
   }
 
   getSummary(query: TransactionSummaryQuery): TransactionSummary {
-    const filtered = this.rows.filter(tx => matchesTxQuery(tx, query));
+    const filtered = this.list().filter(tx => matchesTxQuery(tx, query));
     const expenses = filtered.filter(tx => tx.type !== 'income');
     const days = new Set(expenses.map(tx => (tx.occurredAt ?? '').slice(0, 10)).filter(Boolean));
     return {
@@ -168,7 +273,7 @@ class InMemoryTransactionsRepo
   getSpendSeries(query: SpendSeriesQuery): SpendSeriesPoint[] {
     const pad2 = (n: number) => String(n).padStart(2, '0');
     const groups = new Map<string, number>();
-    this.rows.forEach(tx => {
+    this.list().forEach(tx => {
       if (tx.type === 'income') return;
       if (!matchesTxQuery(tx, query)) return;
       if (!tx.occurredAt) return;
@@ -193,7 +298,7 @@ class InMemoryTransactionsRepo
     minAmount?: number;
     maxAmount?: number;
   }) {
-    return this.rows
+    return this.list()
       .filter(tx => matchesTxQuery(tx, query))
       .map(tx => ({ tx, d: tx.occurredAt ? new Date(tx.occurredAt) : null }))
       .filter(({ d }) => d && d.getFullYear() === query.year && d.getMonth() === query.month)
@@ -213,6 +318,8 @@ class InMemoryDevDataRepo implements DevDataRepo {
       categoriesRepo: InMemoryRepository<Category>;
       recurringRulesRepo: InMemoryRepository<RecurringRule>;
       attachmentsRepo: InMemoryRepository<Attachment>;
+      ledgersRepo: InMemoryRepository<Ledger>;
+      ledgerMembersRepo: InMemoryRepository<LedgerMember>;
     },
   ) {}
 
@@ -236,7 +343,54 @@ class InMemoryDevDataRepo implements DevDataRepo {
     this.repos.categoriesRepo.replaceAll(enabled ? SEED_CATEGORIES : []);
     this.repos.recurringRulesRepo.replaceAll(enabled ? SEED_RECURRING_RULES : []);
     this.repos.attachmentsRepo.replaceAll([]);
+    this.repos.ledgersRepo.replaceAll(enabled ? [SEED_LEDGER] : []);
+    this.repos.ledgerMembersRepo.replaceAll(enabled ? SEED_MEMBERS : []);
     this.listeners.forEach(listener => listener());
+  }
+
+  subscribe(listener: RepoListener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
+
+class InMemorySessionRepo implements SessionRepo {
+  private listeners = new Set<RepoListener>();
+
+  constructor(
+    private ledgersRepo: InMemoryRepository<Ledger>,
+    private ledgerMembersRepo: InMemoryRepository<LedgerMember>,
+    private onSessionChanged: () => void,
+  ) {}
+
+  getSession() {
+    return { activeLedgerId, currentUserId };
+  }
+
+  setCurrentUserId(userId: string): void {
+    if (userId === currentUserId) return;
+    currentUserId = userId;
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+  }
+
+  listLedgers() {
+    return this.ledgersRepo.list();
+  }
+
+  listMembers(ledgerId = activeLedgerId) {
+    return this.ledgerMembersRepo.list().filter(member => member.ledgerId === ledgerId);
+  }
+
+  updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>) {
+    const member = this.ledgerMembersRepo.update(id, patch);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return member;
+  }
+
+  canEdit(createdByUserId?: string, ledgerId = activeLedgerId): boolean {
+    return canEditRow({ createdByUserId, ledgerId }, this.ledgerMembersRepo.list());
   }
 
   subscribe(listener: RepoListener) {
@@ -255,6 +409,18 @@ export function createInMemoryRepositories(): Repositories {
   const recurringRulesRepo = new InMemoryRepository<RecurringRule>(SEED_RECURRING_RULES);
   const attachmentsRepo = new InMemoryRepository<Attachment>([]);
   const merchantLogosRepo = new InMemoryRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>([]);
+  const ledgersRepo = new InMemoryRepository<Ledger>([SEED_LEDGER]);
+  const ledgerMembersRepo = new InMemoryRepository<LedgerMember>(SEED_MEMBERS);
+  const refreshDomainRepos = () => {
+    transactionsRepo.refresh();
+    incomeRepo.refresh();
+    billsRepo.refresh();
+    budgetsRepo.refresh();
+    categoriesRepo.refresh();
+    recurringRulesRepo.refresh();
+    attachmentsRepo.refresh();
+  };
+  const sessionRepo = new InMemorySessionRepo(ledgersRepo, ledgerMembersRepo, refreshDomainRepos);
 
   return {
     transactionsRepo,
@@ -274,6 +440,9 @@ export function createInMemoryRepositories(): Repositories {
       categoriesRepo,
       recurringRulesRepo,
       attachmentsRepo,
+      ledgersRepo,
+      ledgerMembersRepo,
     }),
+    sessionRepo,
   };
 }

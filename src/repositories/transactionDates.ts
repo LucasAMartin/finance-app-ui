@@ -32,6 +32,14 @@ export function transactionFromStored(row: {
   visibility?: Transaction['visibility'] | null;
   createdByUserId?: string | null;
   updatedByUserId?: string | null;
+  ledgerId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  deletedAt?: string | null;
+  cloudRecordName?: string | null;
+  cloudZoneName?: string | null;
+  recordChangeTag?: string | null;
+  syncStatus?: Transaction['syncStatus'] | null;
   meta?: string | null;
 }): Transaction {
   return {
@@ -47,6 +55,14 @@ export function transactionFromStored(row: {
     visibility: row.visibility ?? 'shared',
     createdByUserId: row.createdByUserId ?? undefined,
     updatedByUserId: row.updatedByUserId ?? undefined,
+    ledgerId: row.ledgerId ?? undefined,
+    createdAt: row.createdAt ?? undefined,
+    updatedAt: row.updatedAt ?? undefined,
+    deletedAt: row.deletedAt ?? undefined,
+    cloudRecordName: row.cloudRecordName ?? undefined,
+    cloudZoneName: row.cloudZoneName ?? undefined,
+    recordChangeTag: row.recordChangeTag ?? undefined,
+    syncStatus: row.syncStatus ?? 'local',
     meta: parseJson(row.meta ?? null),
     ...deriveTransactionDisplay(row.occurredAt),
   };
@@ -65,6 +81,14 @@ export function normalizeTransactionInput(input: CreateTransactionInput | Update
     visibility: input.visibility,
     createdByUserId: input.createdByUserId,
     updatedByUserId: input.updatedByUserId,
+    ledgerId: input.ledgerId,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    deletedAt: input.deletedAt,
+    cloudRecordName: input.cloudRecordName,
+    cloudZoneName: input.cloudZoneName,
+    recordChangeTag: input.recordChangeTag,
+    syncStatus: input.syncStatus,
     meta: input.meta,
   };
 }

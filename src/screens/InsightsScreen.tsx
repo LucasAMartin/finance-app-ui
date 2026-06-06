@@ -89,12 +89,13 @@ const CARD_OUTER_PAD = LAYOUT.screenGutter;
 const CARD_INNER_PAD = LAYOUT.cardPadX;
 const CHART_H = 188;
 const TILE_PAD = 16;
+const CHART_RESET_DELAY_MS = 220;
 
 // Neutral chart-line colors — deliberately off-accent so the eye reads
 // category/group data rather than action color. Defined here once so all
 // chart usages stay in sync if the base neutral ever shifts.
-const CHART_LINE = { dark: 'rgba(242,244,245,0.72)', light: 'rgba(14,12,24,0.50)' };
-const CHART_LINE_FAINT = { dark: 'rgba(242,244,245,0.32)', light: 'rgba(14,12,24,0.22)' };
+const CHART_LINE = { dark: 'rgba(147,197,253,0.92)', light: 'rgba(59,130,246,0.70)' };
+const CHART_LINE_FAINT = { dark: 'rgba(147,197,253,0.65)', light: 'rgba(59,130,246,0.50)' };
 
 const PERIODS = ['Week', 'Month', 'Year'] as const;
 type Period = (typeof PERIODS)[number];
@@ -574,6 +575,7 @@ function InsightBottomSheet({
 
 interface Props {
   theme: Theme;
+  active: boolean;
   onOpenDrawer: () => void;
   onViewActivity: (filter: ActivityInitialFilter) => void;
   onOpenInsight: (target: InsightDetailTarget) => void;
@@ -581,6 +583,7 @@ interface Props {
 
 export function InsightsScreen({
   theme,
+  active,
   onOpenDrawer,
   onViewActivity,
   onOpenInsight,
@@ -1396,6 +1399,45 @@ export function InsightsScreen({
     ? scrubDateLabel(scrubIdx)
     : rangeContextLabel;
 
+  // ── Chart replay — keep charts drawn during exit, reset them once the screen
+  // is invisible, then arm them after entry so no completed chart flashes first.
+  const [chartKey, setChartKey] = useState(0);
+  const [chartsArmed, setChartsArmed] = useState(active);
+  const chartResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chartArmFrameRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (chartResetTimerRef.current !== null) {
+      clearTimeout(chartResetTimerRef.current);
+      chartResetTimerRef.current = null;
+    }
+    if (chartArmFrameRef.current !== null) {
+      cancelAnimationFrame(chartArmFrameRef.current);
+      chartArmFrameRef.current = null;
+    }
+
+    if (active) {
+      setChartsArmed(false);
+      setChartKey(k => k + 1);
+      chartArmFrameRef.current = requestAnimationFrame(() => {
+        chartArmFrameRef.current = null;
+        setChartsArmed(true);
+      });
+      return;
+    }
+
+    chartResetTimerRef.current = setTimeout(() => {
+      chartResetTimerRef.current = null;
+      setChartsArmed(false);
+    }, CHART_RESET_DELAY_MS);
+  }, [active]);
+
+  useEffect(() => () => {
+    if (chartResetTimerRef.current !== null) clearTimeout(chartResetTimerRef.current);
+    if (chartArmFrameRef.current !== null) cancelAnimationFrame(chartArmFrameRef.current);
+  }, []);
+
+  const chartReplayKey = `${chartKey}-${timeframe}-${dateIdx}`;
+
   // ── Bento summary tiles ───────────────────────────────────────────
   const savingsTint = groupDisplayColor('savings', theme.dark);
   const lineColor = theme.dark ? CHART_LINE.dark : CHART_LINE.light;
@@ -1633,6 +1675,7 @@ export function InsightsScreen({
                   accessibilityLabel={`Spending trend chart for ${rangeContextLabel}`}
                 >
                   <SpendChart
+                    key={`hero-${chartReplayKey}`}
                     data={cumulativeSeries}
                     width={heroChartW}
                     height={150}
@@ -1640,6 +1683,7 @@ export function InsightsScreen({
                     ringColor={theme.surface}
                     strokeWidth={2.5}
                     verticalInset={28}
+                    play={chartsArmed}
                     onScrub={setScrubIdx}
                   />
                 </View>
@@ -1682,6 +1726,7 @@ export function InsightsScreen({
                     accessibilityLabel="Savings trend chart"
                   >
                     <SpendChart
+                      key={`saved-${chartReplayKey}`}
                       data={savedMetric.cumulativeSeries}
                       width={halfChartW}
                       height={40}
@@ -1689,6 +1734,7 @@ export function InsightsScreen({
                       fillColor={savingsTint}
                       ringColor={theme.surface}
                       strokeWidth={2}
+                      play={chartsArmed}
                       onScrub={setSavedScrubIdx}
                     />
                   </View>
@@ -1728,6 +1774,7 @@ export function InsightsScreen({
                     accessibilityLabel={`Spending trends chart, ${trendRightLabel}`}
                   >
                     <TrendBars
+                      key={`trends-${chartReplayKey}`}
                       values={trend.values}
                       labels={trend.labels}
                       selectedIdx={trendScrubIdx}
@@ -1738,6 +1785,7 @@ export function InsightsScreen({
                       selectedColor={lineColor}
                       labelColor={p.textTer}
                       selectedLabelColor={p.text}
+                      play={chartsArmed}
                     />
                   </View>
                 </BentoTile>

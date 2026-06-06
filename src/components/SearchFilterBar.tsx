@@ -41,8 +41,10 @@ interface Props {
   /** Number of active scope filters; drives the filter button's tinted state + badge. */
   activeCount: number;
   calendarActive?: boolean;
-  onOpenCalendar: () => void;
-  onOpenFilter: () => void;
+  onOpenCalendar?: () => void;
+  onOpenFilter?: () => void;
+  /** Hide the calendar and filter circle buttons — for screens with their own action controls. */
+  hideActions?: boolean;
   placeholder?: string;
 }
 
@@ -54,7 +56,7 @@ interface Props {
  * the home-screen quick actions; it still opens the rich FilterSheet.
  */
 export function SearchFilterBar({
-  theme, p, query, onChangeQuery, activeCount, calendarActive = false, onOpenCalendar, onOpenFilter, placeholder = 'Search transactions…',
+  theme, p, query, onChangeQuery, activeCount, calendarActive = false, onOpenCalendar, onOpenFilter, hideActions = false, placeholder = 'Search transactions…',
 }: Props) {
   // Text lives on the native side so each keystroke renders on the UI thread
   // rather than round-tripping the bridge before the glyph appears. `onTextChange`
@@ -129,71 +131,75 @@ export function SearchFilterBar({
         </HStack>
       </Host>
 
-      <View style={styles.filterWrap}>
-        {SUPPORTS_GLASS ? (
-          <GlassCircleButton
-            onPress={onOpenCalendar}
-            systemImage="calendar"
-            size={FILTER_SIZE}
-            iconSize={18}
-            iconColor={calendarIconColor}
-            glassTint={calendarGlassTint}
-            colorScheme={colorScheme}
-            accessibilityLabel={calendarActive ? 'Calendar, date selected' : 'Calendar'}
-          />
-        ) : (
-          <Host style={styles.filterHost} colorScheme={colorScheme}>
-            <Button
-              onPress={onOpenCalendar}
-              modifiers={[
-                buttonStyle('plain'),
-                frame({ width: FILTER_SIZE, height: FILTER_SIZE }),
-                background(calendarActive ? theme.accent.dot : fillColor),
-                clipShape('circle'),
-              ]}
-            >
-              <Image systemName="calendar" size={18} color={calendarIconColor} />
-            </Button>
-          </Host>
-        )}
-      </View>
+      {!hideActions && (
+        <View style={styles.filterWrap}>
+          {SUPPORTS_GLASS ? (
+            <GlassCircleButton
+              onPress={onOpenCalendar!}
+              systemImage="calendar"
+              size={FILTER_SIZE}
+              iconSize={18}
+              iconColor={calendarIconColor}
+              glassTint={calendarGlassTint}
+              colorScheme={colorScheme}
+              accessibilityLabel={calendarActive ? 'Calendar, date selected' : 'Calendar'}
+            />
+          ) : (
+            <Host style={styles.filterHost} colorScheme={colorScheme}>
+              <Button
+                onPress={onOpenCalendar}
+                modifiers={[
+                  buttonStyle('plain'),
+                  frame({ width: FILTER_SIZE, height: FILTER_SIZE }),
+                  background(calendarActive ? theme.accent.dot : fillColor),
+                  clipShape('circle'),
+                ]}
+              >
+                <Image systemName="calendar" size={18} color={calendarIconColor} />
+              </Button>
+            </Host>
+          )}
+        </View>
+      )}
 
-      <View style={styles.filterWrap}>
-        {SUPPORTS_GLASS ? (
-          <GlassCircleButton
-            onPress={onOpenFilter}
-            systemImage="line.3.horizontal.decrease"
-            size={FILTER_SIZE}
-            iconSize={18}
-            iconColor={filterIconColor}
-            glassTint={filterGlassTint}
-            colorScheme={colorScheme}
-            accessibilityLabel={active ? `Filters, ${activeCount} active` : 'Filters'}
-          />
-        ) : (
-          <Host style={styles.filterHost} colorScheme={colorScheme}>
-            <Button
-              onPress={onOpenFilter}
-              modifiers={[
-                buttonStyle('plain'),
-                frame({ width: FILTER_SIZE, height: FILTER_SIZE }),
-                background(active ? theme.accent.dot : fillColor),
-                clipShape('circle'),
-              ]}
+      {!hideActions && (
+        <View style={styles.filterWrap}>
+          {SUPPORTS_GLASS ? (
+            <GlassCircleButton
+              onPress={onOpenFilter!}
+              systemImage="line.3.horizontal.decrease"
+              size={FILTER_SIZE}
+              iconSize={18}
+              iconColor={filterIconColor}
+              glassTint={filterGlassTint}
+              colorScheme={colorScheme}
+              accessibilityLabel={active ? `Filters, ${activeCount} active` : 'Filters'}
+            />
+          ) : (
+            <Host style={styles.filterHost} colorScheme={colorScheme}>
+              <Button
+                onPress={onOpenFilter}
+                modifiers={[
+                  buttonStyle('plain'),
+                  frame({ width: FILTER_SIZE, height: FILTER_SIZE }),
+                  background(active ? theme.accent.dot : fillColor),
+                  clipShape('circle'),
+                ]}
+              >
+                <Image systemName="line.3.horizontal.decrease" size={18} color={filterIconColor} />
+              </Button>
+            </Host>
+          )}
+          {active && (
+            <View
+              pointerEvents="none"
+              style={[styles.badge, { backgroundColor: theme.accent.dot, borderColor: theme.surface }]}
             >
-              <Image systemName="line.3.horizontal.decrease" size={18} color={filterIconColor} />
-            </Button>
-          </Host>
-        )}
-        {active && (
-          <View
-            pointerEvents="none"
-            style={[styles.badge, { backgroundColor: theme.accent.dot, borderColor: theme.surface }]}
-          >
-            <Text style={[styles.badgeText, { color: theme.accent.ink }]}>{activeCount}</Text>
-          </View>
-        )}
-      </View>
+              <Text style={[styles.badgeText, { color: theme.accent.ink }]}>{activeCount}</Text>
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 }

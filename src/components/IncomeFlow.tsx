@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, Pressable, TextInput, StyleSheet, ScrollView, Keyboard,
 } from 'react-native';
@@ -11,7 +11,8 @@ import { SheetPrimaryButton } from './shared';
 import { TYPE } from '../typography';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { appendMemberLabel, memberDisplayName } from '../repositories/memberLabels';
 import type { Income } from '../repositories/types';
 import { monthlyIncome } from '../selectors/finance';
 import {
@@ -74,8 +75,9 @@ const parseAmountDraft = (text: string): number | null => {
 // ─── component ────────────────────────────────────────────────────────────────
 
 export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
-  const { incomeRepo } = useRepositories();
+  const { incomeRepo, sessionRepo } = useRepositories();
   const incomes = useRepositoryList(incomeRepo);
+  const ledgerMembers = useLedgerMembers();
   const insets = useSafeAreaInsets();
 
   const regularIncomes = useMemo(
@@ -104,7 +106,6 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const [startDate, setStartDate] = useState<Date>(defaultDate);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [receivedDate, setReceivedDate] = useState<Date>(defaultDate);
-  const [feedback, setFeedback] = useState('');
   const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
 
   const loadRegular = (inc: Income) => {
@@ -115,7 +116,6 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     setDraft(inc.amount.toFixed(2));
     setStartDate(dateFromYMD(inc.startDate));
     setEndDate(inc.endDate ? dateFromYMD(inc.endDate) : null);
-    setFeedback('');
   };
 
   const loadOneTime = (inc: Income) => {
@@ -124,29 +124,47 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     setSource(inc.source === 'One-time income' ? '' : inc.source);
     setDraft(inc.amount.toFixed(2));
     setReceivedDate(dateFromYMD(inc.receivedAt ?? inc.startDate));
-    setFeedback('');
   };
 
   const resetRegular = () => {
     setKind('regular'); setEditingId(null); setSource('');
-    setCadence('Mo'); setDraft('0.00'); setStartDate(defaultDate()); setEndDate(null); setFeedback('');
+    setCadence('Mo'); setDraft('0.00'); setStartDate(defaultDate()); setEndDate(null);
   };
 
   const resetOneTime = () => {
     setKind('irregular'); setEditingId(null); setSource('');
-    setDraft('0.00'); setReceivedDate(defaultDate()); setFeedback('');
+    setDraft('0.00'); setReceivedDate(defaultDate());
   };
 
   const amountValue = parseAmountDraft(draft);
   const dateRangeValid = !endDate || endDate >= startDate;
-  const canSave = amountValue !== null && amountValue > 0
+  const editingIncome = useMemo(
+    () => incomes.find(i => i.id === editingId),
+    [editingId, incomes],
+  );
+  const canEditIncome = !editingIncome || sessionRepo.canEdit(editingIncome.createdByUserId, editingIncome.ledgerId);
+  const editingOwner = memberDisplayName(ledgerMembers, editingIncome?.createdByUserId);
+  const incomeLabel = useCallback(
+    (inc: Income) => appendMemberLabel(
+      inc.source === 'One-time income' ? 'One-time income' : inc.source,
+      ledgerMembers,
+      inc.createdByUserId,
+    ),
+    [ledgerMembers],
+  );
+  const canSave = canEditIncome && amountValue !== null && amountValue > 0
     && (kind === 'irregular' || (source.trim().length > 0 && dateRangeValid));
   const openAmountKeypad = () => {
     Keyboard.dismiss();
     requestAnimationFrame(() => setAmountKeypadOpen(true));
   };
+  useEffect(() => {
+    if (!canEditIncome) setAmountKeypadOpen(false);
+  }, [canEditIncome]);
 
   const removeIncome = (id: string) => {
+    const current = incomes.find(i => i.id === id);
+    if (current && !sessionRepo.canEdit(current.createdByUserId, current.ledgerId)) return;
     incomeRepo.delete(id);
     if (kind === 'regular') {
       const next = regularIncomes.find(i => i.id !== id);
@@ -159,7 +177,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
 
   const commit = () => {
     const v = amountValue;
-    if (!v) return;
+    if (!v || !canEditIncome) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     if (kind === 'irregular') {
       const src = source.trim() || 'One-time income';
@@ -169,7 +187,6 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
           kind: 'irregular', amount: v, source: src, cadence: 'oneTime',
           startDate: toYMD(receivedDate), receivedAt, updatedByUserId: 'local',
         });
-        setFeedback(`Updated one-time income for ${monthLabel(CURRENT_MONTH)}`);
       } else {
         const created = incomeRepo.create({
           kind: 'irregular', amount: v, source: src, cadence: 'oneTime',
@@ -177,10 +194,8 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
           createdByUserId: 'local', updatedByUserId: 'local',
         });
         onSaved?.({ id: created.id, amount: v, source: src });
-        setFeedback(`Logged one-time income for ${monthLabel(CURRENT_MONTH)}`);
-        setDraft(''); setSource(''); setReceivedDate(defaultDate());
-        setEditingId(null);
       }
+      onClose();
       return;
     }
     const src = source.trim();
@@ -194,13 +209,11 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     };
     if (editingId) {
       incomeRepo.update(editingId, payload);
-      setFeedback(`Saved ${src}`);
     } else {
       const created = incomeRepo.create({ ...payload, createdByUserId: 'local' });
-      setEditingId(created.id);
-      setFeedback(`Added ${src}`);
       onSaved?.({ id: created.id, amount: v, source: src });
     }
+    onClose();
   };
 
   const sep = { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth };
@@ -264,13 +277,6 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
           style={{ marginBottom: 2 }}
         />
 
-        {feedback.length > 0 && (
-          <View style={[S.feedback, { backgroundColor: theme.accent.fill }]}>
-            <Icon name="check" size={13} color={theme.accent.ink} stroke={2} />
-            <Text style={[TYPE.captionEm, { color: theme.accent.ink }]}>{feedback}</Text>
-          </View>
-        )}
-
         {kind === 'regular' ? (
           <>
             <View style={[S.fieldCard, { backgroundColor: theme.chipBg, marginTop: 12 }]}>
@@ -283,7 +289,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                         <View style={[S.menuTrigger, { justifyContent: 'flex-end' }]}>
                           <Text style={[S.menuText, { color: theme.text }]} numberOfLines={1}>
                             {editingId
-                              ? (regularIncomes.find(i => i.id === editingId)?.source ?? 'New source')
+                              ? (regularIncomes.find(i => i.id === editingId) ? incomeLabel(regularIncomes.find(i => i.id === editingId)!) : 'New source')
                               : 'New source'}
                           </Text>
                           <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
@@ -295,7 +301,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                           key={inc.id}
                           systemImage={inc.id === editingId ? 'checkmark' : undefined}
                           onPress={() => loadRegular(inc)}
-                          label={inc.source}
+                          label={incomeLabel(inc)}
                         />
                       ))}
                       <Button
@@ -308,10 +314,11 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   </Host>
                 </View>
               )}
-              <View style={[S.fieldRow, sep]}>
+              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Name</Text>
                 <TextInput
                   value={source} onChangeText={setSource}
+                  editable={canEditIncome}
                   placeholder="e.g. Salary, Weekend job" placeholderTextColor={theme.textTer}
                   keyboardAppearance={darkScheme} returnKeyType="done" selectTextOnFocus
                   style={[S.fieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
@@ -319,16 +326,17 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               </View>
               <Pressable
                 onPress={openAmountKeypad}
+                disabled={!canEditIncome}
                 accessibilityRole="button"
                 accessibilityLabel="Edit income amount"
-                style={[S.fieldRow, sep]}
+                style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
                 <Text style={[S.amountValue, { color: amountValue !== null ? theme.text : theme.textTer }]}>
                   <Text style={{ color: theme.textSec }}>$</Text>{draft}
                 </Text>
               </Pressable>
-              <View style={[S.fieldRow, sep]}>
+              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Frequency</Text>
                 <Host key="income-frequency" ignoreSafeArea="all" style={S.menuHost}>
                   <Menu
@@ -345,40 +353,40 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                       <Button
                         key={c.value}
                         systemImage={c.value === cadence ? 'checkmark' : undefined}
-                        onPress={() => setCadence(c.value)}
+                          onPress={() => { if (canEditIncome) setCadence(c.value); }}
                         label={c.label}
                       />
                     ))}
                   </Menu>
                 </Host>
               </View>
-              <View style={[S.fieldRow, sep]}>
+              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Starts</Text>
                 <Host key="income-starts" matchContents ignoreSafeArea="all">
                   <DatePicker
-                    selection={startDate} onDateChange={setStartDate}
+                    selection={startDate} onDateChange={canEditIncome ? setStartDate : () => {}}
                     displayedComponents={['date']}
                     modifiers={[datePickerStyle('compact'), tint(theme.accent.dot), environment({ key: 'colorScheme', value: darkScheme })]}
                   />
                 </Host>
               </View>
-              <View style={S.fieldRow}>
+              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Ends</Text>
                 {endDate ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Host key="income-ends" matchContents ignoreSafeArea="all">
                       <DatePicker
-                        selection={endDate} onDateChange={setEndDate}
+                        selection={endDate} onDateChange={canEditIncome ? setEndDate : () => {}}
                         displayedComponents={['date']}
                         modifiers={[datePickerStyle('compact'), tint(theme.accent.dot), environment({ key: 'colorScheme', value: darkScheme })]}
                       />
                     </Host>
-                    <Pressable onPress={() => setEndDate(null)} hitSlop={8} accessibilityRole="button">
+                    <Pressable onPress={() => { if (canEditIncome) setEndDate(null); }} hitSlop={8} accessibilityRole="button" disabled={!canEditIncome}>
                       <Icon name="close" size={11} color={theme.textTer} stroke={2} />
                     </Pressable>
                   </View>
                 ) : (
-                  <Pressable onPress={() => setEndDate(monthEndDate(CURRENT_MONTH))} accessibilityRole="button" style={{ minHeight: 34, justifyContent: 'center' }}>
+                  <Pressable onPress={() => { if (canEditIncome) setEndDate(monthEndDate(CURRENT_MONTH)); }} accessibilityRole="button" disabled={!canEditIncome} style={{ minHeight: 34, justifyContent: 'center' }}>
                     <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set end date</Text>
                   </Pressable>
                 )}
@@ -394,7 +402,12 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               onPress={commit} theme={theme} disabled={!canSave}
               style={{ marginTop: 16 }}
             />
-            {editingId && regularIncomes.some(i => i.id === editingId) && (
+            {editingId && !canEditIncome && (
+              <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
+                {editingOwner ?? 'This member'} has locked edits for this income.
+              </Text>
+            )}
+            {editingId && canEditIncome && regularIncomes.some(i => i.id === editingId) && (
               <Pressable
                 onPress={() => removeIncome(editingId)}
                 accessibilityRole="button"
@@ -425,7 +438,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                     >
                       {oneTimeIncomes.map(inc => (
                         <SwiftText key={inc.id} modifiers={[tag(inc.id)]}>
-                          {inc.source === 'One-time income' ? 'One-time income' : inc.source}
+                          {incomeLabel(inc)}
                         </SwiftText>
                       ))}
                       <SwiftText key="__new__" modifiers={[tag('__new__')]}>Add new</SwiftText>
@@ -433,10 +446,11 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   </Host>
                 </View>
               )}
-              <View style={[S.fieldRow, sep]}>
+              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Name</Text>
                 <TextInput
                   value={source} onChangeText={setSource}
+                  editable={canEditIncome}
                   placeholder="Optional" placeholderTextColor={theme.textTer}
                   keyboardAppearance={darkScheme} returnKeyType="done" selectTextOnFocus
                   style={[S.fieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
@@ -444,20 +458,21 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               </View>
               <Pressable
                 onPress={openAmountKeypad}
+                disabled={!canEditIncome}
                 accessibilityRole="button"
                 accessibilityLabel="Edit income amount"
-                style={[S.fieldRow, sep]}
+                style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
                 <Text style={[S.amountValue, { color: amountValue !== null ? theme.text : theme.textTer }]}>
                   <Text style={{ color: theme.textSec }}>$</Text>{draft}
                 </Text>
               </Pressable>
-              <View style={S.fieldRow}>
+              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Received</Text>
                 <Host key="onetime-received" matchContents ignoreSafeArea="all">
                   <DatePicker
-                    selection={receivedDate} onDateChange={setReceivedDate}
+                    selection={receivedDate} onDateChange={canEditIncome ? setReceivedDate : () => {}}
                     displayedComponents={['date']}
                     modifiers={[datePickerStyle('compact'), tint(theme.accent.dot), environment({ key: 'colorScheme', value: darkScheme })]}
                   />
@@ -469,7 +484,12 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               onPress={commit} theme={theme} disabled={!canSave}
               style={{ marginTop: 16 }}
             />
-            {editingId && oneTimeIncomes.some(i => i.id === editingId) && (
+            {editingId && !canEditIncome && (
+              <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
+                {editingOwner ?? 'This member'} has locked edits for this income.
+              </Text>
+            )}
+            {editingId && canEditIncome && oneTimeIncomes.some(i => i.id === editingId) && (
               <Pressable onPress={() => removeIncome(editingId)} accessibilityRole="button" style={S.deleteBtn}>
                 <Text style={[TYPE.bodySmEm, { color: OVER_DOT }]}>Remove income</Text>
               </Pressable>
@@ -503,10 +523,6 @@ const S = StyleSheet.create({
   heroCircle: {
     width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
   },
-  feedback: {
-    minHeight: 34, borderRadius: 17, marginTop: 12, paddingHorizontal: 12,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-  },
   fieldCard: { borderRadius: 14, overflow: 'hidden' },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -519,6 +535,8 @@ const S = StyleSheet.create({
     textAlign: 'right',
   },
   deleteBtn: { alignItems: 'center', paddingVertical: 16 },
+  lockedCopy: { textAlign: 'center', marginTop: 12 },
+  lockedFields: { opacity: 0.58 },
   // Fixed-size Host avoids the one-frame layout shift that `matchContents`
   // pickers cause while SwiftUI measures their content on mount.
   menuHost: { width: 180, height: 28 },

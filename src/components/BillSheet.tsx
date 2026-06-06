@@ -17,8 +17,9 @@ import Reanimated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { Theme } from '../theme';
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
+import { memberDisplayName } from '../repositories/memberLabels';
 import type { Bill } from '../repositories/types';
 import { advanceDueDate } from '../selectors/finance';
 import { MerchantMark } from './MerchantMark';
@@ -61,8 +62,9 @@ export function BillSheet({
   theme: Theme;
   onClose: () => void;
 }) {
-  const { transactionsRepo, recurringRulesRepo, categoriesRepo } = useRepositories();
+  const { transactionsRepo, recurringRulesRepo, categoriesRepo, sessionRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
+  const ledgerMembers = useLedgerMembers();
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -70,9 +72,13 @@ export function BillSheet({
   const animatedIndex = useSharedValue(0);
   const animatedPosition = useSharedValue(SCREEN_H);
 
-  const lastBill = useRef<Bill | null>(null);
-  if (bill) lastBill.current = bill;
-  const b = lastBill.current;
+	  const lastBill = useRef<Bill | null>(null);
+	  if (bill) lastBill.current = bill;
+	  const b = lastBill.current;
+  const ruleId = b?.id.startsWith('bill-') ? b.id.slice(5) : (b?.id ?? '');
+  const rule = ruleId ? recurringRulesRepo.get(ruleId) : undefined;
+  const canEditBill = b ? sessionRepo.canEdit(rule?.createdByUserId ?? b.createdByUserId, rule?.ledgerId ?? b.ledgerId) : false;
+  const ownerName = memberDisplayName(ledgerMembers, rule?.createdByUserId ?? b?.createdByUserId);
 
   const [editAmt, setEditAmt] = useState('');
   const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
@@ -120,6 +126,7 @@ export function BillSheet({
   }, [actionTravel, animatedPosition]);
 
   const openAmountKeypad = useCallback(() => {
+    if (!canEditBill) return;
     keypadOpenRef.current = true;
     clearKeypadOpenTimer();
     sheetRef.current?.snapToIndex(1, expandAnimation);
@@ -129,7 +136,7 @@ export function BillSheet({
         setAmountKeypadOpen(true);
       }
     }, KEYPAD_OPEN_DELAY_MS);
-  }, [clearKeypadOpenTimer, expandAnimation]);
+  }, [canEditBill, clearKeypadOpenTimer, expandAnimation]);
 
   const closeAmountKeypad = useCallback(() => {
     keypadOpenRef.current = false;
@@ -170,6 +177,10 @@ export function BillSheet({
     clearKeypadOpenTimer();
     setAmountKeypadOpen(false);
   }, [bill, clearKeypadOpenTimer]);
+
+  useEffect(() => {
+    if (!canEditBill) closeAmountKeypad();
+  }, [canEditBill, closeAmountKeypad]);
 
   useEffect(() => clearKeypadOpenTimer, [clearKeypadOpenTimer]);
 
@@ -243,13 +254,11 @@ export function BillSheet({
     overflow: 'hidden' as const,
   }), []);
 
-  const ruleId = b?.id.startsWith('bill-') ? b.id.slice(5) : (b?.id ?? '');
-  const rule = ruleId ? recurringRulesRepo.get(ruleId) : undefined;
   const groupColor = b ? categoryGroupColor(b.cat, categories, theme.dark) : theme.accent.dot;
   const cat = b ? cats[b.cat] : undefined;
 
   const markPaid = () => {
-    if (!b) return;
+    if (!b || !canEditBill) return;
     const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
     transactionsRepo.create({
@@ -278,7 +287,7 @@ export function BillSheet({
   };
 
   const markPartiallyPaid = () => {
-    if (!b || !rule) return;
+    if (!b || !rule || !canEditBill) return;
     const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
     transactionsRepo.create({
@@ -386,12 +395,13 @@ export function BillSheet({
             </View>
 
             <View style={[S.amtCard, { backgroundColor: theme.chipBg }]}>
-              <Pressable
-                onPress={openAmountKeypad}
-                accessibilityRole="button"
-                accessibilityLabel="Edit amount paid"
-                style={S.amtRow}
-              >
+	              <Pressable
+	                onPress={openAmountKeypad}
+                  disabled={!canEditBill}
+	                accessibilityRole="button"
+	                accessibilityLabel="Edit amount paid"
+	                style={[S.amtRow, !canEditBill && S.lockedFields]}
+	              >
                 <Text style={[S.amtLabel, { color: theme.textSec }]}>Amount paid</Text>
                 <Text style={[S.amtValue, { color: editAmt ? theme.text : theme.textTer }]}>
                   <Text style={{ color: theme.textSec }}>$</Text>{editAmt || '0.00'}
@@ -408,16 +418,23 @@ export function BillSheet({
             >
               <SheetPrimaryButton
                 label="Mark as paid"
-                onPress={markPaid}
-                theme={theme}
-                style={S.primaryBtn}
-              />
-              <SheetTextButton
-                label="Mark partially paid"
-                onPress={markPartiallyPaid}
-                theme={theme}
-                style={S.secondaryBtn}
-              />
+	                onPress={markPaid}
+	                theme={theme}
+	                disabled={!canEditBill}
+	                style={S.primaryBtn}
+	              />
+                {canEditBill ? (
+                  <SheetTextButton
+                    label="Mark partially paid"
+                    onPress={markPartiallyPaid}
+                    theme={theme}
+                    style={S.secondaryBtn}
+                  />
+                ) : (
+                  <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
+                    {ownerName ?? 'This member'} has locked edits for this bill.
+                  </Text>
+                )}
             </Reanimated.View>
           </>
         )}
@@ -477,6 +494,14 @@ const S = StyleSheet.create({
   },
   secondaryBtn: {
     alignItems: 'center',
+  },
+  lockedFields: {
+    opacity: 0.58,
+  },
+  lockedCopy: {
+    textAlign: 'center',
+    marginTop: 12,
+    paddingHorizontal: 20,
   },
   actionDock: {
     position: 'absolute',

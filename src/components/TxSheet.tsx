@@ -5,9 +5,10 @@ import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetTextInput,
+  useBottomSheetTimingConfigs,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
-import Animated, { useAnimatedReaction, useSharedValue, runOnJS, FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { Easing as ReEasing, useAnimatedReaction, useSharedValue, runOnJS, FadeIn, FadeOut } from 'react-native-reanimated';
 import { Button as SwiftButton, DatePicker, Host, Menu } from '@expo/ui/swift-ui';
 import { datePickerStyle, environment } from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
@@ -28,10 +29,20 @@ const SHEET_CHROME = 44;
 const DATE_PICKER_EXPANDED_HEIGHT = 236;
 type SheetPhase = 'closed' | 'presenting' | 'open' | 'dismissing';
 const EARLY_EXPAND_INTENT_THRESHOLD = 0.08;
+// Manual-swipe settle timing — crisp ease-out so detent changes feel decisive
+// instead of mushy. Matches BillSheet's feel.
+const SHEET_ANIM_MS = 300;
+const SHEET_EASING = ReEasing.out(ReEasing.cubic);
+// Forgiving expand: if an upward drag from compact releases past this fraction of
+// the way to expanded, honor the intent even when the fling was too weak for
+// gorhom's velocity projection to commit on its own. (0 = compact, 1 = expanded.)
+const EXPAND_COMMIT_THRESHOLD = 0.25;
 
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import * as Haptics from 'expo-haptics';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
-import type { Category, GroupKey, Transaction } from '../repositories/types';
+import { appendMemberLabel, memberDisplayName } from '../repositories/memberLabels';
+import type { Category, GroupKey, LedgerMember, Transaction } from '../repositories/types';
 import { Icon } from './Icon';
 import { MerchantMark } from './MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
@@ -81,6 +92,7 @@ export function TxSheet({
 }) {
   const { transactionsRepo, categoriesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
+  const ledgerMembers = useLedgerMembers();
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
@@ -96,14 +108,24 @@ export function TxSheet({
   // swipes between detents.
   const animatedIndex = useSharedValue(COMPACT_INDEX);
   const openingToCompact = useSharedValue(false);
+  const sheetAnimationConfigs = useBottomSheetTimingConfigs({
+    duration: SHEET_ANIM_MS,
+    easing: SHEET_EASING,
+  });
   const lastTx = useRef<Transaction | null>(null);
   const sheetHeightRef = useRef(0);
   const pendingEarlyExpandRef = useRef(false);
   const earlyExpandAppliedRef = useRef(false);
+  // The detent the sheet last *settled* at (not the live drag index). Lets the
+  // forgiving-expand logic tell "dragged up from compact" from "collapsing down
+  // from expanded" at release time, independent of gorhom's ambiguous from-index.
+  const settledIndexRef = useRef(COMPACT_INDEX);
   visibleRef.current = visible;
   txRef.current = tx;
   if (tx) lastTx.current = tx;
   const t = lastTx.current;
+  const canEditTx = t ? transactionsRepo.canEdit(t) : false;
+  const txOwnerName = memberDisplayName(ledgerMembers, t?.createdByUserId);
 
   const [sheetIndex, setSheetIndex] = useState(COMPACT_INDEX);
   const [editCat, setEditCat] = useState('');
@@ -115,6 +137,10 @@ export function TxSheet({
   const [datePickerInlineOpen, setDatePickerInlineOpen] = useState(false);
   const [catTotal, setCatTotal] = useState<number | null>(null);
   const [deferredTxId, setDeferredTxId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canEditTx) setAmountKeypadOpen(false);
+  }, [canEditTx]);
 
   useEffect(() => {
     if (tx !== null) {
@@ -229,7 +255,7 @@ export function TxSheet({
   }, [tx, transactionsRepo]);
 
   const saveEdit = () => {
-    if (!t) return;
+    if (!t || !canEditTx) return;
     const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
     const nextMerchant = editMerchant.trim() || t.merchant;
@@ -250,12 +276,14 @@ export function TxSheet({
         merchantSource: nextMerchant !== t.merchant || t.meta?.merchantSource === 'user' ? 'user' : t.meta?.merchantSource,
       },
     });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setAmountKeypadOpen(false);
     onClose();
   };
 
   const deleteTx = () => {
-    if (!t) return;
+    if (!t || !canEditTx) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     if (onDeleted) onDeleted(t);
     else transactionsRepo.delete(t.id);
     setAmountKeypadOpen(false);
@@ -284,8 +312,8 @@ export function TxSheet({
     pendingEarlyExpandRef.current = true;
     earlyExpandAppliedRef.current = true;
     openingToCompact.value = false;
-    sheetRef.current?.snapToIndex(EXPANDED_INDEX);
-  }, [openingToCompact]);
+    sheetRef.current?.snapToIndex(EXPANDED_INDEX, sheetAnimationConfigs);
+  }, [openingToCompact, sheetAnimationConfigs]);
 
   const markEarlyExpandIntent = useCallback(() => {
     applyEarlyExpandIntent();
@@ -314,13 +342,28 @@ export function TxSheet({
       clearEarlyExpandIntent();
       return;
     }
+    settledIndexRef.current = index;
     openingToCompact.value = false;
     if (index >= EXPANDED_INDEX) clearEarlyExpandIntent();
   }, [clearEarlyExpandIntent, openingToCompact]);
 
   const handleSheetAnimate = useCallback((_from: number, to: number) => {
     if (to >= EXPANDED_INDEX && openingToCompact.value) markEarlyExpandIntent();
-  }, [markEarlyExpandIntent, openingToCompact]);
+    // Forgiving expand: the user was resting at compact and dragged up, but
+    // released too gently for gorhom's velocity projection to commit — so it's
+    // settling back to compact. If they pulled past the threshold, honor the
+    // upward intent and finish the expand. `animatedIndex` at animate-start is the
+    // release position. Gated on the last *settled* detent so collapsing down from
+    // expanded (settled === expanded) and dismissing (to < compact) are untouched.
+    if (
+      to === COMPACT_INDEX &&
+      settledIndexRef.current === COMPACT_INDEX &&
+      !openingToCompact.value &&
+      animatedIndex.value >= EXPAND_COMMIT_THRESHOLD
+    ) {
+      sheetRef.current?.snapToIndex(EXPANDED_INDEX, sheetAnimationConfigs);
+    }
+  }, [animatedIndex, markEarlyExpandIntent, openingToCompact, sheetAnimationConfigs]);
 
   // Fires after a dismiss fully completes (swipe or programmatic). If a new
   // transaction arrived while dismissing, present it now instead of letting the
@@ -342,8 +385,8 @@ export function TxSheet({
   const backgroundStyle = useMemo(() => ({ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }), [theme.surface]);
 
   const expandToEdit = useCallback(() => {
-    sheetRef.current?.snapToIndex(EXPANDED_INDEX);
-  }, []);
+    sheetRef.current?.snapToIndex(EXPANDED_INDEX, sheetAnimationConfigs);
+  }, [sheetAnimationConfigs]);
 
   const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
     <BottomSheetBackdrop
@@ -376,6 +419,11 @@ export function TxSheet({
       enableDynamicSizing={false}
       enablePanDownToClose
       animatedIndex={animatedIndex}
+      animationConfigs={sheetAnimationConfigs}
+      // Claim the vertical drag after a small, symmetric threshold so the gesture
+      // commits to the sheet instead of being eaten by child press targets — the
+      // cause of "swipe a little, it stops, swipe again."
+      activeOffsetY={[-8, 8]}
       onAnimate={handleSheetAnimate}
       onChange={handleSheetChange}
       // Close on `onDismiss` (fires AFTER the dismiss animation completes), so
@@ -416,6 +464,7 @@ export function TxSheet({
                 logoEnabled={deferredContentReady}
                 cats={cats}
                 categories={categories}
+                members={ledgerMembers}
               />
               {/* Cross-fade the differing lower section on detent change; the
                   hero above stays put, so the swap reads as a soft dissolve
@@ -427,17 +476,23 @@ export function TxSheet({
               >
                 {!isExpanded ? (
                   <View>
-                    <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} />
-                    <Pressable
-                      onPress={expandToEdit}
-                      pointerEvents="box-only"
-                      style={S.expandHint}
-                      accessibilityRole="button"
-                      accessibilityLabel="Edit transaction"
-                    >
-                      <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
-                      <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
-                    </Pressable>
+                    <CompactSummary tx={t} catTotal={catTotal} theme={theme} cats={cats} categories={categories} members={ledgerMembers} />
+                    {!canEditTx ? (
+                      <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
+                        {txOwnerName ?? 'This member'} has locked edits for this transaction.
+                      </Text>
+                    ) : (
+                      <Pressable
+                        onPress={expandToEdit}
+                        pointerEvents="box-only"
+                        style={S.expandHint}
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit transaction"
+                      >
+                        <Icon name="chevUp" size={13} color={theme.textSec} stroke={2} />
+                        <Text style={[S.expandHintText, { color: theme.textSec }]}>Edit</Text>
+                      </Pressable>
+                    )}
                   </View>
                 ) : (
                   <EditSection
@@ -458,6 +513,8 @@ export function TxSheet({
                     onDateChange={setEditOccurredAt}
                     cats={cats}
                     categories={categories}
+                    canEdit={canEditTx}
+                    ownerName={txOwnerName}
                     onSave={saveEdit}
                     onDelete={deleteTx}
                   />
@@ -488,6 +545,7 @@ function SheetBody({
   logoEnabled,
   cats,
   categories,
+  members,
 }: {
   tx: Transaction;
   theme: Theme;
@@ -495,10 +553,12 @@ function SheetBody({
   logoEnabled: boolean;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  members: LedgerMember[];
 }) {
   const cat = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const useLogo = logoEnabled && transactionUsesMerchantLogo(tx);
+  const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
 
   return (
     <View style={[S.hero, isExpanded && S.heroCompact]}>
@@ -512,7 +572,7 @@ function SheetBody({
       />
       <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
       <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
-        {cat?.label ?? UNCATEGORIZED_LABEL}
+        {meta}
         <Text style={{ color: theme.textTer }}> · </Text>
         {tx.fullDate}
         <Text style={{ color: theme.textTer }}> · </Text>
@@ -531,14 +591,17 @@ function CompactSummary({
   theme,
   cats,
   categories,
+  members,
 }: {
   tx: Transaction;
   catTotal: number | null;
   theme: Theme;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  members: LedgerMember[];
 }) {
   const cat = cats[tx.cat];
+  const categoryLabel = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const catBudget = cat?.budget ?? 0;
   const ready = catTotal !== null;
@@ -554,7 +617,7 @@ function CompactSummary({
       ) : null}
       <View style={S.budgetBlock}>
         <View style={S.usageRow}>
-          <Text style={[S.usageLabel, { color: theme.textSec }]}>{cat?.label} this month</Text>
+          <Text style={[S.usageLabel, { color: theme.textSec }]}>{categoryLabel} this month</Text>
           <Text style={[S.usageAmount, { color: theme.textSec }]}>
             <Text style={[TYPE.bodySmEm, { color: theme.text }]}>
               {ready ? `$${catTotal.toFixed(0)}` : '...'}
@@ -574,7 +637,7 @@ function EditSection({
   theme, editCat, setEditCat, editMerchant, setEditMerchant,
   editNote, setEditNote, editAmt, setEditAmt, onOpenAmountKeypad, onDismissAmountKeypad,
   editOccurredAt, datePickerInlineOpen, onToggleDatePicker, onDateChange,
-  cats, categories, onSave, onDelete,
+  cats, categories, canEdit, ownerName, onSave, onDelete,
 }: {
   theme: Theme;
   editCat: string; setEditCat: (v: string) => void;
@@ -589,6 +652,8 @@ function EditSection({
   onDateChange: (v: Date) => void;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
+  canEdit: boolean;
+  ownerName?: string;
   onSave: () => void;
   onDelete: () => void;
 }) {
@@ -602,12 +667,14 @@ function EditSection({
     savings: theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light,
   };
   const selectedGroupColor = groupColors[selectedGroup] ?? theme.accent.dot;
+  const lockedFieldStyle = !canEdit && S.lockedFields;
 
   return (
     <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
-      <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
+      <View pointerEvents={canEdit ? 'auto' : 'none'} style={[S.fieldCard, lockedFieldStyle, { backgroundColor: theme.chipBg }]}>
         <Pressable
           onPress={onOpenAmountKeypad}
+          disabled={!canEdit}
           accessibilityRole="button"
           accessibilityLabel="Edit transaction amount"
           style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
@@ -621,6 +688,7 @@ function EditSection({
         </Pressable>
         <Pressable
           onPress={onToggleDatePicker}
+          disabled={!canEdit}
           style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
         >
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Date & time</Text>
@@ -643,7 +711,7 @@ function EditSection({
               <Host matchContents ignoreSafeArea="all">
                 <DatePicker
                   selection={editOccurredAt}
-                  onDateChange={onDateChange}
+                  onDateChange={canEdit ? onDateChange : () => {}}
                   displayedComponents={['date', 'hourAndMinute']}
                   modifiers={[
                     datePickerStyle('wheel'),
@@ -659,6 +727,7 @@ function EditSection({
           <BottomSheetTextInput
             value={editMerchant}
             onChangeText={setEditMerchant}
+            editable={canEdit}
             placeholder="Merchant name"
             placeholderTextColor={theme.textTer}
             clearButtonMode="while-editing"
@@ -674,6 +743,7 @@ function EditSection({
           <BottomSheetTextInput
             value={editNote}
             onChangeText={setEditNote}
+            editable={canEdit}
             placeholder="Optional"
             placeholderTextColor={theme.textTer}
             keyboardAppearance={theme.dark ? 'dark' : 'light'}
@@ -687,8 +757,10 @@ function EditSection({
 
       {/* Category picker */}
       <View
+        pointerEvents={canEdit ? 'auto' : 'none'}
         style={[
           S.categoryPanel,
+          lockedFieldStyle,
           {
             backgroundColor: theme.chipBg,
             borderColor: theme.hairline,
@@ -700,6 +772,7 @@ function EditSection({
           values={GROUP_KEYS.map(key => GROUP_LABELS[key])}
           selectedIndex={selectedGroupIdx}
           onChange={(e) => {
+            if (!canEdit) return;
             const nextGroup = GROUP_KEYS[e.nativeEvent.selectedSegmentIndex];
             if (!nextGroup) return;
             const nextSubcats = categories.filter(cat => cat.group === nextGroup && !cat.archived);
@@ -733,7 +806,7 @@ function EditSection({
                   <SwiftButton
                     key={String(idx)}
                     systemImage={idx === selectedSubIdx ? 'checkmark' : undefined}
-                    onPress={() => setEditCat(cat.id)}
+                    onPress={() => { if (canEdit) setEditCat(cat.id); }}
                     label={cats[cat.id]?.label ?? cat.label}
                   />
                 ))}
@@ -750,15 +823,23 @@ function EditSection({
         label="Save changes"
         onPress={onSave}
         theme={theme}
+        disabled={!canEdit}
         style={S.saveBtn}
       />
-      <SheetTextButton
-        label="Delete transaction"
-        onPress={onDelete}
-        theme={theme}
-        tone="danger"
-        style={S.deleteBtn}
-      />
+      {!canEdit && (
+        <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
+          {ownerName ?? 'This member'} has locked edits for this transaction.
+        </Text>
+      )}
+      {canEdit && (
+        <SheetTextButton
+          label="Delete transaction"
+          onPress={onDelete}
+          theme={theme}
+          tone="danger"
+          style={S.deleteBtn}
+        />
+      )}
     </View>
   );
 }
@@ -914,6 +995,14 @@ const S = StyleSheet.create({
   saveBtn: {
     marginTop: 28,
     alignItems: 'center',
+  },
+  lockedFields: {
+    opacity: 0.58,
+  },
+  lockedCopy: {
+    textAlign: 'center',
+    marginTop: 12,
+    paddingHorizontal: 16,
   },
   deleteBtn: {
     alignItems: 'center',

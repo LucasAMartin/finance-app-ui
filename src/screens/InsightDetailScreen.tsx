@@ -8,8 +8,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -17,6 +15,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
+import { SearchFilterBar } from '../components/SearchFilterBar';
+import { GlassCircleIcon, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 
 import { Theme, GROUP_COLORS, overText } from '../theme';
 import { useTheme } from '../ThemeProvider';
@@ -254,6 +254,14 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   // Spent chart can't answer. Leading empty buckets (history shorter than the
   // window) are trimmed so the chart never opens on a row of zeros.
   const [trendGrain, setTrendGrain] = useState<TrendGrain>('month');
+
+  // Increments whenever the screen opens or data context changes, remounting
+  // chart components so their animations replay from a clean state.
+  const [chartKey, setChartKey] = useState(0);
+  useEffect(() => {
+    if (visible) setChartKey(k => k + 1);
+  }, [visible, period, dateIdx, trendGrain]);
+
   const trend = useMemo(() => {
     if (!isTrendsDetail) return { values: [] as number[], slots: [] as TrendSlot[] };
     const count = trendGrain === 'week' ? 8 : 6;
@@ -443,7 +451,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   }, [rows]);
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
 
-  const lineColor = isSavingsDetail ? savingsTint : 'rgba(242,244,245,0.95)';
+  const lineColor = isSavingsDetail ? savingsTint : 'rgba(147,197,253,0.92)';
 
   const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
 
@@ -576,6 +584,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                   <View style={styles.heroChart}>
                     {isTrendsDetail ? (
                       <TrendBars
+                        key={chartKey}
                         values={trendValues}
                         labels={trendLabels}
                         width={CHART_W}
@@ -584,13 +593,14 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                         partialIdx={trendPartialIdx}
                         onScrub={setScrubIdx}
                         onTap={(idx) => setScrubIdx(prev => prev === idx ? null : idx)}
-                        barColor="rgba(242,244,245,0.58)"
-                        selectedColor="rgba(242,244,245,1)"
+                        barColor="rgba(147,197,253,0.68)"
+                        selectedColor="rgba(147,197,253,1)"
                         labelColor={pW.textSec}
-                        selectedLabelColor={pW.text}
+                        selectedLabelColor="rgba(147,197,253,1)"
                       />
                     ) : (
                       <SpendChart
+                        key={chartKey}
                         data={activeSeries}
                         width={CHART_W}
                         height={CHART_H}
@@ -689,13 +699,23 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                     </Host>
                   )}
 
-                  {/* Sort — its own visible control */}
-                  <Host ignoreSafeArea="all" style={{ width: 36, height: 36 }}>
+                  {/* Sort — glass circle trigger opening a native menu */}
+                  <Host ignoreSafeArea="all" style={{ width: 44, height: 44 }}>
                     <Menu
                       label={
-                        <View style={styles.moreBtn}>
-                          <Icon name="filter" size={16} color={pW.text} />
-                        </View>
+                        SUPPORTS_GLASS ? (
+                          <GlassCircleIcon
+                            systemImage="arrow.up.arrow.down"
+                            size={44}
+                            iconSize={18}
+                            iconColor={pW.text as string}
+                            glassTint={glassTintForTheme(theme.dark)}
+                          />
+                        ) : (
+                          <View style={styles.moreBtn}>
+                            <Icon name="filter" size={16} color={pW.text} />
+                          </View>
+                        )
                       }
                     >
                       {SORT_OPTIONS.map((o, i) => (
@@ -710,34 +730,17 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                   </Host>
                 </View>
 
-                {/* Search bar */}
+                {/* Search bar — native SwiftUI TextField matching the History screen */}
                 <View style={styles.searchWrap}>
-                  <BlurView intensity={theme.dark ? 50 : 90} tint={cardTint} style={styles.searchCard}>
-                    <View style={[styles.searchCardInner, { borderColor: cardBorder }]}>
-                      <View style={styles.searchRow}>
-                        <Icon name="search" size={16} color={p.textSec} />
-                        <TextInput
-                          value={query}
-                          onChangeText={setQuery}
-                          placeholder="Search transactions…"
-                          placeholderTextColor={p.textTer}
-                          style={[styles.searchInput, { color: p.text }]}
-                          returnKeyType="search"
-                          accessibilityLabel="Search transactions"
-                        />
-                        {query.length > 0 && (
-                          <TouchableOpacity
-                            onPress={() => setQuery('')}
-                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                            accessibilityRole="button"
-                            accessibilityLabel="Clear search"
-                          >
-                            <Icon name="close" size={14} color={p.textSec} />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                  </BlurView>
+                  <SearchFilterBar
+                    theme={theme}
+                    p={p}
+                    query={query}
+                    onChangeQuery={setQuery}
+                    activeCount={0}
+                    hideActions
+                    placeholder="Search transactions…"
+                  />
                 </View>
               </View>
             }
@@ -955,9 +958,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   moreBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: MEDIA.trackBg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -974,27 +977,7 @@ const styles = StyleSheet.create({
   dateLabelText: { ...TYPE.subsectionTitle },
 
   // Search bar
-  searchWrap: {},
-  searchCard: {
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  searchCardInner: {
-    borderRadius: 18,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  searchInput: {
-    flex: 1,
-    ...TYPE.bodyRegular,
-    padding: 0,
-  },
+  searchWrap: { marginTop: 10 },
 
   // Day card
   dayCard: {

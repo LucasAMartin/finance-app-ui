@@ -39,8 +39,9 @@ import { TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
-import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
+import { memberDisplayName } from '../repositories/memberLabels';
 import type { Bill, Category, GroupKey, Income, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
@@ -292,13 +293,14 @@ const fwStyles = StyleSheet.create({
 
 function SwipeRow({ children, onRemove, onOpen, onClose, scrollRef, tapRef }: {
   children: React.ReactNode;
-  onRemove: () => void;
+  onRemove?: () => void;
   onOpen: (ref: Swipeable) => void;
   onClose: () => void;
   scrollRef: React.RefObject<any>;
   tapRef: React.RefObject<any>;
 }) {
   const swipeRef = useRef<Swipeable>(null);
+  if (!onRemove) return <>{children}</>;
 
   const renderRightActions = useCallback((progress: Animated.AnimatedInterpolation<number>) => {
     const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [78, 0] });
@@ -425,7 +427,7 @@ function EditCaret({ color }: { color: string }) {
 // underline signals it's editable; the inner tap target pre-empts the whole-row
 // tap (which opens the editor sheet). Editing state lives in the parent so the
 // shared keypad can drive the live draft and commit.
-function EditableBudgetAmount({ value, active, color, accentColor, underlineColor, onStartEdit, onMeasured, accessibilityLabel }: {
+function EditableBudgetAmount({ value, active, color, accentColor, underlineColor, onStartEdit, onMeasured, accessibilityLabel, disabled = false }: {
   value: number;
   active: boolean;
   color: string;
@@ -434,10 +436,12 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
   onStartEdit: () => void;
   onMeasured: (top: number, height: number) => void;
   accessibilityLabel?: string;
+  disabled?: boolean;
 }) {
   const ref = useRef<View>(null);
 
   const startEdit = () => {
+    if (disabled) return;
     // Begin editing synchronously; measure afterwards purely for scroll-into-view.
     onStartEdit();
     ref.current?.measureInWindow((_x, y, _w, h) => onMeasured(y, h));
@@ -461,12 +465,13 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
     <TouchableOpacity
       ref={ref}
       onPress={startEdit}
+      disabled={disabled}
       activeOpacity={0.6}
       hitSlop={{ top: 10, bottom: 10, left: 12, right: 6 }}
-      accessibilityRole="button"
+      accessibilityRole={disabled ? undefined : 'button'}
       accessibilityLabel={accessibilityLabel}
     >
-      <View style={[styles.catBudgetWrap, { borderBottomColor: underlineColor }]}>
+      <View style={[styles.catBudgetWrap, { borderBottomColor: disabled ? 'transparent' : underlineColor, opacity: disabled ? 0.58 : 1 }]}>
         <Text
           maxFontSizeMultiplier={MAX_FONT_SCALE}
           numberOfLines={1}
@@ -481,13 +486,14 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
 }
 
 export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenChange }: Props) {
-  const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
+  const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
   const incomes = useRepositoryList(incomeRepo);
   const budgetRecords = useRepositoryList(budgetsRepo);
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
+  const ledgerMembers = useLedgerMembers();
   const upcomingBills = useMemo(
     () => upcomingBillsFromRecurring(recurringRules, categories),
     [recurringRules, categories],
@@ -590,6 +596,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const [budgets, setBudgets] = useState<Record<string, number>>(() => initBudgets(visibleSpendGroups, upcomingBills, categories));
   const [undoVisible, setUndoVisible] = useState(false);
   const [undoLabel, setUndoLabel] = useState('');
+  const [undoHasAction, setUndoHasAction] = useState(true);
 
   const [customSubs, setCustomSubs] = useState<Record<string, { label: string }[]>>({
     needs: [], wants: [], savings: [],
@@ -710,6 +717,43 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     () => budgetRecords.some(b => b.month === selectedMonth),
     [budgetRecords, selectedMonth],
   );
+  const showNotice = useCallback((label: string) => {
+    if (pendingDeleteRef.current) {
+      pendingDeleteRef.current();
+      pendingDeleteRef.current = null;
+    }
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndoLabel(label);
+    setUndoHasAction(false);
+    setUndoVisible(true);
+    undoTimer.current = setTimeout(() => {
+      setUndoVisible(false);
+    }, 4000);
+  }, []);
+  const lockedOwnerName = useCallback((createdByUserId?: string) => (
+    memberDisplayName(ledgerMembers, createdByUserId) ?? 'This member'
+  ), [ledgerMembers]);
+  const canEditCategoryId = useCallback((categoryId?: string) => {
+    if (!categoryId) return true;
+    const category = categories.find(item => item.id === categoryId);
+    return !category || sessionRepo.canEdit(category.createdByUserId, category.ledgerId);
+  }, [categories, sessionRepo]);
+  const canEditBudgetKey = useCallback((key: string) => {
+    if (key.startsWith('bill:')) {
+      const [, , billId] = key.split(':');
+      const ruleId = billId ? ruleIdFromBillId(billId) : '';
+      const rule = recurringRules.find(item => item.id === ruleId);
+      return !rule || sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId);
+    }
+    const [groupKey, label] = key.split(':') as [SpendGroup['key'] | undefined, string | undefined];
+    if (!groupKey || !label) return true;
+    const sub = visibleSpendGroups.find(g => g.key === groupKey)?.subs.find(s => s.label === label);
+    if (sub?.cat && !canEditCategoryId(sub.cat)) return false;
+    const existing = budgetRecords.find(b => (
+      (sub?.cat && b.category === sub.cat) || (b.group === groupKey && b.label === label)
+    ) && b.month === selectedMonth);
+    return !existing || sessionRepo.canEdit(existing.createdByUserId, existing.ledgerId);
+  }, [budgetRecords, canEditCategoryId, recurringRules, selectedMonth, sessionRepo, visibleSpendGroups]);
   const copyFromPreviousMonth = () => {
     const prevKey = monthKeyFromOffset(selectedMonth, -1);
     budgetRecords
@@ -734,11 +778,15 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
 
 
-  const syncBudgetRecord = (key: string, v: number) => {
-    if (key.startsWith('bill:')) {
-      const [, , billId] = key.split(':');
-      if (billId) recurringRulesRepo.update(ruleIdFromBillId(billId), { amount: v, updatedByUserId: 'local' });
-      return;
+	  const syncBudgetRecord = (key: string, v: number) => {
+    if (!canEditBudgetKey(key)) {
+      showNotice('This item is locked by its owner.');
+      return false;
+    }
+	    if (key.startsWith('bill:')) {
+	      const [, , billId] = key.split(':');
+	      if (billId) recurringRulesRepo.update(ruleIdFromBillId(billId), { amount: v, updatedByUserId: 'local' });
+	      return true;
     }
     const [groupKey, label] = key.split(':') as [SpendGroup['key'] | undefined, string | undefined];
     if (!groupKey || !label) return;
@@ -764,12 +812,17 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         amount: v,
       });
     }
-  };
+    return true;
+	  };
 
-  const commitBudget = (key: string, value: number) => {
-    setBudgets(b => ({ ...b, [key]: value }));
-    syncBudgetRecord(key, value);
-  };
+	  const commitBudget = (key: string, value: number) => {
+    if (!canEditBudgetKey(key)) {
+      showNotice('This item is locked by its owner.');
+      return;
+    }
+	    setBudgets(b => ({ ...b, [key]: value }));
+	    syncBudgetRecord(key, value);
+	  };
 
   // Persist whatever the keypad has built for the active row, if it parses.
   // Plain functions (not memoized) so each call uses the live commit closure —
@@ -787,8 +840,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     onKeypadOpenChange?.(open);
   }, [onKeypadOpenChange]);
 
-  const startAmountEdit = (key: string, value: number) => {
-    const wasOpen = editingKeyRef.current !== null;
+	  const startAmountEdit = (key: string, value: number) => {
+    if (!canEditBudgetKey(key)) {
+      showNotice('This item is locked by its owner.');
+      return;
+    }
+	    const wasOpen = editingKeyRef.current !== null;
     // Switching rows mid-edit: commit the one we're leaving first. editingKey goes
     // straight from one key to the next (never null), so the keypad and tab bar
     // don't blink between rows.
@@ -847,20 +904,34 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     };
   };
 
-  const removeSub = (gKey: string, sub: Pick<SpendSub, 'cat' | 'label'>) => {
-    const label = sub.label;
-    saveSnapshot();
-    setRemovedSubs(prev => new Set([...prev, bKey(gKey, label)]));
-    setBudgets(b => { const n = { ...b }; delete n[bKey(gKey, label)]; return n; });
-    showUndo(`Removed ${label}`, () => {
-      const category = categories.find(cat => cat.id === sub.cat);
-      if (category) categoriesRepo.update(category.id, { archived: true, updatedByUserId: 'local' });
-    });
-  };
+	  const removeSub = (gKey: string, sub: Pick<SpendSub, 'cat' | 'label'>) => {
+	    const label = sub.label;
+    const category = categories.find(cat => cat.id === sub.cat);
+    if (category && !sessionRepo.canEdit(category.createdByUserId, category.ledgerId)) {
+      showNotice(`${lockedOwnerName(category.createdByUserId)} has locked edits for this category.`);
+      return;
+    }
+    const rowKey = bKey(gKey, label);
+    if (!canEditBudgetKey(rowKey)) {
+      showNotice('This budget is locked by its owner.');
+      return;
+    }
+	    saveSnapshot();
+	    setRemovedSubs(prev => new Set([...prev, rowKey]));
+	    setBudgets(b => { const n = { ...b }; delete n[rowKey]; return n; });
+	    showUndo(`Removed ${label}`, () => {
+	      if (category) categoriesRepo.update(category.id, { archived: true, updatedByUserId: 'local' });
+	    });
+	  };
 
-  const removeBill = (bill: Bill) => {
-    const ruleId = typeof bill.meta?.recurringRuleId === 'string' ? bill.meta.recurringRuleId : ruleIdFromBillId(bill.id);
-    saveSnapshot();
+	  const removeBill = (bill: Bill) => {
+	    const ruleId = typeof bill.meta?.recurringRuleId === 'string' ? bill.meta.recurringRuleId : ruleIdFromBillId(bill.id);
+    const rule = recurringRules.find(item => item.id === ruleId);
+    if (rule && !sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId)) {
+      showNotice(`${lockedOwnerName(rule.createdByUserId)} has locked edits for this bill.`);
+      return;
+    }
+	    saveSnapshot();
     setRemovedBills(prev => new Set([...prev, bill.id]));
     showUndo(`Removed ${bill.name}`, () => {
       recurringRulesRepo.delete(ruleId);
@@ -972,9 +1043,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setCategoryFormError('');
   };
 
-  const saveCategoryEdit = (): boolean => {
-    if (!editingCategory) return false;
-    const label = categoryLabelDraft.trim();
+	  const saveCategoryEdit = (): boolean => {
+	    if (!editingCategory) return false;
+    if (!canEditCategoryId(editingCategory.id)) {
+      showNotice(`${lockedOwnerName(editingCategory.createdByUserId)} has locked edits for this category.`);
+      return false;
+    }
+	    const label = categoryLabelDraft.trim();
     if (!label) {
       setCategoryFormError('Category name is required');
       return false;
@@ -1033,14 +1108,17 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       meta: nextMeta,
       updatedByUserId: 'local',
     });
-    budgetRecords
-      .filter(b => b.category === editingCategory.id || (b.group === editingCategory.group && b.label === editingCategory.label))
-      .forEach(b => budgetsRepo.update(b.id, {
-        group: actualGroup,
-        category: editingCategory.id,
-        label,
-        icon: categoryIconDraft,
-    }));
+	    budgetRecords
+	      .filter(b => b.category === editingCategory.id || (b.group === editingCategory.group && b.label === editingCategory.label))
+	      .forEach(b => {
+        if (!sessionRepo.canEdit(b.createdByUserId, b.ledgerId)) return;
+        budgetsRepo.update(b.id, {
+          group: actualGroup,
+          category: editingCategory.id,
+          label,
+          icon: categoryIconDraft,
+        });
+      });
     const oldKey = bKey(editingCategory.group, editingCategory.label);
     const newKey = bKey(actualGroup, label);
     setBudgets(prev => {
@@ -1063,6 +1141,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     removeSub(editingCategory.group, { cat: editingCategory.id, label: editingCategory.label });
     closeCategoryEditor();
   };
+  const canEditEditingCategory = !editingCategory || canEditCategoryId(editingCategory.id);
 
   const groupTotals = useMemo(() => {
     const t: Record<string, number> = {};
@@ -1425,19 +1504,20 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                      const subGoalSaved = subCat && typeof subCat.meta?.goalSaved === 'number' ? subCat.meta.goalSaved as number : 0;
 	                      const subGoalPct = subGoalTarget > 0 ? Math.min(100, Math.round(subGoalSaved / subGoalTarget * 100)) : 0;
 	                      const subBudget = budgets[rowKey] ?? sub.budget;
+                      const canEditRow = canEditBudgetKey(rowKey) && canEditCategoryId(sub.cat);
 	                      return (
-                        <CollapsingRow key={sub.cat} removing={isRemoving}>
-                          <SwipeRow onRemove={() => handleRemoveSub(g.key, sub)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
-                            <TouchableOpacity
-                              onPress={() => openCategoryEditor(sub.cat)}
+	                        <CollapsingRow key={sub.cat} removing={isRemoving}>
+	                          <SwipeRow onRemove={canEditRow ? () => handleRemoveSub(g.key, sub) : undefined} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
+	                            <TouchableOpacity
+	                              onPress={() => openCategoryEditor(sub.cat)}
                               activeOpacity={0.7}
                               delayPressIn={0}
                               style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
-                              accessibilityRole="button"
-                              accessibilityLabel={`Edit ${sub.label} category`}
-                              accessibilityHint="Swipe left to delete"
-                              accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-                              onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, sub); }}
+	                              accessibilityRole="button"
+	                              accessibilityLabel={`Edit ${sub.label} category`}
+	                              accessibilityHint={canEditRow ? 'Swipe left to delete' : undefined}
+	                              accessibilityActions={canEditRow ? [{ name: 'delete', label: 'Delete' }] : undefined}
+	                              onAccessibilityAction={canEditRow ? (event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, sub); } : undefined}
                             >
                               <View style={[styles.rowIcon, { backgroundColor: `${groupColor}26` }]}>
                                 <Icon name={sub.icon} size={15} color={groupColor} stroke={1.6} />
@@ -1460,11 +1540,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                 active={editingKey === rowKey}
                                 color={p.textSec}
                                 accentColor={theme.accent.dot}
-                                underlineColor={p.hairline}
-                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
-                                onMeasured={scrollEditIntoView}
-                                accessibilityLabel={`Edit ${sub.label} budget`}
-                              />
+	                                underlineColor={p.hairline}
+	                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
+	                                onMeasured={scrollEditIntoView}
+	                                accessibilityLabel={`Edit ${sub.label} budget`}
+                                  disabled={!canEditRow}
+	                              />
                             </TouchableOpacity>
                           </SwipeRow>
                         </CollapsingRow>
@@ -1478,19 +1559,20 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                      const customCat = categories.find(c => c.group === (g.key as GroupKey) && c.label.toLowerCase() === sub.label.toLowerCase());
 	                      const spendSub = visibleSpendGroups.find(group => group.key === g.key)?.subs.find(item => item.label.toLowerCase() === sub.label.toLowerCase());
 	                      const subBudget = budgets[rowKey] ?? spendSub?.budget ?? 0;
+                      const canEditRow = canEditBudgetKey(rowKey) && (!customCat || canEditCategoryId(customCat.id));
 	                      return (
-                        <CollapsingRow key={sub.label} removing={isRemoving}>
-                          <SwipeRow onRemove={() => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label })} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
+	                        <CollapsingRow key={sub.label} removing={isRemoving}>
+	                          <SwipeRow onRemove={canEditRow ? () => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }) : undefined} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                             <TouchableOpacity
                               onPress={() => customCat && openCategoryEditor(customCat.id)}
                               activeOpacity={customCat ? 0.7 : 1}
                               delayPressIn={0}
                               style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
-                              accessibilityRole="button"
-                              accessibilityLabel={`Edit ${sub.label} category`}
-                              accessibilityHint="Swipe left to delete"
-                              accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-                              onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }); }}
+	                              accessibilityRole="button"
+	                              accessibilityLabel={`Edit ${sub.label} category`}
+	                              accessibilityHint={canEditRow ? 'Swipe left to delete' : undefined}
+	                              accessibilityActions={canEditRow ? [{ name: 'delete', label: 'Delete' }] : undefined}
+	                              onAccessibilityAction={canEditRow ? (event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }); } : undefined}
                             >
                               <View style={[styles.rowIcon, { backgroundColor: groupColor + '26' }]}>
                                 <Icon name={customCat?.icon ?? 'tag'} size={14} color={groupColor} stroke={1.5} />
@@ -1504,10 +1586,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                 color={p.textSec}
                                 accentColor={theme.accent.dot}
                                 underlineColor={p.hairline}
-                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
-                                onMeasured={scrollEditIntoView}
-                                accessibilityLabel={`Edit ${sub.label} budget`}
-                              />
+	                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
+	                                onMeasured={scrollEditIntoView}
+	                                accessibilityLabel={`Edit ${sub.label} budget`}
+                                  disabled={!canEditRow}
+	                              />
                             </TouchableOpacity>
                           </SwipeRow>
                         </CollapsingRow>
@@ -1521,21 +1604,23 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                           <Text style={[TYPE.labelSm, { color: p.textTer }]}>Recurring</Text>
                         </View>
                         {groupBills.map((bill, bi) => {
-                          const isLast = bi === groupBills.length - 1;
-                          const isBillRemoving = pendingRemoveKeys.has(bill.id);
-                          return (
-                            <CollapsingRow key={bill.id} removing={isBillRemoving}>
-                            <SwipeRow onRemove={() => handleRemoveBill(bill)} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
+	                          const isLast = bi === groupBills.length - 1;
+	                          const isBillRemoving = pendingRemoveKeys.has(bill.id);
+                          const rowKey = billKey(g.key, bill.id);
+                          const canEditRow = canEditBudgetKey(rowKey);
+	                          return (
+	                            <CollapsingRow key={bill.id} removing={isBillRemoving}>
+	                            <SwipeRow onRemove={canEditRow ? () => handleRemoveBill(bill) : undefined} onOpen={handleSwipeOpen} onClose={handleSwipeClose} scrollRef={scrollViewRef} tapRef={outerTapRef}>
                               <TouchableOpacity
                                 onPress={() => openCategoryEditor(bill.cat)}
                                 activeOpacity={0.7}
                                 delayPressIn={0}
                                 style={[styles.editRow, { borderBottomWidth: isLast ? 0 : 1, borderBottomColor: p.hairline }]}
-                                accessibilityRole="button"
-                                accessibilityLabel={`Edit ${bill.name} category`}
-                                accessibilityHint="Swipe left to delete"
-                                accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-                                onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveBill(bill); }}
+	                                accessibilityRole="button"
+	                                accessibilityLabel={`Edit ${bill.name} category`}
+	                                accessibilityHint={canEditRow ? 'Swipe left to delete' : undefined}
+	                                accessibilityActions={canEditRow ? [{ name: 'delete', label: 'Delete' }] : undefined}
+	                                onAccessibilityAction={canEditRow ? (event) => { if (event.nativeEvent.actionName === 'delete') handleRemoveBill(bill); } : undefined}
                               >
                                 <View style={[styles.rowIcon, { backgroundColor: `${categoryGroupColor(bill.cat, categories, theme.dark)}26` }]}>
                                   <Icon name={bill.icon} size={15} color={categoryGroupColor(bill.cat, categories, theme.dark)} stroke={1.6} />
@@ -1545,15 +1630,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                   <Text style={[TYPE.caption, { color: p.textSec, marginTop: 1 }]}>{bill.dueDate}</Text>
                                 </View>
                                 <EditableBudgetAmount
-                                  value={budgets[billKey(g.key, bill.id)] ?? bill.amount}
-                                  active={editingKey === billKey(g.key, bill.id)}
+	                                  value={budgets[rowKey] ?? bill.amount}
+	                                  active={editingKey === rowKey}
                                   color={p.textSec}
                                   accentColor={theme.accent.dot}
                                   underlineColor={p.hairline}
-                                  onStartEdit={() => startAmountEdit(billKey(g.key, bill.id), budgets[billKey(g.key, bill.id)] ?? bill.amount)}
-                                  onMeasured={scrollEditIntoView}
-                                  accessibilityLabel={`Edit ${bill.name} budget`}
-                                />
+	                                  onStartEdit={() => startAmountEdit(rowKey, budgets[rowKey] ?? bill.amount)}
+	                                  onMeasured={scrollEditIntoView}
+	                                  accessibilityLabel={`Edit ${bill.name} budget`}
+                                    disabled={!canEditRow}
+	                                />
                               </TouchableOpacity>
                             </SwipeRow>
                             </CollapsingRow>
@@ -1642,6 +1728,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
         goalDeadline={categoryGoalDeadline}
         nameError={duplicateNameError}
         formError={categoryFormError}
+        canEdit={canEditEditingCategory}
         notes={categoryNotes}
         onLabelChange={(v) => { setCategoryLabelDraft(v); if (duplicateNameError) setDuplicateNameError(false); if (categoryFormError) setCategoryFormError(''); }}
         onIconChange={setCategoryIconDraft}
@@ -1722,7 +1809,7 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
 
 function CategoryEditSheet({
   theme, category, addingForGroup, label, icon, group, goalTarget, goalSaved,
-  budget, goalDeadline, nameError, formError, notes,
+  budget, goalDeadline, nameError, formError, canEdit, notes,
   onLabelChange, onIconChange, onGroupChange, onGoalTargetChange, onGoalSavedChange,
   onBudgetChange, onGoalDeadlineChange, onNotesChange,
   onClose, onSave, onDelete, onAddNew,
@@ -1739,6 +1826,7 @@ function CategoryEditSheet({
   goalDeadline: string;
   nameError: boolean;
   formError: string;
+  canEdit: boolean;
   notes: string;
   onLabelChange: (v: string) => void;
   onIconChange: (v: string) => void;
@@ -1942,7 +2030,7 @@ function CategoryEditSheet({
     <BottomSheetModal
       ref={sheetRef}
       index={0}
-      snapPoints={['92%']}
+      snapPoints={[showGoalFields ? '82%' : '62%']}
       enableDynamicSizing={false}
       enablePanDownToClose
       onDismiss={handleDismiss}
@@ -1986,7 +2074,7 @@ function CategoryEditSheet({
         >
           {/* Hero — tap circle to open native popup menu */}
           <View style={[styles.catHero, compactSheet && styles.catHeroCompact]}>
-            <Host ignoreSafeArea="all" style={{ width: 52, height: 52 }}>
+	            <Host ignoreSafeArea="all" style={{ width: 52, height: 52 }} pointerEvents={canEdit ? 'auto' : 'none'}>
               <Menu
                 label={
                   <View
@@ -2007,9 +2095,10 @@ function CategoryEditSheet({
                   <SwiftButton
                     key={opt}
                     systemImage={opt === icon ? 'checkmark' : undefined}
-                    onPress={() => {
-                      iconManuallySet.current = true;
-                      onIconChange(opt);
+	                    onPress={() => {
+                      if (!canEdit) return;
+	                      iconManuallySet.current = true;
+	                      onIconChange(opt);
                     }}
                     label={ICON_DISPLAY_NAMES[opt] ?? opt}
                   />
@@ -2025,8 +2114,9 @@ function CategoryEditSheet({
           <SegmentedControl
             values={GROUP_OPTIONS.map(o => o.label)}
             selectedIndex={selectedGroupIdx >= 0 ? selectedGroupIdx : 0}
-            onChange={(e) => {
-              const opt = GROUP_OPTIONS[e.nativeEvent.selectedSegmentIndex];
+	            onChange={(e) => {
+              if (!canEdit) return;
+	              const opt = GROUP_OPTIONS[e.nativeEvent.selectedSegmentIndex];
               if (opt) onGroupChange(opt.value);
             }}
             tintColor={theme.accent.dot}
@@ -2039,11 +2129,12 @@ function CategoryEditSheet({
           />
 
           {/* Primary field card: Name, Budget, Notes */}
-          <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 8 : 12 }]}>
+	          <View pointerEvents={canEdit ? 'auto' : 'none'} style={[styles.catFieldCard, !canEdit && styles.lockedFields, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 8 : 12 }]}>
             <View style={[fieldRowStyle, sep]}>
               <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Name</Text>
               <TextInput
-                value={label}
+	                value={label}
+                  editable={canEdit}
                 accessibilityLabel="Category name"
                 onChangeText={(next) => {
                   onLabelChange(next);
@@ -2069,13 +2160,14 @@ function CategoryEditSheet({
                 color={theme.text}
                 accentColor={theme.accent.dot}
                 underlineColor={theme.hairline}
-                onActivate={() => activateNumField('budget', budgetDisplay)}
+	                onActivate={() => { if (canEdit) activateNumField('budget', budgetDisplay); }}
               />
             </View>
             <View style={fieldRowStyle}>
               <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Notes</Text>
               <TextInput
-                value={notes}
+	                value={notes}
+                  editable={canEdit}
                 accessibilityLabel="Category notes"
                 onChangeText={onNotesChange}
                 onFocus={() => { if (activeNumField) closeNumKeypad(); }}
@@ -2097,7 +2189,7 @@ function CategoryEditSheet({
           {/* Goal fields — compact date pickers, no inline expansion */}
           {showGoalFields && (
             <>
-              <View style={[styles.catFieldCard, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 10 : 14 }]}>
+	              <View pointerEvents={canEdit ? 'auto' : 'none'} style={[styles.catFieldCard, !canEdit && styles.lockedFields, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 10 : 14 }]}>
                 <View ref={fieldRowRefs.target} style={[fieldRowStyle, sep]}>
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target</Text>
                   <SheetNumericField
@@ -2108,7 +2200,7 @@ function CategoryEditSheet({
                     color={theme.text}
                     accentColor={theme.accent.dot}
                     underlineColor={theme.hairline}
-                    onActivate={() => activateNumField('target', goalTargetDisplay)}
+	                    onActivate={() => { if (canEdit) activateNumField('target', goalTargetDisplay); }}
                   />
                 </View>
                 <View ref={fieldRowRefs.saved} style={[fieldRowStyle, sep]}>
@@ -2121,7 +2213,7 @@ function CategoryEditSheet({
                     color={theme.text}
                     accentColor={theme.accent.dot}
                     underlineColor={theme.hairline}
-                    onActivate={() => activateNumField('saved', goalSavedDisplay)}
+	                    onActivate={() => { if (canEdit) activateNumField('saved', goalSavedDisplay); }}
                   />
                 </View>
                 {/* Target date — fixed-height row so the picker never shifts layout */}
@@ -2132,17 +2224,17 @@ function CategoryEditSheet({
                       <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
                         <DatePicker
                           selection={deadlineDate}
-                          onDateChange={(d) => { setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
+	                          onDateChange={(d) => { if (!canEdit) return; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
                           displayedComponents={['date']}
                           modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
                         />
                       </Host>
-                      <Pressable onPress={() => { setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8}>
+	                      <Pressable onPress={() => { if (!canEdit) return; setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8} disabled={!canEdit}>
                         <Icon name="close" size={11} color={theme.textTer} stroke={2} />
                       </Pressable>
                     </View>
                   ) : (
-                    <Pressable onPress={() => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only">
+	                    <Pressable onPress={() => { if (!canEdit) return; const d = new Date(); d.setFullYear(d.getFullYear() + 1); setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only" disabled={!canEdit}>
                       <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
                     </Pressable>
                   )}
@@ -2172,13 +2264,18 @@ function CategoryEditSheet({
             iOS keyboard never registers with the sheet: it simply overlays, the
             sheet stays anchored, and this footer stays put under the container. */}
         <View style={[styles.catSheetFooter, { paddingBottom: sheetBottomPadding }]}>
-          <SheetPrimaryButton
-            label={isAddMode ? 'Add category' : 'Save category'}
-            onPress={handleSave}
-            theme={theme}
-            disabled={!canSaveCategory}
-          />
-          {!isAddMode && (
+	          <SheetPrimaryButton
+	            label={isAddMode ? 'Add category' : 'Save category'}
+	            onPress={handleSave}
+	            theme={theme}
+	            disabled={!canSaveCategory || !canEdit}
+	          />
+            {!isAddMode && !canEdit && (
+              <Text style={[TYPE.caption, styles.lockedCategoryCopy, { color: theme.textSec }]}>
+                This category is locked by its owner.
+              </Text>
+            )}
+	          {!isAddMode && canEdit && (
             <Pressable
               onPress={onDelete}
               pointerEvents="box-only"
@@ -2398,6 +2495,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: LAYOUT.rowPadY,
+  },
+  lockedFields: {
+    opacity: 0.58,
+  },
+  lockedCategoryCopy: {
+    textAlign: 'center',
+    marginTop: SPACE.md,
   },
   catHero: {
     alignItems: 'center',

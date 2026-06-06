@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   View,
   Animated,
@@ -37,7 +37,7 @@ import {
   TxSheetMount, type TxSheetHandle,
   BillSheetMount, type BillSheetHandle,
 } from './src/components/sheetMounts';
-import type { Bill, Transaction } from './src/repositories/types';
+import type { AppSession, Bill, Ledger, LedgerMember, Transaction } from './src/repositories/types';
 
 type Screen = 'home' | 'insights' | 'activity' | 'budget';
 
@@ -77,7 +77,7 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
 
 export function DashboardApp() {
   const { theme, dark, metaFlag, setMetaFlag } = useTheme();
-  const { transactionsRepo, devDataRepo, incomeRepo } = useRepositories();
+  const { transactionsRepo, devDataRepo, incomeRepo, sessionRepo } = useRepositories();
   const incomes = useRepositoryList(incomeRepo);
   const { showToast } = useAppFeedback();
 
@@ -97,6 +97,21 @@ export function DashboardApp() {
   const [activityFilterToken, setActivityFilterToken] = useState(0);
   const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
   const [morphResetToken, setMorphResetToken] = useState(0);
+  // Optimistic delete: store the ID of a transaction that should be hidden from
+  // the activity list immediately, before the repo delete + requery lands.
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [session, setSession] = useState<AppSession>(() => sessionRepo.getSession());
+  const [ledgerMembers, setLedgerMembers] = useState<LedgerMember[]>(() => sessionRepo.listMembers());
+  const [ledgers, setLedgers] = useState<Ledger[]>(() => sessionRepo.listLedgers());
+
+  const refreshSessionState = useCallback(() => {
+    const nextSession = sessionRepo.getSession();
+    setSession(nextSession);
+    setLedgerMembers(sessionRepo.listMembers(nextSession.activeLedgerId));
+    setLedgers(sessionRepo.listLedgers());
+  }, [sessionRepo]);
+
+  useEffect(() => sessionRepo.subscribe(refreshSessionState), [refreshSessionState, sessionRepo]);
 
   // The inline budget keypad asks us to hide the floating tab bar so the pad has
   // the bottom of the screen to itself (the pad mirrors the system keyboard slot).
@@ -146,9 +161,20 @@ export function DashboardApp() {
   useFocusEffect(resetHomeMorphReaction);
 
   const handleDeleteTx = useCallback((tx: Transaction) => {
-    transactionsRepo.delete(tx.id);
-    showToast('Transaction deleted', () => transactionsRepo.create(txToCreateInput(tx)));
-  }, [showToast, transactionsRepo]);
+    if (!transactionsRepo.canEdit(tx)) {
+      const ownerName = ledgerMembers.find(member => member.userId === tx.createdByUserId)?.displayName;
+      showToast(`${ownerName ?? 'This member'} has locked edits for their items`);
+      return;
+    }
+    // Hide the row immediately in the activity list before the repo delete lands.
+    setPendingDeleteId(tx.id);
+    // Defer the actual delete one frame so the row-exit renders first.
+    requestAnimationFrame(() => {
+      transactionsRepo.delete(tx.id);
+      setPendingDeleteId(null);
+      showToast('Transaction deleted', () => transactionsRepo.create(txToCreateInput(tx)));
+    });
+  }, [ledgerMembers, showToast, transactionsRepo]);
 
   const sampleDataEnabled = useSyncExternalStore(
     useCallback((listener) => devDataRepo.subscribe(listener), [devDataRepo]),
@@ -158,8 +184,22 @@ export function DashboardApp() {
 
   const handleSampleDataEnabledChange = useCallback((enabled: boolean) => {
     devDataRepo.setSeedDataEnabled(enabled);
+    refreshSessionState();
     showToast(enabled ? 'Sample data reloaded' : 'Sample data cleared');
-  }, [devDataRepo, showToast]);
+  }, [devDataRepo, refreshSessionState, showToast]);
+
+  const handleCurrentUserChange = useCallback((userId: string) => {
+    sessionRepo.setCurrentUserId(userId);
+    const member = ledgerMembers.find(item => item.userId === userId);
+    showToast(`Viewing as ${member?.displayName ?? userId}`);
+  }, [ledgerMembers, sessionRepo, showToast]);
+
+  const handleCurrentMemberEditLockChange = useCallback((allowOthersToEditMyItems: boolean) => {
+    const member = ledgerMembers.find(item => item.userId === session.currentUserId);
+    if (!member) return;
+    sessionRepo.updateMember(member.id, { allowOthersToEditMyItems });
+    showToast(allowOthersToEditMyItems ? 'Others can edit your items' : 'Only you can edit your items');
+  }, [ledgerMembers, session.currentUserId, sessionRepo, showToast]);
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -286,11 +326,12 @@ export function DashboardApp() {
   const insightsScreen = useMemo(() => (
     <MemoInsightsScreen
       theme={theme}
+      active={screen === 'insights'}
       onOpenDrawer={openDrawer}
       onViewActivity={navigateToActivity}
       onOpenInsight={handleInsightTarget}
     />
-  ), [handleInsightTarget, navigateToActivity, openDrawer, theme]);
+  ), [handleInsightTarget, navigateToActivity, openDrawer, screen, theme]);
 
   const activityScreen = useMemo(() => (
     <MemoActivityScreen
@@ -301,8 +342,9 @@ export function DashboardApp() {
       onOverlayOpenChange={handleOverlayOpenChange}
       initialFilter={activityFilter}
       filterToken={activityFilterToken}
+      pendingDeleteId={pendingDeleteId}
     />
-  ), [activityFilter, activityFilterToken, handleOverlayOpenChange, openDrawer, openTx, prepareTx, theme]);
+  ), [activityFilter, activityFilterToken, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen
@@ -386,6 +428,11 @@ export function DashboardApp() {
             onClose={closeDrawer}
             sampleDataEnabled={sampleDataEnabled}
             onSampleDataEnabledChange={handleSampleDataEnabledChange}
+            activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
+            currentUserId={session.currentUserId}
+            ledgerMembers={ledgerMembers}
+            onCurrentUserChange={handleCurrentUserChange}
+            onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
           />
         </View>
 

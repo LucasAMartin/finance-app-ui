@@ -29,23 +29,28 @@ interface BarProps {
   /** <1 dims an in-progress (partial) period so its short bar doesn't misread. */
   fillOpacity: number;
   index: number;
-  /** New identity whenever the series changes → replays the grow. */
-  playKey: object;
+  play: boolean;
 }
 
 // One bar, owning its own grow animation so the stagger can offset each by
 // index without violating hook rules (a shared per-index loop can't). Animates
 // the rect's height/y (which react-native-svg drives on the UI thread) rather
 // than a scaleY transform, which animatedProps doesn't propagate for SVG.
-function Bar({ x, width, fullHeight, rx, baseY, fill, fillOpacity, index, playKey }: BarProps) {
+// The parent remounts this component (via React key) to replay the animation.
+function Bar({ x, width, fullHeight, rx, baseY, fill, fillOpacity, index, play }: BarProps) {
   const grow = useSharedValue(0);
   useEffect(() => {
+    if (!play) {
+      grow.value = 0;
+      return;
+    }
     grow.value = 0;
     grow.value = withDelay(
       index * STAGGER_MS,
       withTiming(1, { duration: GROW_MS, easing: Easing.out(Easing.cubic) }),
     );
-  }, [playKey, index, grow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [play, index]);
 
   // Grow up out of the baseline: height climbs, top edge (y) follows it up.
   const animatedProps = useAnimatedProps(() => {
@@ -82,6 +87,8 @@ interface Props {
   /** Index of an in-progress (partial) period, dimmed so its short bar reads as
    *  "not done yet" rather than a real dip. */
   partialIdx?: number | null;
+  /** Starts the grow animation only when true; false holds bars at the baseline. */
+  play?: boolean;
   /** Fires with the active bar index while scrubbing, `null` on release. */
   onScrub?: (index: number | null) => void;
   /** Fires on a discrete tap; parent handles toggle (same index → deselect). */
@@ -93,6 +100,7 @@ interface Props {
 // (faint by default, the stronger `selectedColor` for the scrubbed bar so it
 // reads as highlighted). Neutral only — no chart accent. Long-press drag
 // scrubs; the parent surfaces the selected bar's total, like the hero line.
+// The parent remounts this component (via React key) to replay bar animations.
 export function TrendBars({
   values,
   labels,
@@ -104,6 +112,7 @@ export function TrendBars({
   labelColor,
   selectedLabelColor,
   partialIdx,
+  play = true,
   onScrub,
   onTap,
 }: Props) {
@@ -124,9 +133,6 @@ export function TrendBars({
     return { bars, band, baseY, barW };
   }, [values, width, height, n]);
 
-  // New identity per data change → bars replay; selection/scrub re-renders keep
-  // the same `values` reference, so scrubbing never retriggers the grow.
-  const playKey = useMemo(() => ({}), [values]);
 
   const tick = () => Haptics.selectionAsync();
   const emit = (idx: number | null) => onScrub?.(idx);
@@ -201,7 +207,7 @@ export function TrendBars({
             fill={i === selectedIdx ? selectedColor : barColor}
             fillOpacity={i === partialIdx && i !== selectedIdx ? 0.5 : 1}
             index={i}
-            playKey={playKey}
+            play={play}
           />
         ))}
 

@@ -7,8 +7,18 @@ import { SQLiteMerchantLogosRepo } from './merchantLogos';
 import { SQLiteRecurringRulesRepo } from './recurringRules';
 import { SQLiteSettingsRepo } from './settings';
 import { SQLiteTransactionsRepo } from './transactions';
-import { isDevSeedDataEnabled, setDevSeedDataEnabled } from './db';
-import type { DevDataRepo, RepoListener, Repositories } from '../types';
+import {
+  canEditRecord,
+  getSession,
+  isDevSeedDataEnabled,
+  listLedgerMembers,
+  listLedgers,
+  setCurrentUserId,
+  setDevSeedDataEnabled,
+  subscribeSession,
+  updateLedgerMember,
+} from './db';
+import type { DevDataRepo, LedgerMember, RepoListener, Repositories, SessionRepo } from '../types';
 
 class SQLiteDevDataRepo implements DevDataRepo {
   private listeners = new Set<RepoListener>();
@@ -23,6 +33,49 @@ class SQLiteDevDataRepo implements DevDataRepo {
     setDevSeedDataEnabled(enabled);
     this.onDataChanged();
     this.listeners.forEach(listener => listener());
+  }
+
+  subscribe(listener: RepoListener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
+
+class SQLiteSessionRepo implements SessionRepo {
+  private listeners = new Set<RepoListener>();
+
+  constructor(private onSessionChanged: () => void) {
+    subscribeSession(() => {
+      this.onSessionChanged();
+      this.listeners.forEach(listener => listener());
+    });
+  }
+
+  getSession() {
+    return getSession();
+  }
+
+  setCurrentUserId(userId: string): void {
+    setCurrentUserId(userId);
+  }
+
+  listLedgers() {
+    return listLedgers();
+  }
+
+  listMembers(ledgerId?: string) {
+    return listLedgerMembers(ledgerId);
+  }
+
+  updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>) {
+    const member = updateLedgerMember(id, patch);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return member;
+  }
+
+  canEdit(createdByUserId?: string, ledgerId?: string): boolean {
+    return canEditRecord(createdByUserId, ledgerId);
   }
 
   subscribe(listener: RepoListener) {
@@ -50,6 +103,7 @@ export function createSQLiteRepositories(): Repositories {
     recurringRulesRepo.refresh();
     attachmentsRepo.refresh();
   };
+  const sessionRepo = new SQLiteSessionRepo(refreshDomainRepos);
 
   return {
     transactionsRepo,
@@ -62,5 +116,6 @@ export function createSQLiteRepositories(): Repositories {
     attachmentsRepo,
     merchantLogosRepo,
     devDataRepo: new SQLiteDevDataRepo(refreshDomainRepos),
+    sessionRepo,
   };
 }
