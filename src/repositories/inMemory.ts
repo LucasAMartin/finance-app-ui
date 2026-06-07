@@ -43,6 +43,7 @@ const DEFAULT_OWNER_USER_ID = 'alex';
 const DEV_PARTNER_USER_ID = 'partner';
 let activeLedgerId = DEFAULT_LEDGER_ID;
 let currentUserId = DEFAULT_OWNER_USER_ID;
+let getPermissionMembers: () => LedgerMember[] = () => SEED_MEMBERS;
 
 const nowIso = () => new Date().toISOString();
 
@@ -104,7 +105,25 @@ function withCreateFields<T extends object>(row: T): T {
   };
 }
 
-function canEditRow(row: any, members = SEED_MEMBERS): boolean {
+function withSeedFields<T extends object>(row: T): T {
+  const now = nowIso();
+  const existing = row as any;
+  return {
+    ...row,
+    ledgerId: existing.ledgerId ?? DEFAULT_LEDGER_ID,
+    createdByUserId: existing.createdByUserId ?? DEFAULT_OWNER_USER_ID,
+    updatedByUserId: existing.updatedByUserId ?? DEFAULT_OWNER_USER_ID,
+    createdAt: existing.createdAt ?? now,
+    updatedAt: existing.updatedAt ?? now,
+    syncStatus: existing.syncStatus ?? 'local',
+  };
+}
+
+function seedRows<T extends object>(rows: T[]): T[] {
+  return rows.map(row => withSeedFields(row));
+}
+
+function canEditRow(row: any, members = getPermissionMembers()): boolean {
   if (!row?.createdByUserId || row.createdByUserId === currentUserId) return true;
   const member = members.find(m => m.ledgerId === (row.ledgerId ?? activeLedgerId) && m.userId === row.createdByUserId);
   return member ? member.allowOthersToEditMyItems !== false : false;
@@ -146,6 +165,23 @@ class InMemoryRepository<T extends { id: string }, CreateInput = Omit<T, 'id'>, 
     this.rows = this.rows.map(row => {
       if (row.id !== id) return row;
       if (!canEditRow(row)) return row;
+      next = {
+        ...row,
+        ...(patch as object),
+        updatedByUserId: currentUserId,
+        updatedAt: nowIso(),
+        syncStatus: 'pending',
+      };
+      return next;
+    });
+    if (next) this.emit();
+    return next ? { ...next } : undefined;
+  }
+
+  forceUpdate(id: string, patch: UpdateInput): T | undefined {
+    let next: T | undefined;
+    this.rows = this.rows.map(row => {
+      if (row.id !== id) return row;
       next = {
         ...row,
         ...(patch as object),
@@ -308,20 +344,21 @@ class InMemoryTransactionsRepo
 
 class InMemoryDevDataRepo implements DevDataRepo {
   private listeners = new Set<RepoListener>();
+  private repos: {
+    transactionsRepo: InMemoryTransactionsRepo;
+    incomeRepo: InMemoryRepository<Income>;
+    billsRepo: InMemoryRepository<Bill>;
+    budgetsRepo: InMemoryRepository<Budget>;
+    categoriesRepo: InMemoryRepository<Category>;
+    recurringRulesRepo: InMemoryRepository<RecurringRule>;
+    attachmentsRepo: InMemoryRepository<Attachment>;
+    ledgersRepo: InMemoryRepository<Ledger>;
+    ledgerMembersRepo: InMemoryRepository<LedgerMember>;
+  };
 
-  constructor(
-    private repos: {
-      transactionsRepo: InMemoryTransactionsRepo;
-      incomeRepo: InMemoryRepository<Income>;
-      billsRepo: InMemoryRepository<Bill>;
-      budgetsRepo: InMemoryRepository<Budget>;
-      categoriesRepo: InMemoryRepository<Category>;
-      recurringRulesRepo: InMemoryRepository<RecurringRule>;
-      attachmentsRepo: InMemoryRepository<Attachment>;
-      ledgersRepo: InMemoryRepository<Ledger>;
-      ledgerMembersRepo: InMemoryRepository<LedgerMember>;
-    },
-  ) {}
+  constructor(repos: InMemoryDevDataRepo['repos']) {
+    this.repos = repos;
+  }
 
   isSeedDataEnabled(): boolean {
     return (
@@ -336,12 +373,12 @@ class InMemoryDevDataRepo implements DevDataRepo {
   }
 
   setSeedDataEnabled(enabled: boolean): void {
-    this.repos.transactionsRepo.replaceAll(enabled ? SEED_TRANSACTIONS : []);
-    this.repos.incomeRepo.replaceAll(enabled ? SEED_INCOME : []);
-    this.repos.billsRepo.replaceAll(enabled ? SEED_BILLS : []);
-    this.repos.budgetsRepo.replaceAll(enabled ? SEED_BUDGETS : []);
-    this.repos.categoriesRepo.replaceAll(enabled ? SEED_CATEGORIES : []);
-    this.repos.recurringRulesRepo.replaceAll(enabled ? SEED_RECURRING_RULES : []);
+    this.repos.transactionsRepo.replaceAll(enabled ? seedRows(SEED_TRANSACTIONS) : []);
+    this.repos.incomeRepo.replaceAll(enabled ? seedRows(SEED_INCOME) : []);
+    this.repos.billsRepo.replaceAll(enabled ? seedRows(SEED_BILLS) : []);
+    this.repos.budgetsRepo.replaceAll(enabled ? seedRows(SEED_BUDGETS) : []);
+    this.repos.categoriesRepo.replaceAll(enabled ? seedRows(SEED_CATEGORIES) : []);
+    this.repos.recurringRulesRepo.replaceAll(enabled ? seedRows(SEED_RECURRING_RULES) : []);
     this.repos.attachmentsRepo.replaceAll([]);
     this.repos.ledgersRepo.replaceAll(enabled ? [SEED_LEDGER] : []);
     this.repos.ledgerMembersRepo.replaceAll(enabled ? SEED_MEMBERS : []);
@@ -356,12 +393,19 @@ class InMemoryDevDataRepo implements DevDataRepo {
 
 class InMemorySessionRepo implements SessionRepo {
   private listeners = new Set<RepoListener>();
+  private ledgersRepo: InMemoryRepository<Ledger>;
+  private ledgerMembersRepo: InMemoryRepository<LedgerMember>;
+  private onSessionChanged: () => void;
 
   constructor(
-    private ledgersRepo: InMemoryRepository<Ledger>,
-    private ledgerMembersRepo: InMemoryRepository<LedgerMember>,
-    private onSessionChanged: () => void,
-  ) {}
+    ledgersRepo: InMemoryRepository<Ledger>,
+    ledgerMembersRepo: InMemoryRepository<LedgerMember>,
+    onSessionChanged: () => void,
+  ) {
+    this.ledgersRepo = ledgersRepo;
+    this.ledgerMembersRepo = ledgerMembersRepo;
+    this.onSessionChanged = onSessionChanged;
+  }
 
   getSession() {
     return { activeLedgerId, currentUserId };
@@ -383,7 +427,13 @@ class InMemorySessionRepo implements SessionRepo {
   }
 
   updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>) {
-    const member = this.ledgerMembersRepo.update(id, patch);
+    const current = this.ledgerMembersRepo.get(id);
+    if (!current) return undefined;
+    const currentMember = this.ledgerMembersRepo.list().find(member => member.userId === currentUserId);
+    const changingAnotherMember = current.userId !== currentUserId;
+    if (changingAnotherMember && patch.allowOthersToEditMyItems !== undefined) return undefined;
+    if (changingAnotherMember && currentMember?.role !== 'owner') return undefined;
+    const member = this.ledgerMembersRepo.forceUpdate(id, patch);
     this.onSessionChanged();
     this.listeners.forEach(listener => listener());
     return member;
@@ -400,17 +450,21 @@ class InMemorySessionRepo implements SessionRepo {
 }
 
 export function createInMemoryRepositories(): Repositories {
-  const transactionsRepo = new InMemoryTransactionsRepo(SEED_TRANSACTIONS);
-  const incomeRepo = new InMemoryRepository<Income>(SEED_INCOME);
-  const billsRepo = new InMemoryRepository<Bill>(SEED_BILLS);
-  const budgetsRepo = new InMemoryRepository<Budget>(SEED_BUDGETS);
+  activeLedgerId = DEFAULT_LEDGER_ID;
+  currentUserId = DEFAULT_OWNER_USER_ID;
+  getPermissionMembers = () => SEED_MEMBERS;
+  const transactionsRepo = new InMemoryTransactionsRepo(seedRows(SEED_TRANSACTIONS));
+  const incomeRepo = new InMemoryRepository<Income>(seedRows(SEED_INCOME));
+  const billsRepo = new InMemoryRepository<Bill>(seedRows(SEED_BILLS));
+  const budgetsRepo = new InMemoryRepository<Budget>(seedRows(SEED_BUDGETS));
   const settingsRepo = new InMemoryRepository<AppSettings, AppSettings>([SEED_SETTINGS]);
-  const categoriesRepo = new InMemoryRepository<Category>(SEED_CATEGORIES);
-  const recurringRulesRepo = new InMemoryRepository<RecurringRule>(SEED_RECURRING_RULES);
+  const categoriesRepo = new InMemoryRepository<Category>(seedRows(SEED_CATEGORIES));
+  const recurringRulesRepo = new InMemoryRepository<RecurringRule>(seedRows(SEED_RECURRING_RULES));
   const attachmentsRepo = new InMemoryRepository<Attachment>([]);
   const merchantLogosRepo = new InMemoryRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>([]);
   const ledgersRepo = new InMemoryRepository<Ledger>([SEED_LEDGER]);
   const ledgerMembersRepo = new InMemoryRepository<LedgerMember>(SEED_MEMBERS);
+  getPermissionMembers = () => ledgerMembersRepo.list();
   const refreshDomainRepos = () => {
     transactionsRepo.refresh();
     incomeRepo.refresh();

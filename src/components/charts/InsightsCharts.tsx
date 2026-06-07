@@ -40,6 +40,9 @@ export interface InsightDetail {
   metrics?: InsightMetric[];
   viz?: SnapshotVizSpec;
   filter?: ActivityInitialFilter;
+  // Period-level insights (daily avg, biggest bin, no-spend) can open the
+  // full spending chart as a secondary action from the insight sheet.
+  showSpendingChart?: boolean;
 }
 
 export interface InsightBin {

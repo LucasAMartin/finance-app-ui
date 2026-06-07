@@ -1,4 +1,3 @@
-import * as SQLite from 'expo-sqlite';
 import {
   SEED_BILLS,
   SEED_BUDGETS,
@@ -11,23 +10,23 @@ import {
 import { shiftedSeedDate } from '../transactionDates';
 export { parseJson } from '../json';
 import type { AppSession, Ledger, LedgerMember, SyncFields, SyncStatus } from '../types';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import { openSQLiteDatabaseSync, type SQLiteDatabaseLike } from './driver';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 export const DEFAULT_LEDGER_ID = 'ledger-default';
 export const DEFAULT_OWNER_USER_ID = 'alex';
 export const DEV_PARTNER_USER_ID = 'partner';
 const DEFAULT_LEDGER_NAME = 'Shared finances';
 
-let db: SQLiteDatabase | null = null;
+let db: SQLiteDatabaseLike | null = null;
 let currentUserId = DEFAULT_OWNER_USER_ID;
 let activeLedgerId = DEFAULT_LEDGER_ID;
 const sessionListeners = new Set<() => void>();
 
-export function getDb(): SQLiteDatabase {
+export function getDb(): SQLiteDatabaseLike {
   if (!db) {
-    db = SQLite.openDatabaseSync(DB_NAME);
+    db = openSQLiteDatabaseSync(DB_NAME);
     configureDb(db);
     migrate(db);
     seedIfEmpty(db);
@@ -35,7 +34,20 @@ export function getDb(): SQLiteDatabase {
   return db;
 }
 
-function configureDb(database: SQLiteDatabase) {
+export function resetSQLiteDatabaseForTests(setup?: (database: SQLiteDatabaseLike) => void): SQLiteDatabaseLike {
+  db?.closeSync?.();
+  db = openSQLiteDatabaseSync(':memory:');
+  currentUserId = DEFAULT_OWNER_USER_ID;
+  activeLedgerId = DEFAULT_LEDGER_ID;
+  sessionListeners.clear();
+  configureDb(db);
+  setup?.(db);
+  migrate(db);
+  seedIfEmpty(db);
+  return db;
+}
+
+function configureDb(database: SQLiteDatabaseLike) {
   database.execSync(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
@@ -44,7 +56,7 @@ function configureDb(database: SQLiteDatabase) {
   `);
 }
 
-function migrate(database: SQLiteDatabase) {
+function migrate(database: SQLiteDatabaseLike) {
   const row = database.getFirstSync<{ user_version: number }>('PRAGMA user_version');
   const version = row?.user_version ?? 0;
   if (version >= DB_VERSION) return;
@@ -387,6 +399,15 @@ function migrate(database: SQLiteDatabase) {
 
       backfillDefaultLedger(database);
     }
+    if (version < 10) {
+      database.execSync(`
+        CREATE TABLE IF NOT EXISTS sync_state (
+          zone_name TEXT PRIMARY KEY NOT NULL,
+          change_token TEXT,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });
   if (version > 0) {
@@ -394,7 +415,7 @@ function migrate(database: SQLiteDatabase) {
   }
 }
 
-function insertSeedTransactions(database: SQLiteDatabase) {
+function insertSeedTransactions(database: SQLiteDatabaseLike) {
   SEED_TRANSACTIONS.forEach(tx => {
     const now = new Date().toISOString();
     database.runSync(
@@ -424,7 +445,7 @@ function insertSeedTransactions(database: SQLiteDatabase) {
   });
 }
 
-function seedIfEmpty(database: SQLiteDatabase) {
+function seedIfEmpty(database: SQLiteDatabaseLike) {
   const row = database.getFirstSync<{ count: number }>('SELECT COUNT(*) as count FROM settings');
   if ((row?.count ?? 0) > 0) return;
 
@@ -466,7 +487,7 @@ export function setDevSeedDataEnabled(enabled: boolean) {
   });
 }
 
-function clearDomainData(database: SQLiteDatabase) {
+function clearDomainData(database: SQLiteDatabaseLike) {
   database.execSync(`
     DELETE FROM attachments;
     DELETE FROM transactions;
@@ -480,7 +501,7 @@ function clearDomainData(database: SQLiteDatabase) {
   `);
 }
 
-function insertSeedDomainData(database: SQLiteDatabase) {
+function insertSeedDomainData(database: SQLiteDatabaseLike) {
   backfillDefaultLedger(database);
   SEED_INCOME.forEach(income => {
     const now = new Date().toISOString();
@@ -595,7 +616,7 @@ function insertSeedDomainData(database: SQLiteDatabase) {
   });
 }
 
-function backfillV2(database: SQLiteDatabase) {
+function backfillV2(database: SQLiteDatabaseLike) {
   const categories = database.getFirstSync<{ count: number }>('SELECT COUNT(*) as count FROM categories');
   if ((categories?.count ?? 0) === 0) {
     SEED_CATEGORIES.forEach(cat => insertCategory(database, cat));
@@ -630,7 +651,7 @@ function backfillV2(database: SQLiteDatabase) {
   }
 }
 
-function insertCategory(database: SQLiteDatabase, cat: (typeof SEED_CATEGORIES)[number]) {
+function insertCategory(database: SQLiteDatabaseLike, cat: (typeof SEED_CATEGORIES)[number]) {
   const now = new Date().toISOString();
   database.runSync(
     `INSERT OR REPLACE INTO categories (
@@ -655,7 +676,7 @@ function insertCategory(database: SQLiteDatabase, cat: (typeof SEED_CATEGORIES)[
   );
 }
 
-function addSyncColumns(database: SQLiteDatabase, table: string) {
+function addSyncColumns(database: SQLiteDatabaseLike, table: string) {
   addColumnIfMissing(database, table, 'ledger_id', `TEXT NOT NULL DEFAULT '${DEFAULT_LEDGER_ID}'`);
   addColumnIfMissing(database, table, 'created_at', 'TEXT');
   addColumnIfMissing(database, table, 'updated_at', 'TEXT');
@@ -670,7 +691,7 @@ function addSyncColumns(database: SQLiteDatabase, table: string) {
   }
 }
 
-function backfillDefaultLedger(database: SQLiteDatabase) {
+function backfillDefaultLedger(database: SQLiteDatabaseLike) {
   const now = new Date().toISOString();
   database.runSync(
     `INSERT OR IGNORE INTO ledgers (
@@ -724,7 +745,7 @@ function backfillDefaultLedger(database: SQLiteDatabase) {
   });
 }
 
-function insertSeedMember(database: SQLiteDatabase, member: {
+function insertSeedMember(database: SQLiteDatabaseLike, member: {
   id: string;
   userId: string;
   displayName: string;
@@ -825,6 +846,14 @@ export function listLedgerMembers(ledgerId = activeLedgerId): LedgerMember[] {
 export function updateLedgerMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>): LedgerMember | undefined {
   const current = getDb().getFirstSync<any>('SELECT * FROM ledger_members WHERE id = ?', id);
   if (!current) return undefined;
+  const actor = getDb().getFirstSync<{ role: string }>(
+    'SELECT role FROM ledger_members WHERE ledger_id = ? AND user_id = ? AND deleted_at IS NULL',
+    current.ledger_id,
+    currentUserId,
+  );
+  const changingAnotherMember = current.user_id !== currentUserId;
+  if (changingAnotherMember && patch.allowOthersToEditMyItems !== undefined) return undefined;
+  if (changingAnotherMember && actor?.role !== 'owner') return undefined;
   const now = new Date().toISOString();
   getDb().runSync(
     `UPDATE ledger_members
@@ -888,13 +917,13 @@ export function syncStatus(value: unknown): SyncStatus {
   return value === 'pending' || value === 'synced' || value === 'conflicted' ? value : 'local';
 }
 
-function columnExists(database: SQLiteDatabase, table: string, column: string): boolean {
+function columnExists(database: SQLiteDatabaseLike, table: string, column: string): boolean {
   return database
     .getAllSync<{ name: string }>(`PRAGMA table_info(${table})`)
     .some(row => row.name === column);
 }
 
-function addColumnIfMissing(database: SQLiteDatabase, table: string, column: string, definition: string) {
+function addColumnIfMissing(database: SQLiteDatabaseLike, table: string, column: string, definition: string) {
   if (!columnExists(database, table, column)) {
     database.execSync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }

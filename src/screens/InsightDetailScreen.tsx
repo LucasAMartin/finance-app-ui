@@ -8,13 +8,16 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
+import * as Haptics from 'expo-haptics';
+import { GlassEffectContainer, Host, Menu, Button as SwiftButton, RNHostView } from '@expo/ui/swift-ui';
+import { buttonStyle, glassEffect } from '@expo/ui/swift-ui/modifiers';
 import { SearchFilterBar } from '../components/SearchFilterBar';
 import { GlassCircleIcon, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 
@@ -34,7 +37,6 @@ import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../reposit
 import type {
   Category,
   Transaction,
-  TransactionCursor,
   TransactionSummaryQuery,
 } from '../repositories/types';
 import {
@@ -45,6 +47,7 @@ import {
   foldTrendSeries,
   type TrendGrain,
   type TrendSlot,
+  type ActivityInitialFilter,
 } from '../selectors/spending';
 import { buildSavedMetric } from '../selectors/savings';
 import { TYPE } from '../typography';
@@ -54,7 +57,7 @@ const CHART_PAD = 16;
 const CHART_W = SCREEN_W - CHART_PAD * 2;
 const CHART_H = 160;
 const DETAIL_CHART_INSET_Y = 20;
-const PAGE_SIZE = 50;
+const DETAIL_TX_LIMIT = 10;
 
 const TIMEFRAMES = ['1W', '1M', '1Y'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
@@ -111,9 +114,15 @@ interface Props {
   target: InsightDetailTarget | null;
   onOpenTx?: (tx: Transaction) => void;
   onClose: () => void;
+  onSeeAll?: (filter: ActivityInitialFilter) => void;
+  /**
+   * Rendered as a native stack route (app/insight.tsx) rather than an in-app
+   * overlay. The route's push/pop handles entrance + the swipe-back gesture, so
+   * the screen skips its own slide-in/out and just sits in place.
+   */
 }
 
-export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props) {
+export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll }: Props) {
   const { transactionsRepo, categoriesRepo, incomeRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const incomes = useRepositoryList(incomeRepo);
@@ -132,9 +141,6 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   const scrim: [string, string, string, string] = [scrimTop, scrimMid, scrimLower, scrimBottom];
   const cardBorder = theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
   const cardTint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
-  const handleOpenTx = useCallback((selected: Transaction) => {
-    onOpenTx?.(selected);
-  }, [onOpenTx]);
 
   // Keep the last target mounted through the slide-out so content doesn't blank.
   const last = useRef<InsightDetailTarget | null>(null);
@@ -302,24 +308,18 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
     trendGrain === 'week' ? 'Weekly' : trendGrain === 'month' ? 'Monthly' : 'Quarterly';
   const trendWindowLabel = `Last ${trendValues.length} ${grainNoun}s`;
 
-  // Trajectory stat: the most recent *completed* period vs the average of the
-  // ones before it. Completed-only keeps the partial current period out of it.
-  const trendStat = useMemo(() => {
-    if (completedVals.length < 2) return null;
-    const lastIdx = trendPartialIdx !== null ? trendSlots.length - 2 : trendSlots.length - 1;
-    const lastSlot = trendSlots[lastIdx];
-    const last = completedVals[completedVals.length - 1];
-    const prior = completedVals.slice(0, -1);
-    const priorAvg = prior.reduce((a, b) => a + b, 0) / prior.length;
-    if (priorAvg <= 0) return null;
-    const pct = Math.round(((last - priorAvg) / priorAvg) * 100);
-    if (pct === 0) return null;
-    // Axis label is the compact tick (e.g. "May"); use it verbatim so the
-    // eyebrow unambiguously names which completed period the stat describes,
-    // rather than the generic "last month" which reads as the current partial one.
-    const periodLabel = lastSlot?.label ?? grainNoun;
-    return { pct: Math.abs(pct), up: pct > 0, periodLabel };
-  }, [completedVals, trendPartialIdx, trendSlots, grainNoun]);
+  const activeSeries = isSavingsDetail
+    ? savedMetric.cumulativeSeries
+    : isTrendsDetail
+      ? trendValues
+      : cumulativeSeries;
+
+  // ── Scrub / tap selection ─────────────────────────────────────────
+  // scrubIdx is both the live scrub position (pan gesture) and the locked
+  // selection (tap toggle). For line charts it maps to a day/month offset from
+  // the period start; for trend bars it maps to a slot index.
+  const [scrubIdx, setScrubIdx] = useState<number | null>(null);
+  useEffect(() => setScrubIdx(null), [activeSeries]);
 
   // Fuller label for a scrubbed trend bar than its compact axis tick.
   const trendScrubLabel = (i: number): string => {
@@ -332,15 +332,43 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
     return `Q${Math.floor(s.from.getMonth() / 3) + 1} ${s.from.getFullYear()}`;
   };
 
-  const activeSeries = isSavingsDetail
-    ? savedMetric.cumulativeSeries
-    : isTrendsDetail
-      ? trendValues
-      : cumulativeSeries;
-
-  // ── Scrub ─────────────────────────────────────────────────────────
-  const [scrubIdx, setScrubIdx] = useState<number | null>(null);
-  useEffect(() => setScrubIdx(null), [activeSeries]);
+  // Trajectory stat shown in the hero eyebrow. When a trends bar is tapped, the
+  // stat reflects that bar vs the average of all other completed bars so the user
+  // can compare any period, not just the most recent one.
+  const trendStat = useMemo(() => {
+    if (!isTrendsDetail) return null;
+    if (scrubIdx !== null && scrubIdx < trendValues.length) {
+      const selectedVal = trendValues[scrubIdx];
+      const selectedSlot = trendSlots[scrubIdx];
+      const otherCompleted = trendValues.filter((_, i) => i !== scrubIdx && i !== trendPartialIdx);
+      if (otherCompleted.length === 0) return null;
+      const avg = otherCompleted.reduce((a, b) => a + b, 0) / otherCompleted.length;
+      if (avg <= 0) return null;
+      const pct = Math.round(((selectedVal - avg) / avg) * 100);
+      if (pct === 0) return null;
+      const slot = selectedSlot;
+      const periodLabel = slot
+        ? trendGrain === 'week'
+          ? `Week of ${slot.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+          : trendGrain === 'month'
+            ? slot.from.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+            : `Q${Math.floor(slot.from.getMonth() / 3) + 1} ${slot.from.getFullYear()}`
+        : grainNoun;
+      return { pct: Math.abs(pct), up: pct > 0, periodLabel };
+    }
+    // Default: most recent completed period vs the prior average.
+    if (completedVals.length < 2) return null;
+    const lastIdx = trendPartialIdx !== null ? trendSlots.length - 2 : trendSlots.length - 1;
+    const lastSlot = trendSlots[lastIdx];
+    const last = completedVals[completedVals.length - 1];
+    const prior = completedVals.slice(0, -1);
+    const priorAvg = prior.reduce((a, b) => a + b, 0) / prior.length;
+    if (priorAvg <= 0) return null;
+    const pct = Math.round(((last - priorAvg) / priorAvg) * 100);
+    if (pct === 0) return null;
+    const periodLabel = lastSlot?.label ?? grainNoun;
+    return { pct: Math.abs(pct), up: pct > 0, periodLabel };
+  }, [isTrendsDetail, scrubIdx, trendValues, trendSlots, trendPartialIdx, trendGrain, completedVals, grainNoun]);
 
   // Period total comes from the aggregate summary, not a reduce over rows.
   // Same retention as lineSeries: keep the last total so the hero amount holds
@@ -395,51 +423,61 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
   const savedExtraText = money(savedMetric.extra, savedMetric.extra < 100 ? 2 : 0);
 
   // ── Paginated transaction list ────────────────────────────────────
-  // Only the visible window is loaded; more pages stream in on scroll. The
-  // chart/total above are driven by aggregates, so they stay correct even
-  // though the list below is partial.
-  // For trends the list shows the most recent period in the window (the current
-  // week/month/quarter); the chart above carries the cross-period comparison, so
-  // the list stays a focused "what's in this period" rather than refetching as
-  // you scrub. Spending/savings keep the selected period's full range.
-  const listSlot = isTrendsDetail ? trendSlots[trendSlots.length - 1] : null;
-  const listScope = useMemo<TransactionSummaryQuery>(() => ({
-    from: (listSlot ? listSlot.from : ranges.current.from).toISOString(),
-    to: (listSlot ? listSlot.to : ranges.current.to).toISOString(),
-    categoryIds: isSavingsDetail ? savedMetric.categoryIds : undefined,
-    merchantQuery: query.trim() || undefined,
-    searchCategoryIds,
-  }), [listSlot, ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
+  // Tapping/scrubbing locks the list to that period. For trends, a tapped bar
+  // scopes to that slot; default is the most recent slot. For spending/savings,
+  // a tapped point scopes to that day (Week/Month) or that month (Year).
+
+  // Derive the date range for a locked spending/savings point.
+  const selectedPointRange = useMemo<{ from: Date; to: Date } | null>(() => {
+    if (isTrendsDetail || scrubIdx === null) return null;
+    if (period === 'Year') {
+      const year = ranges.current.from.getFullYear();
+      const from = new Date(year, scrubIdx, 1);
+      const to = new Date(year, scrubIdx + 1, 0, 23, 59, 59, 999);
+      return { from, to };
+    }
+    const from = addDays(ranges.current.from, scrubIdx);
+    from.setHours(0, 0, 0, 0);
+    const to = addDays(ranges.current.from, scrubIdx);
+    to.setHours(23, 59, 59, 999);
+    return { from, to };
+  }, [isTrendsDetail, scrubIdx, period, ranges]);
+
+  const listSlot = isTrendsDetail
+    ? (scrubIdx !== null ? trendSlots[scrubIdx] : trendSlots[trendSlots.length - 1])
+    : null;
+
+  const listScope = useMemo<TransactionSummaryQuery>(() => {
+    const from = selectedPointRange
+      ? selectedPointRange.from
+      : listSlot
+        ? listSlot.from
+        : ranges.current.from;
+    const to = selectedPointRange
+      ? selectedPointRange.to
+      : listSlot
+        ? listSlot.to
+        : ranges.current.to;
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      categoryIds: isSavingsDetail ? savedMetric.categoryIds : undefined,
+      merchantQuery: query.trim() || undefined,
+      searchCategoryIds,
+    };
+  }, [selectedPointRange, listSlot, ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
 
   const [rows, setRows] = useState<Transaction[]>([]);
-  const [nextCursor, setNextCursor] = useState<TransactionCursor | undefined>();
-  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     const page = transactionsRepo.listPage({
       ...listScope,
       sort: sortBy,
-      limit: PAGE_SIZE,
+      limit: DETAIL_TX_LIMIT,
     });
     setRows(page.rows);
-    setNextCursor(page.nextCursor);
-    setLoadingMore(false);
   }, [transactionsRepo, listScope, sortBy, visible, repoVersion]);
-
-  const loadMore = useCallback(() => {
-    if (loadingMore || !nextCursor) return;
-    setLoadingMore(true);
-    const page = transactionsRepo.listPage({
-      ...listScope,
-      sort: sortBy,
-      limit: PAGE_SIZE,
-      cursor: nextCursor,
-    });
-    setRows(prev => [...prev, ...page.rows]);
-    setNextCursor(page.nextCursor);
-    setLoadingMore(false);
-  }, [transactionsRepo, listScope, sortBy, nextCursor, loadingMore]);
 
   const grouped = useMemo(() => {
     const g: Record<string, Transaction[]> = {};
@@ -499,13 +537,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
               <ScreenExitButton
                 variant="back"
                 onPress={onClose}
-                tint={pW.text}
-                fallbackBg="rgba(8,6,20,0.45)"
+                tint={p.text}
+                fallbackBg={theme.dark ? 'rgba(8,6,20,0.45)' : 'rgba(255,255,255,0.3)'}
                 accessibilityLabel="Back"
               />
 
               {/* Title */}
-              <Text style={[styles.headerTitle, { color: pW.text }, DARK_TEXT_SHADOW]} numberOfLines={1}>
+              <Text style={[styles.headerTitle, { color: p.text }]} numberOfLines={1}>
                 {t?.title ?? ''}
               </Text>
 
@@ -530,7 +568,6 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                 categories={categories}
                 cats={cats}
                 theme={theme}
-                onPress={handleOpenTx}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -539,8 +576,6 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
             initialNumToRender={8}
             maxToRenderPerBatch={6}
             windowSize={7}
-            onEndReached={loadMore}
-            onEndReachedThreshold={0.7}
             ListHeaderComponent={
               <View style={styles.headerStack}>
                 <View style={styles.hero}>
@@ -609,7 +644,9 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                         ringColor="#08060e"
                         strokeWidth={2.5}
                         verticalInset={DETAIL_CHART_INSET_Y}
+                        selectedIdx={scrubIdx}
                         onScrub={setScrubIdx}
+                        onTap={(idx) => setScrubIdx(prev => prev === idx ? null : idx)}
                       />
                     )}
                   </View>
@@ -663,7 +700,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                         : 'rgba(11,13,16,0.62)',
                     }}
                     activeFontStyle={{
-                      color: theme.dark ? '#080A0D' : '#F2F4F5',
+                      color: theme.accent.ink,
                       fontWeight: '600',
                     }}
                     style={styles.pickerSeg}
@@ -708,12 +745,12 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                             systemImage="arrow.up.arrow.down"
                             size={44}
                             iconSize={18}
-                            iconColor={pW.text as string}
+                            iconColor={theme.dark ? (pW.text as string) : '#0E0C18'}
                             glassTint={glassTintForTheme(theme.dark)}
                           />
                         ) : (
                           <View style={styles.moreBtn}>
-                            <Icon name="filter" size={16} color={pW.text} />
+                            <Icon name="filter" size={16} color={theme.dark ? pW.text : '#0E0C18'} />
                           </View>
                         )
                       }
@@ -760,6 +797,58 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
                 </View>
               </BlurView>
             }
+            ListFooterComponent={rows.length > 0 ? (
+              <View style={styles.seeAllWrap}>
+                {SUPPORTS_GLASS ? (
+                  <Host matchContents ignoreSafeArea="all" colorScheme={theme.dark ? 'dark' : 'light'}>
+                    <GlassEffectContainer>
+                      <SwiftButton
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          const from = listSlot ? listSlot.from : ranges.current.from;
+                          const to   = listSlot ? listSlot.to   : ranges.current.to;
+                          onSeeAll?.({ dateFrom: from, dateTo: to });
+                          onClose();
+                        }}
+                        modifiers={[
+                          buttonStyle('plain'),
+                          glassEffect({ glass: { variant: 'regular', interactive: true }, shape: 'capsule' }),
+                        ]}
+                      >
+                        <RNHostView matchContents>
+                          <View style={styles.seeAllRow}>
+                            <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>See all transactions</Text>
+                            <Icon name="chevR" size={13} color={theme.accent.dot} stroke={2.2} />
+                          </View>
+                        </RNHostView>
+                      </SwiftButton>
+                    </GlassEffectContainer>
+                  </Host>
+                ) : (
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel="See all transactions"
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      const from = listSlot ? listSlot.from : ranges.current.from;
+                      const to   = listSlot ? listSlot.to   : ranges.current.to;
+                      onSeeAll?.({ dateFrom: from, dateTo: to });
+                      onClose();
+                    }}
+                  >
+                    <BlurView
+                      intensity={theme.dark ? 55 : 72}
+                      tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
+                      style={[styles.seeAllRow, { borderRadius: RADIUS.full, overflow: 'hidden' }]}
+                    >
+                      <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>See all transactions</Text>
+                      <Icon name="chevR" size={13} color={theme.accent.dot} stroke={2.2} />
+                    </BlurView>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : null}
           />
         </ImageBackground>
       </View>
@@ -770,14 +859,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose }: Props)
 // ─── DetailDayGroup ───────────────────────────────────────────────────────────
 
 function DetailDayGroup({
-  day, txs, categories, cats, theme, onPress,
+  day, txs, categories, cats, theme,
 }: {
   day: string;
   txs: Transaction[];
   categories: Category[];
   cats: Record<string, { label: string; icon: string; budget: number }>;
   theme: Theme;
-  onPress: (tx: Transaction) => void;
 }) {
   const p = makeP(theme.dark);
   const tint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
@@ -806,19 +894,15 @@ function DetailDayGroup({
           const cat        = cats[tx.cat];
           const isIncome   = tx.type === 'income';
           return (
-            <Pressable
+            <View
               key={tx.id}
-              onPress={() => onPress(tx)}
-              style={({ pressed }) => [
+              style={[
                 styles.txRow,
                 {
                   borderBottomWidth: i < txs.length - 1 ? 1 : 0,
                   borderBottomColor: border,
-                  opacity: pressed ? 0.6 : 1,
                 },
               ]}
-              accessibilityRole="button"
-              accessibilityLabel={`${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
             >
               <MerchantMark
                 merchant={tx.merchant}
@@ -848,7 +932,7 @@ function DetailDayGroup({
                 prefix={isIncome ? '+$' : '−$'}
                 color={isIncome ? incomeColor : p.text}
               />
-            </Pressable>
+            </View>
           );
         })}
       </View>
@@ -1003,6 +1087,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 16,
+  },
+  seeAllWrap: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  seeAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
   },
 
   // Transaction rows

@@ -27,7 +27,6 @@ export function HomeSpendGroups({ theme, groups, income, compact, onMedia }: Pro
           theme={theme}
           group={g}
           income={income}
-          last={i === groups.length - 1}
           compact={compact}
           onMedia={onMedia}
         />
@@ -52,14 +51,12 @@ function GroupPanel({
   theme,
   group,
   income,
-  last,
   compact,
   onMedia,
 }: {
   theme: Theme;
   group: SpendGroup;
   income: number;
-  last: boolean;
   compact?: boolean;
   onMedia?: boolean;
 }) {
@@ -97,13 +94,12 @@ function GroupPanel({
     : theme.dark ? `${color}12` : `${color}26`;
   const textColor = onMedia ? ON_MEDIA.text : theme.text;
   const textTerColor = onMedia ? ON_MEDIA.textTer : theme.dark ? theme.textTer : theme.textSec;
-  const sepColor = onMedia ? ON_MEDIA.sep : theme.sep;
   const trackBg = onMedia
     ? ON_MEDIA.trackBg
     : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
 
   return (
-    <View style={[s.panel, { borderBottomColor: sepColor, borderBottomWidth: last ? 0 : 1 }]}>
+    <View style={s.panel}>
       {/* Tinted container — grows to contain both header and expanded sub-rows */}
       <View style={[s.tintedContainer, { backgroundColor: headerTint }]}>
 

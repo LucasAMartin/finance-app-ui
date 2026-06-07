@@ -30,6 +30,7 @@ interface PopupNumericKeypadProps {
   closeDuration?: number;
   onHeightChange?: (height: number) => void;
   zIndex?: number;
+  passthrough?: boolean;
 }
 
 export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, PopupNumericKeypadProps>(function PopupNumericKeypad({
@@ -39,9 +40,10 @@ export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, Popu
   onDone,
   borderColor,
   openDuration = 280,
-  closeDuration = 190,
+  closeDuration = 280,
   onHeightChange,
   zIndex = 40,
+  passthrough = false,
 }, ref) {
   const insets = useSafeAreaInsets();
   const [interactive, setInteractive] = useState(visible);
@@ -89,7 +91,7 @@ export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, Popu
     <>
       <TouchableWithoutFeedback onPress={onDone} accessible={false}>
         <View
-          pointerEvents={interactive ? 'auto' : 'none'}
+          pointerEvents={!passthrough && interactive ? 'auto' : 'none'}
           style={[styles.backdrop, { zIndex: zIndex - 1 }]}
         />
       </TouchableWithoutFeedback>

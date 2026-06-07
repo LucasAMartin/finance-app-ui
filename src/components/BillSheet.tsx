@@ -16,6 +16,9 @@ import Reanimated, {
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { DatePicker, Host } from '@expo/ui/swift-ui';
+import { datePickerStyle, environment, tint } from '@expo/ui/swift-ui/modifiers';
 import { Theme } from '../theme';
 import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
@@ -31,8 +34,10 @@ import { TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 
 const SCREEN_H = Dimensions.get('window').height;
-const COMPACT_SNAP_PCT = 52;
-// Matches PopupNumericKeypad's internal DONE_AREA constant.
+const COMPACT_SNAP_PCT = 60;
+// Distance from sheet top to the bottom of the Amount row in the field card:
+// paddingTop(20) + hero(197) + cardMargin(16) + amountRow(54) = 287
+const CONTENT_DEPTH = 287;
 const KEYPAD_DONE_AREA = 76;
 const SHEET_EXPAND_MS = 300;
 const KEYPAD_OPEN_DELAY_MS = 200;
@@ -40,10 +45,6 @@ const KEYPAD_OPEN_ANIM_MS = 280;
 const KEYPAD_CLOSE_MS = 260;
 const SHEET_COLLAPSE_MS = KEYPAD_CLOSE_MS;
 const SHEET_EASING = ReEasing.out(ReEasing.cubic);
-// Distance from sheet top edge to the bottom of the amount-paid row:
-// content paddingTop(20) + hero(197) + amount row(54) = 271px
-const CONTENT_DEPTH = 271;
-// Small cushion so the amount row does not sit flush against the keypad.
 const EXPANDED_BUFFER_PX = -24;
 
 const CADENCE_LABEL: Record<string, string> = {
@@ -72,19 +73,22 @@ export function BillSheet({
   const animatedIndex = useSharedValue(0);
   const animatedPosition = useSharedValue(SCREEN_H);
 
-	  const lastBill = useRef<Bill | null>(null);
-	  if (bill) lastBill.current = bill;
-	  const b = lastBill.current;
+  const lastBill = useRef<Bill | null>(null);
+  if (bill) lastBill.current = bill;
+  const b = lastBill.current;
   const ruleId = b?.id.startsWith('bill-') ? b.id.slice(5) : (b?.id ?? '');
   const rule = ruleId ? recurringRulesRepo.get(ruleId) : undefined;
-  const canEditBill = b ? sessionRepo.canEdit(rule?.createdByUserId ?? b.createdByUserId, rule?.ledgerId ?? b.ledgerId) : false;
+  const canEditBill = b
+    ? sessionRepo.canEdit(rule?.createdByUserId ?? b.createdByUserId, rule?.ledgerId ?? b.ledgerId)
+    : false;
   const ownerName = memberDisplayName(ledgerMembers, rule?.createdByUserId ?? b?.createdByUserId);
+  const partialPaid = (rule?.meta?.partialPaid as number | undefined) ?? 0;
 
   const [editAmt, setEditAmt] = useState('');
+  const [editDueDate, setEditDueDate] = useState<Date>(new Date());
   const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
   const [keypadH, setKeypadH] = useState(300);
-  // Tracks whether the current expansion was requested by the keypad, so any
-  // non-keypad snap cannot leave the sheet in the raised state.
+
   const keypadOpenRef = useRef(false);
   const keypadExpandedRef = useRef(false);
   const keypadOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,33 +100,26 @@ export function BillSheet({
     }
   }, []);
 
-  const expandAnimation = useBottomSheetTimingConfigs({
-    duration: SHEET_EXPAND_MS,
-    easing: SHEET_EASING,
-  });
-  const collapseAnimation = useBottomSheetTimingConfigs({
-    duration: SHEET_COLLAPSE_MS,
-    easing: SHEET_EASING,
-  });
+  const expandAnimation = useBottomSheetTimingConfigs({ duration: SHEET_EXPAND_MS, easing: SHEET_EASING });
+  const collapseAnimation = useBottomSheetTimingConfigs({ duration: SHEET_COLLAPSE_MS, easing: SHEET_EASING });
 
-  // Index 1 is sized so the amount-paid row clears the top of the keypad. The
-  // keypad is anchored to the bottom of the sheet's content, so the content
-  // container must be this tall for its bottom edge to reach the screen bottom.
   const expandedSnapPct = useMemo(() => {
     const required = keypadH + KEYPAD_DONE_AREA + insets.bottom + CONTENT_DEPTH + EXPANDED_BUFFER_PX;
     return Math.min(94, Math.ceil((required / SCREEN_H) * 100));
   }, [keypadH, insets.bottom]);
-  const snapPoints = useMemo(() => [`${COMPACT_SNAP_PCT}%`, `${expandedSnapPct}%`], [expandedSnapPct]);
+
+  const snapPoints = useMemo(
+    () => [`${COMPACT_SNAP_PCT}%`, `${expandedSnapPct}%`],
+    [expandedSnapPct],
+  );
   const actionTravel = useMemo(
     () => Math.max(0, ((expandedSnapPct - COMPACT_SNAP_PCT) / 100) * SCREEN_H),
-    [expandedSnapPct]
+    [expandedSnapPct],
   );
   const actionDockStyle = useAnimatedStyle(() => {
     const compactPosition = SCREEN_H - (COMPACT_SNAP_PCT / 100) * SCREEN_H;
     const progress = Math.max(0, compactPosition - animatedPosition.value);
-    return {
-      transform: [{ translateY: Math.min(actionTravel, progress) }],
-    };
+    return { transform: [{ translateY: Math.min(actionTravel, progress) }] };
   }, [actionTravel, animatedPosition]);
 
   const openAmountKeypad = useCallback(() => {
@@ -132,9 +129,7 @@ export function BillSheet({
     sheetRef.current?.snapToIndex(1, expandAnimation);
     keypadOpenTimerRef.current = setTimeout(() => {
       keypadOpenTimerRef.current = null;
-      if (keypadOpenRef.current) {
-        setAmountKeypadOpen(true);
-      }
+      if (keypadOpenRef.current) setAmountKeypadOpen(true);
     }, KEYPAD_OPEN_DELAY_MS);
   }, [canEditBill, clearKeypadOpenTimer, expandAnimation]);
 
@@ -161,7 +156,7 @@ export function BillSheet({
         runOnJS(closeKeypadForSwipe)();
       }
     },
-    [closeKeypadForSwipe]
+    [closeKeypadForSwipe],
   );
 
   const handleAmountKey = useCallback((key: Parameters<typeof applyKeypadKey>[1]) => {
@@ -171,12 +166,15 @@ export function BillSheet({
   useEffect(() => {
     if (bill !== null) {
       setEditAmt(bill.amount.toFixed(2));
+      const rId = bill.id.startsWith('bill-') ? bill.id.slice(5) : bill.id;
+      const r = recurringRulesRepo.get(rId);
+      setEditDueDate(r ? new Date(r.nextDueDate) : new Date());
     }
     keypadOpenRef.current = false;
     keypadExpandedRef.current = false;
     clearKeypadOpenTimer();
     setAmountKeypadOpen(false);
-  }, [bill, clearKeypadOpenTimer]);
+  }, [bill, clearKeypadOpenTimer]); // recurringRulesRepo is stable
 
   useEffect(() => {
     if (!canEditBill) closeAmountKeypad();
@@ -203,8 +201,6 @@ export function BillSheet({
     onClose();
   }, [onClose]);
 
-  // Only the keypad raises the sheet (index 1). Downward pan is allowed, and
-  // this keeps any future non-keypad snap from stranding it expanded.
   const handleAnimate = useCallback((_from: number, to: number) => {
     if (to <= 0 && keypadOpenRef.current) {
       keypadOpenRef.current = false;
@@ -216,13 +212,10 @@ export function BillSheet({
     if (to === 1 && !keypadOpenRef.current) {
       requestAnimationFrame(() => sheetRef.current?.snapToIndex(0));
     }
-  }, []);
+  }, [clearKeypadOpenTimer]);
 
   const handleChange = useCallback((index: number) => {
-    if (index >= 1 && keypadOpenRef.current) {
-      keypadExpandedRef.current = true;
-    }
-    // If the sheet collapses externally while the keypad is open, hide it too.
+    if (index >= 1 && keypadOpenRef.current) keypadExpandedRef.current = true;
     if (index <= 0 && keypadOpenRef.current) {
       keypadOpenRef.current = false;
       keypadExpandedRef.current = false;
@@ -230,6 +223,68 @@ export function BillSheet({
       setAmountKeypadOpen(false);
     }
   }, [clearKeypadOpenTimer]);
+
+  // Auto-save due date changes directly to the rule.
+  const handleDateChange = useCallback((date: Date) => {
+    setEditDueDate(date);
+    if (ruleId && canEditBill) {
+      recurringRulesRepo.update(ruleId, {
+        nextDueDate: date.toISOString(),
+        dayOfMonth: date.getDate(),
+        updatedByUserId: 'local',
+      });
+    }
+  }, [ruleId, canEditBill, recurringRulesRepo]);
+
+  const handlePay = useCallback(() => {
+    if (!b || !canEditBill) return;
+    const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    transactionsRepo.create({
+      merchant: b.merchant,
+      cat: b.cat,
+      amount,
+      recurring: true,
+      recurringRuleId: ruleId,
+      occurredAt: new Date().toISOString(),
+      type: 'expense',
+      visibility: 'shared',
+      createdByUserId: 'local',
+      updatedByUserId: 'local',
+    });
+
+    if (rule) {
+      const isFullPayment = amount >= b.amount; // b.amount is already the remaining
+      if (isFullPayment) {
+        recurringRulesRepo.update(ruleId, {
+          nextDueDate: advanceDueDate(rule),
+          meta: { ...rule.meta, partialPaid: undefined },
+          updatedByUserId: 'local',
+        });
+      } else {
+        const existing = (rule.meta?.partialPaid as number | undefined) ?? 0;
+        recurringRulesRepo.update(ruleId, {
+          meta: { ...rule.meta, partialPaid: existing + amount },
+          updatedByUserId: 'local',
+        });
+      }
+    }
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    keypadOpenRef.current = false;
+    keypadExpandedRef.current = false;
+    clearKeypadOpenTimer();
+    setAmountKeypadOpen(false);
+    onClose();
+  }, [b, canEditBill, editAmt, ruleId, rule, transactionsRepo, recurringRulesRepo, clearKeypadOpenTimer, onClose]);
+
+  const handleDelete = useCallback(() => {
+    if (!ruleId || !canEditBill) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    recurringRulesRepo.delete(ruleId);
+    onClose();
+  }, [ruleId, canEditBill, recurringRulesRepo, onClose]);
 
   const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
     <BottomSheetBackdrop
@@ -240,6 +295,22 @@ export function BillSheet({
       pressBehavior="close"
     />
   ), []);
+
+  const actionBottomPadding = Math.max(insets.bottom, 16) + 12;
+
+  const renderFooter = useCallback((props: BottomSheetFooterProps) => (
+    <BottomSheetFooter {...props} bottomInset={0}>
+      <PopupNumericKeypad
+        visible={amountKeypadOpen}
+        theme={theme}
+        onKey={handleAmountKey}
+        onDone={closeAmountKeypad}
+        onHeightChange={setKeypadH}
+        openDuration={KEYPAD_OPEN_ANIM_MS}
+        closeDuration={KEYPAD_CLOSE_MS}
+      />
+    </BottomSheetFooter>
+  ), [amountKeypadOpen, closeAmountKeypad, handleAmountKey, theme]);
 
   const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
   const backgroundStyle = useMemo(() => ({
@@ -256,84 +327,8 @@ export function BillSheet({
 
   const groupColor = b ? categoryGroupColor(b.cat, categories, theme.dark) : theme.accent.dot;
   const cat = b ? cats[b.cat] : undefined;
-
-  const markPaid = () => {
-    if (!b || !canEditBill) return;
-    const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    transactionsRepo.create({
-      merchant: b.merchant,
-      cat: b.cat,
-      amount,
-      recurring: true,
-      recurringRuleId: ruleId,
-      occurredAt: new Date().toISOString(),
-      type: 'expense',
-      visibility: 'shared',
-      createdByUserId: 'local',
-      updatedByUserId: 'local',
-    });
-    if (rule) {
-      recurringRulesRepo.update(ruleId, {
-        nextDueDate: advanceDueDate(rule),
-        meta: { ...rule.meta, partialPaid: undefined },
-      });
-    }
-    keypadOpenRef.current = false;
-    keypadExpandedRef.current = false;
-    clearKeypadOpenTimer();
-    setAmountKeypadOpen(false);
-    onClose();
-  };
-
-  const markPartiallyPaid = () => {
-    if (!b || !rule || !canEditBill) return;
-    const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    transactionsRepo.create({
-      merchant: b.merchant,
-      cat: b.cat,
-      amount,
-      recurring: true,
-      recurringRuleId: ruleId,
-      occurredAt: new Date().toISOString(),
-      type: 'expense',
-      visibility: 'shared',
-      createdByUserId: 'local',
-      updatedByUserId: 'local',
-    });
-    const existing = (rule.meta?.partialPaid as number | undefined) ?? 0;
-    recurringRulesRepo.update(ruleId, {
-      meta: { ...rule.meta, partialPaid: existing + amount },
-    });
-    keypadOpenRef.current = false;
-    keypadExpandedRef.current = false;
-    clearKeypadOpenTimer();
-    setAmountKeypadOpen(false);
-    onClose();
-  };
-
-  // The keypad rides a BottomSheetFooter so it stays pinned to the sheet's
-  // visible bottom edge while the sheet body expands above it.
-  const actionBottomPadding = Math.max(insets.bottom, 16) + 12;
-  const renderFooter = useCallback((props: BottomSheetFooterProps) => (
-    <BottomSheetFooter {...props} bottomInset={0}>
-      <PopupNumericKeypad
-        visible={amountKeypadOpen}
-        theme={theme}
-        onKey={handleAmountKey}
-        onDone={closeAmountKeypad}
-        onHeightChange={setKeypadH}
-        openDuration={KEYPAD_OPEN_ANIM_MS}
-        closeDuration={KEYPAD_CLOSE_MS}
-      />
-    </BottomSheetFooter>
-  ), [
-    amountKeypadOpen,
-    closeAmountKeypad,
-    handleAmountKey,
-    theme,
-  ]);
+  const darkScheme = theme.dark ? 'dark' : 'light';
+  const sep = { borderTopColor: theme.sep, borderTopWidth: StyleSheet.hairlineWidth };
 
   return (
     <BottomSheetModal
@@ -386,27 +381,48 @@ export function BillSheet({
               <Text style={[S.metaLine, { color: theme.textSec }]} numberOfLines={1}>
                 {cat?.label}
                 {cat?.label ? <Text style={{ color: theme.textTer }}> · </Text> : null}
-                Due {b.dueDate}
-                {rule ? <Text style={{ color: theme.textTer }}> · {CADENCE_LABEL[rule.cadence] ?? 'Recurring'}</Text> : null}
+                {rule ? (CADENCE_LABEL[rule.cadence] ?? 'Recurring') : 'Recurring'}
+                {partialPaid > 0 && rule
+                  ? <Text style={{ color: theme.textTer }}> · ${rule.amount.toFixed(2)} total</Text>
+                  : null}
               </Text>
               <View style={{ marginTop: 16 }}>
                 <Money value={b.amount} size={32} weight="600" prefix="$" theme={theme} />
               </View>
             </View>
 
-            <View style={[S.amtCard, { backgroundColor: theme.chipBg }]}>
-	              <Pressable
-	                onPress={openAmountKeypad}
-                  disabled={!canEditBill}
-	                accessibilityRole="button"
-	                accessibilityLabel="Edit amount paid"
-	                style={[S.amtRow, !canEditBill && S.lockedFields]}
-	              >
-                <Text style={[S.amtLabel, { color: theme.textSec }]}>Amount paid</Text>
-                <Text style={[S.amtValue, { color: editAmt ? theme.text : theme.textTer }]}>
+            {/* Field card — matches IncomeFlow's fieldCard / fieldRow design */}
+            <View style={[S.fieldCard, { backgroundColor: theme.chipBg, marginHorizontal: 20 }]}>
+              {/* Amount row — tappable, opens keypad */}
+              <Pressable
+                onPress={openAmountKeypad}
+                disabled={!canEditBill}
+                accessibilityRole="button"
+                accessibilityLabel="Edit amount to pay"
+                style={[S.fieldRow, !canEditBill && S.lockedFields]}
+              >
+                <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
+                <Text style={[S.amountValue, { color: editAmt ? theme.text : theme.textTer }]}>
                   <Text style={{ color: theme.textSec }}>$</Text>{editAmt || '0.00'}
                 </Text>
               </Pressable>
+
+              {/* Due date row — compact picker, auto-saves */}
+              <View style={[S.fieldRow, sep, !canEditBill && S.lockedFields]}>
+                <Text style={[S.fieldLabel, { color: theme.textSec }]}>Due date</Text>
+                <Host ignoreSafeArea="all" matchContents>
+                  <DatePicker
+                    selection={editDueDate}
+                    onDateChange={canEditBill ? handleDateChange : () => {}}
+                    displayedComponents={['date']}
+                    modifiers={[
+                      datePickerStyle('compact'),
+                      tint(theme.accent.dot),
+                      environment({ key: 'colorScheme', value: darkScheme }),
+                    ]}
+                  />
+                </Host>
+              </View>
             </View>
 
             <Reanimated.View
@@ -417,24 +433,25 @@ export function BillSheet({
               ]}
             >
               <SheetPrimaryButton
-                label="Mark as paid"
-	                onPress={markPaid}
-	                theme={theme}
-	                disabled={!canEditBill}
-	                style={S.primaryBtn}
-	              />
-                {canEditBill ? (
-                  <SheetTextButton
-                    label="Mark partially paid"
-                    onPress={markPartiallyPaid}
-                    theme={theme}
-                    style={S.secondaryBtn}
-                  />
-                ) : (
-                  <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
-                    {ownerName ?? 'This member'} has locked edits for this bill.
-                  </Text>
-                )}
+                label={`Pay $${editAmt || '0.00'}`}
+                onPress={handlePay}
+                theme={theme}
+                disabled={!canEditBill}
+                style={S.primaryBtn}
+              />
+              {canEditBill ? (
+                <SheetTextButton
+                  label="Delete expense"
+                  onPress={handleDelete}
+                  theme={theme}
+                  tone="danger"
+                  style={S.deleteBtn}
+                />
+              ) : (
+                <Text style={[TYPE.caption, S.lockedCopy, { color: theme.textSec }]}>
+                  {ownerName ?? 'This member'} has locked edits for this bill.
+                </Text>
+              )}
             </Reanimated.View>
           </>
         )}
@@ -463,27 +480,38 @@ const S = StyleSheet.create({
     marginTop: 5,
     textAlign: 'center',
   },
-  amtCard: {
+
+  // Matches IncomeFlow's fieldCard + fieldRow pattern exactly.
+  fieldCard: {
     borderRadius: 14,
-    marginHorizontal: 20,
     overflow: 'hidden',
+    marginTop: 16,
   },
-  amtRow: {
+  fieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 50,
+    minHeight: 54,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    paddingVertical: LAYOUT.rowPadY,
     gap: 12,
   },
-  amtLabel: {
+  fieldLabel: {
     ...TYPE.body,
     flexShrink: 0,
   },
-  amtValue: {
+  amountValue: {
     ...TYPE.subsectionTitle,
     textAlign: 'right',
+  },
+  lockedFields: {
+    opacity: 0.58,
+  },
+  actionDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingTop: 8,
   },
   primaryBtn: {
     marginHorizontal: 20,
@@ -492,21 +520,12 @@ const S = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 16,
   },
-  secondaryBtn: {
+  deleteBtn: {
     alignItems: 'center',
-  },
-  lockedFields: {
-    opacity: 0.58,
   },
   lockedCopy: {
     textAlign: 'center',
     marginTop: 12,
     paddingHorizontal: 20,
-  },
-  actionDock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    paddingTop: 8,
   },
 });

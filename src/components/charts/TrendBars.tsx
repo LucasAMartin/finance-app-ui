@@ -93,6 +93,8 @@ interface Props {
   onScrub?: (index: number | null) => void;
   /** Fires on a discrete tap; parent handles toggle (same index → deselect). */
   onTap?: (index: number) => void;
+  /** Whether scrub/tap should fire selection haptics. Default true. */
+  haptics?: boolean;
 }
 
 // Compact bar chart for the Insights "Spending trends" half-tile. Carries the
@@ -115,6 +117,7 @@ export function TrendBars({
   play = true,
   onScrub,
   onTap,
+  haptics = true,
 }: Props) {
   const padT = 6;
   const padB = 16;
@@ -134,7 +137,7 @@ export function TrendBars({
   }, [values, width, height, n]);
 
 
-  const tick = () => Haptics.selectionAsync();
+  const tick = () => { if (haptics) Haptics.selectionAsync(); };
   const emit = (idx: number | null) => onScrub?.(idx);
   const emitTap = (idx: number) => onTap?.(idx);
 

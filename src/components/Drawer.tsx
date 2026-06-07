@@ -52,6 +52,7 @@ const SECTIONS: DrawerSection[] = [
       { id: 'budget',     label: 'Budgets',        systemIcon: 'chart.pie' },
       { id: 'insights',   label: 'Insights',       systemIcon: 'lightbulb' },
       { id: 'activity',   label: 'Activity',       systemIcon: 'list.bullet', badge: 3 },
+      { id: 'goals',      label: 'Goals',          systemIcon: 'target' },
     ],
   },
   {

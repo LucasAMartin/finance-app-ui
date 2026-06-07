@@ -132,9 +132,9 @@ export const SEED_TRANSACTIONS: Transaction[] = buildSeedTransactions();
 // Upcoming bills (forward-looking)
 // ─────────────────────────────────────────────────────────────
 export const SEED_BILLS: Bill[] = [
-  { id: 'b1', name: 'Rent',    merchant: 'Rent',    icon: 'home', cat: 'bills',         amount: 1200,  dueDate: 'May 28', daysUntil: 14, recurring: true },
-  { id: 'b2', name: 'Spotify', merchant: 'Spotify', icon: 'film', cat: 'entertainment', amount: 10.99, dueDate: 'May 30', daysUntil: 16, recurring: true },
-  { id: 'b3', name: 'PG&E',    merchant: 'PG&E',    icon: 'doc',  cat: 'bills',         amount: 95,    dueDate: 'Jun 8',  daysUntil: 25, recurring: true, estimate: true },
+  { id: 'b1', name: 'Rent',    merchant: 'Rent',    icon: 'home', cat: 'bills',         amount: 1200,  fullAmount: 1200,  dueDate: 'May 28', daysUntil: 14, recurring: true },
+  { id: 'b2', name: 'Spotify', merchant: 'Spotify', icon: 'film', cat: 'entertainment', amount: 10.99, fullAmount: 10.99, dueDate: 'May 30', daysUntil: 16, recurring: true },
+  { id: 'b3', name: 'PG&E',    merchant: 'PG&E',    icon: 'doc',  cat: 'bills',         amount: 95,    fullAmount: 95,    dueDate: 'Jun 8',  daysUntil: 25, recurring: true, estimate: true },
 ];
 
 export const SEED_RECURRING_RULES: RecurringRule[] = [

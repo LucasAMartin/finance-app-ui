@@ -46,6 +46,7 @@ export class SQLiteBillsRepo extends SQLiteRepository<Bill> {
     ).map(row => ({
       id: row.id,
       amount: row.amount,
+      fullAmount: row.amount,
       merchant: row.merchant,
       name: row.name,
       icon: row.icon,

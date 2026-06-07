@@ -189,6 +189,7 @@ export function upcomingBillsFromRecurring(rules: RecurringRule[], categories: C
         icon: cat?.icon ?? 'repeat',
         cat: rule.cat,
         amount: Math.max(0, rule.amount - partialPaid),
+        fullAmount: rule.amount,
         dueDate: `${MONTHS[due.getMonth()]} ${due.getDate()}`,
         daysUntil,
         recurring: true,

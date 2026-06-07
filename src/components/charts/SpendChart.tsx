@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import Svg, {
   Path,
   Circle,
@@ -43,6 +43,12 @@ interface Props {
   play?: boolean;
   /** Fires with the active point index while scrubbing, `null` on release. */
   onScrub?: (index: number | null) => void;
+  /** Currently locked point (from a tap). Cursor stays visible at this index. */
+  selectedIdx?: number | null;
+  /** Fires on a discrete tap; parent handles toggle (same index → deselect). */
+  onTap?: (index: number) => void;
+  /** Whether scrub/tap should fire selection haptics. Default true. */
+  haptics?: boolean;
 }
 
 // Catmull-Rom → cubic bezier: a smooth curve through every point, no axes.
@@ -75,6 +81,9 @@ export function SpendChart({
   verticalInset,
   play = true,
   onScrub,
+  selectedIdx,
+  onTap,
+  haptics = true,
 }: Props) {
   const padX = strokeWidth + 1;
   const padY = Math.max(strokeWidth + 1, verticalInset ?? strokeWidth + 1);
@@ -136,10 +145,44 @@ export function SpendChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [play, geo.dashLen]);
 
-  const tick = () => Haptics.selectionAsync();
+  const tick = () => { if (haptics) Haptics.selectionAsync(); };
   const emit = (idx: number | null) => onScrub?.(idx);
+  const emitTap = (idx: number) => onTap?.(idx);
 
+  // Track whether a pan is in progress on the JS side so the selectedIdx effect
+  // knows not to fight the worklet-driven cursor position.
   const { xs, ys, stepX } = geo;
+
+  const panActiveRef = useRef(false);
+  const setPanActive = (v: boolean) => { panActiveRef.current = v; };
+
+  // When the parent's locked selection changes (tap toggle), show the cursor at
+  // that point. Skipped while panning so the worklet-driven cursor stays smooth.
+  useEffect(() => {
+    if (panActiveRef.current) return;
+    if (selectedIdx != null && xs[selectedIdx] !== undefined) {
+      cursorX.value = xs[selectedIdx];
+      cursorY.value = ys[selectedIdx];
+      cursorOn.value = withTiming(1, { duration: 130 });
+    } else {
+      cursorOn.value = withTiming(0, { duration: 180 });
+    }
+  }, [selectedIdx, xs, ys, cursorX, cursorY, cursorOn]);
+
+  const tap = useMemo(
+    () =>
+      Gesture.Tap().onEnd((e) => {
+        'worklet';
+        const i =
+          n <= 1
+            ? 0
+            : Math.max(0, Math.min(n - 1, Math.round((e.x - padX) / stepX)));
+        runOnJS(tick)();
+        runOnJS(emitTap)(i);
+      }),
+    [n, padX, stepX],
+  );
+
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -154,6 +197,7 @@ export function SpendChart({
           cursorY.value = ys[i];
           cursorOn.value = withTiming(1, { duration: 130 });
           lastIdx.value = i;
+          runOnJS(setPanActive)(true);
           runOnJS(tick)();
           runOnJS(emit)(i);
         })
@@ -173,16 +217,18 @@ export function SpendChart({
         })
         .onFinalize(() => {
           'worklet';
-          // Only reset if a scrub actually started (skip plain taps).
           if (lastIdx.value !== -1) {
-            cursorOn.value = withTiming(0, { duration: 180 });
             lastIdx.value = -1;
+            runOnJS(setPanActive)(false);
             runOnJS(emit)(null);
+            // The selectedIdx effect re-fires after emit(null) clears scrubIdx;
+            // if a locked selection exists it will restore the cursor there.
           }
         }),
-    // recreate so the worklet closes over the latest geometry
     [xs, ys, stepX, n, padX, cursorX, cursorY, cursorOn, lastIdx],
   );
+
+  const gesture = useMemo(() => Gesture.Race(tap, pan), [tap, pan]);
 
   const lineProps = useAnimatedProps(() => ({ strokeDashoffset: drawn.value }));
   const areaProps = useAnimatedProps(() => ({ opacity: fillIn.value }));
@@ -204,7 +250,7 @@ export function SpendChart({
   const base = fillColor ?? color;
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={gesture}>
       <Svg width={width} height={height}>
         <Defs>
           <LinearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">

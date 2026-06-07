@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   View,
   Animated,
@@ -27,9 +27,11 @@ import {
   InsightDetailScreen,
   type InsightDetailTarget,
 } from './src/screens/InsightDetailScreen';
-import { ActivityScreen } from './src/screens/ActivityScreen';
+import { ActivityScreen, type ActivityHandle } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
+import { GoalsScreen } from './src/screens/GoalsScreen';
 import { TabBar } from './src/components/TabBar';
 import { Drawer } from './src/components/Drawer';
 import type { SourceRect } from './src/components/ContainerTransform';
@@ -93,8 +95,13 @@ export function DashboardApp() {
   const [screen, setScreen] = useState<Screen>('home');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(false);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
   const [activityFilterToken, setActivityFilterToken] = useState(0);
+  const activityFilterTokenRef = useRef(0);
+  const [pendingFilteredActivityNavToken, setPendingFilteredActivityNavToken] = useState<number | null>(null);
+  const [readyFilteredActivityNavToken, setReadyFilteredActivityNavToken] = useState<number | null>(null);
   const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
   const [morphResetToken, setMorphResetToken] = useState(0);
   // Optimistic delete: store the ID of a transaction that should be hidden from
@@ -140,7 +147,8 @@ export function DashboardApp() {
     }).start();
   }, [tabBarAnim]);
 
-  const txSheetRef = useRef<TxSheetHandle>(null);
+  const activityRef  = useRef<ActivityHandle>(null);
+  const txSheetRef   = useRef<TxSheetHandle>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
   const prepareTx = useCallback((tx: Transaction) => txSheetRef.current?.prepare(tx), []);
   const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
@@ -266,11 +274,35 @@ export function DashboardApp() {
 
   const navigateToActivity = useCallback((filter?: ActivityInitialFilter) => {
     if (filter) {
+      const nextToken = activityFilterTokenRef.current + 1;
+      activityFilterTokenRef.current = nextToken;
+      activityRef.current?.beginNavFilter(filter, nextToken);
       setActivityFilter(filter);
-      setActivityFilterToken(t => t + 1);
+      setActivityFilterToken(nextToken);
+      if (activeRef.current !== 'activity') {
+        OP.activity.setValue(0);
+        setReadyFilteredActivityNavToken(null);
+        setPendingFilteredActivityNavToken(nextToken);
+        return;
+      }
     }
     navigate('activity');
-  }, [navigate]);
+  }, [OP, navigate]);
+
+  const handleActivityNavSkeletonReady = useCallback((token: number) => {
+    setReadyFilteredActivityNavToken(token);
+  }, []);
+
+  // Filtered Activity entries wait for the destination screen to confirm that a
+  // skeleton frame has committed. Only then does the native opacity animation
+  // reveal Activity, so stale all-transaction rows never become visible.
+  useLayoutEffect(() => {
+    if (pendingFilteredActivityNavToken === null) return;
+    if (readyFilteredActivityNavToken !== pendingFilteredActivityNavToken) return;
+    setPendingFilteredActivityNavToken(null);
+    setReadyFilteredActivityNavToken(null);
+    navigate('activity');
+  }, [navigate, pendingFilteredActivityNavToken, readyFilteredActivityNavToken]);
 
   const handleDrawerNav = useCallback((id: string) => {
     closeDrawer();
@@ -278,19 +310,23 @@ export function DashboardApp() {
     else if (id === 'budget')   navigate('budget');
     else if (id === 'insights') navigate('insights');
     else if (id === 'activity') navigate('activity');
-    else if (id === 'settings') setThemeOpen(true);
+    else if (id === 'goals')    setGoalsOpen(true);
+    else if (id === 'settings') setSettingsOpen(true);
   }, [closeDrawer, navigate]);
 
   const openTheme = useCallback(() => setThemeOpen(true), []);
   const openBudgetIncome = useCallback((_node: View) => router.push('/income'), []);
   const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const closeGoals = useCallback(() => setGoalsOpen(false), []);
+  const openIncomeFromSettings = useCallback(() => router.push('/income'), []);
   const closeInsight = useCallback(() => setInsightTarget(null), []);
   const handleTabPress = useCallback((id: string) => {
     if      (id === 'home')     navigate('home');
     else if (id === 'spending') navigate('insights');
     else if (id === 'budget')   navigate('budget');
-    else if (id === 'profile')  navigate('activity');
+    else if (id === 'activity') navigate('activity');
   }, [navigate]);
 
   const homeScreen = useMemo(() => (
@@ -335,6 +371,7 @@ export function DashboardApp() {
 
   const activityScreen = useMemo(() => (
     <MemoActivityScreen
+      ref={activityRef}
       theme={theme}
       onOpenDrawer={openDrawer}
       onOpenTx={openTx}
@@ -342,9 +379,10 @@ export function DashboardApp() {
       onOverlayOpenChange={handleOverlayOpenChange}
       initialFilter={activityFilter}
       filterToken={activityFilterToken}
+      onNavSkeletonReady={handleActivityNavSkeletonReady}
       pendingDeleteId={pendingDeleteId}
     />
-  ), [activityFilter, activityFilterToken, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
+  ), [activityFilter, activityFilterToken, handleActivityNavSkeletonReady, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen
@@ -398,7 +436,7 @@ export function DashboardApp() {
         >
           <TabBar
             theme={theme}
-            active={screen === 'activity' ? 'profile' : screen === 'insights' ? 'spending' : screen}
+            active={screen === 'insights' ? 'spending' : screen}
             onAdd={openVoiceExpense}
             onTabPress={handleTabPress}
           />
@@ -453,6 +491,22 @@ export function DashboardApp() {
           </View>
         )}
 
+        <GoalsScreen
+          theme={theme}
+          visible={goalsOpen}
+          onClose={closeGoals}
+        />
+
+        <SettingsScreen
+          theme={theme}
+          visible={settingsOpen}
+          onClose={closeSettings}
+          onOpenAppearance={openTheme}
+          onOpenIncome={openIncomeFromSettings}
+          activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
+          memberCount={ledgerMembers.length}
+        />
+
         <ThemeScreen
           theme={theme}
           visible={themeOpen}
@@ -464,6 +518,7 @@ export function DashboardApp() {
           target={insightTarget}
           onOpenTx={openTx}
           onClose={closeInsight}
+          onSeeAll={navigateToActivity}
         />
 
       </View>

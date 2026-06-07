@@ -17,6 +17,9 @@ interface Props {
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
+  // 'primary' (default): full blur intensity for hero/data tiles.
+  // 'secondary': reduced blur for supporting context tiles (What changed, Where it went).
+  tier?: 'primary' | 'secondary';
 }
 
 // A frosted-glass bento tile: the app's signature SectionCard surface, sized by
@@ -29,9 +32,16 @@ export function BentoTile({
   onPress,
   style,
   accessibilityLabel,
+  tier = 'primary',
 }: Props) {
   const scale = useRef(new Animated.Value(1)).current;
-  const borderColor = dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
+  const isPrimary = tier === 'primary';
+  const blurIntensity = isPrimary
+    ? (dark ? 70 : 100)
+    : (dark ? 44 : 72);
+  const borderColor = isPrimary
+    ? (dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)')
+    : (dark ? 'rgba(235,239,242,0.10)' : 'rgba(14,12,24,0.05)');
 
   const animateTo = (toValue: number) =>
     Animated.spring(scale, {
@@ -43,7 +53,7 @@ export function BentoTile({
 
   const body = (
     <BlurView
-      intensity={dark ? 70 : 100}
+      intensity={blurIntensity}
       tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
       style={styles.blur}
     >

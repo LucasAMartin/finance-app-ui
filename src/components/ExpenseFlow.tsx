@@ -110,6 +110,9 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
   const [manualRepeat, setManualRepeat] = useState<RepeatValue>('never');
   const [heardTranscript, setHeardTranscript] = useState('');
 
+  const merchantRef = useRef<TextInput>(null);
+  const noteRef = useRef<TextInput>(null);
+
   const voice = useVoiceRecognition();
   const transcriptRef = useRef('');
   useEffect(() => { transcriptRef.current = voice.transcript; }, [voice.transcript]);
@@ -441,30 +444,38 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
               ) : null}
 
               <View style={[S.fieldCard, { backgroundColor: theme.chipBg }]}>
-                <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                <Pressable
+                  onPress={() => { setKeypadOpen(false); merchantRef.current?.focus(); }}
+                  style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
+                >
                   <Text style={[TYPE.body, { color: theme.textSec }]}>Merchant</Text>
                   <TextInput
+                    ref={merchantRef}
                     value={manualMerchant} onChangeText={setManualMerchant}
                     placeholder="Where?" placeholderTextColor={theme.textTer}
                     keyboardAppearance={darkScheme}
                     returnKeyType="done"
                     selectTextOnFocus
                     style={[S.fieldInput, { color: theme.text, flex: 1 }]}
-                    onFocus={() => { if (keypadOpen) setKeypadOpen(false); }}
+                    onFocus={() => setKeypadOpen(false)}
                   />
-                </View>
-                <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setKeypadOpen(false); noteRef.current?.focus(); }}
+                  style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
+                >
                   <Text style={[TYPE.body, { color: theme.textSec }]}>Note</Text>
                   <TextInput
+                    ref={noteRef}
                     value={manualNote} onChangeText={setManualNote}
                     placeholder="Optional" placeholderTextColor={theme.textTer}
                     keyboardAppearance={darkScheme}
                     returnKeyType="done"
                     selectTextOnFocus
                     style={[S.fieldInput, { color: theme.text, flex: 1 }]}
-                    onFocus={() => { if (keypadOpen) setKeypadOpen(false); }}
+                    onFocus={() => setKeypadOpen(false)}
                   />
-                </View>
+                </Pressable>
                 <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
                   <Text style={[TYPE.body, { color: theme.textSec }]}>Date</Text>
                   <Host matchContents ignoreSafeArea="all">
@@ -536,6 +547,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
             theme={theme}
             onKey={(key) => setManualAmt(prev => applyKeypadKey(prev, key))}
             onDone={() => setKeypadOpen(false)}
+            passthrough
           />
         )}
       </View>

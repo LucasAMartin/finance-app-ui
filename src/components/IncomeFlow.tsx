@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, Pressable, TextInput, StyleSheet, ScrollView, Keyboard,
 } from 'react-native';
@@ -107,6 +107,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [receivedDate, setReceivedDate] = useState<Date>(defaultDate);
   const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
+  const nameRef = useRef<TextInput>(null);
 
   const loadRegular = (inc: Income) => {
     setKind('regular');
@@ -314,16 +315,22 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   </Host>
                 </View>
               )}
-              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
+              <Pressable
+                disabled={!canEditIncome}
+                onPress={() => { setAmountKeypadOpen(false); nameRef.current?.focus(); }}
+                style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}
+              >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Name</Text>
                 <TextInput
+                  ref={nameRef}
                   value={source} onChangeText={setSource}
                   editable={canEditIncome}
                   placeholder="e.g. Salary, Weekend job" placeholderTextColor={theme.textTer}
                   keyboardAppearance={darkScheme} returnKeyType="done" selectTextOnFocus
                   style={[S.fieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
+                  onFocus={() => setAmountKeypadOpen(false)}
                 />
-              </View>
+              </Pressable>
               <Pressable
                 onPress={openAmountKeypad}
                 disabled={!canEditIncome}
@@ -446,16 +453,22 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   </Host>
                 </View>
               )}
-              <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
+              <Pressable
+                disabled={!canEditIncome}
+                onPress={() => { setAmountKeypadOpen(false); nameRef.current?.focus(); }}
+                style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}
+              >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Name</Text>
                 <TextInput
+                  ref={nameRef}
                   value={source} onChangeText={setSource}
                   editable={canEditIncome}
                   placeholder="Optional" placeholderTextColor={theme.textTer}
                   keyboardAppearance={darkScheme} returnKeyType="done" selectTextOnFocus
                   style={[S.fieldInput, { color: theme.text, flex: 1, textAlign: 'right' }]}
+                  onFocus={() => setAmountKeypadOpen(false)}
                 />
-              </View>
+              </Pressable>
               <Pressable
                 onPress={openAmountKeypad}
                 disabled={!canEditIncome}
@@ -502,6 +515,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
         theme={theme}
         onKey={(key) => setDraft(prev => applyKeypadKey(prev, key))}
         onDone={() => setAmountKeypadOpen(false)}
+        passthrough
       />
     </View>
   );

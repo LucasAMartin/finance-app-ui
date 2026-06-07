@@ -24,7 +24,7 @@ const TABS = [
   { id: 'home',     icon: 'home',    inactive: 'house',     active: 'house.fill'     },
   { id: 'spending', icon: 'chart',   inactive: 'chart.bar', active: 'chart.bar.fill' },
   { id: 'budget',   icon: 'wallet',  inactive: 'chart.pie', active: 'chart.pie.fill' },
-  { id: 'profile',  icon: 'receipt', inactive: 'clock',     active: 'clock.fill'     },
+  { id: 'activity', icon: 'list',    inactive: 'list.bullet.rectangle', active: 'list.bullet.rectangle.fill' },
 ] as const;
 
 const TAB_W    = 52;  // tab button diameter

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, View, Text, Pressable, StyleSheet, Keyboard, useWindowDimensions } from 'react-native';
+import { InteractionManager, View, Text, Pressable, StyleSheet, Keyboard, TextInput, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BottomSheetModal,
@@ -433,8 +433,7 @@ export function TxSheet({
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={handleIndicatorStyle}
       backgroundStyle={backgroundStyle}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
+      keyboardBehavior={"none" as any}
     >
       <View
         style={[S.content, { backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)' }]}
@@ -531,6 +530,7 @@ export function TxSheet({
             theme={theme}
             onKey={(key) => setEditAmt(prev => applyKeypadKey(prev, key))}
             onDone={() => setAmountKeypadOpen(false)}
+            passthrough
           />
         )}
       </View>
@@ -668,6 +668,8 @@ function EditSection({
   };
   const selectedGroupColor = groupColors[selectedGroup] ?? theme.accent.dot;
   const lockedFieldStyle = !canEdit && S.lockedFields;
+  const merchantRef = useRef<any>(null);
+  const noteRef = useRef<any>(null);
 
   return (
     <View style={[S.editSection, { borderTopColor: theme.hairline }]}>
@@ -722,25 +724,34 @@ function EditSection({
             </View>
           </View>
         ) : null}
-        <View style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+        <Pressable
+          disabled={!canEdit}
+          onPress={() => { onDismissAmountKeypad(); merchantRef.current?.focus(); }}
+          style={[S.fieldRow, { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}
+        >
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Merchant</Text>
           <BottomSheetTextInput
+            ref={merchantRef}
             value={editMerchant}
             onChangeText={setEditMerchant}
             editable={canEdit}
             placeholder="Merchant name"
             placeholderTextColor={theme.textTer}
-            clearButtonMode="while-editing"
             keyboardAppearance={theme.dark ? 'dark' : 'light'}
             returnKeyType="done"
             selectTextOnFocus
             onFocus={onDismissAmountKeypad}
             style={[S.fieldInput, { color: theme.text, flex: 1 }]}
           />
-        </View>
-        <View style={S.fieldRow}>
+        </Pressable>
+        <Pressable
+          disabled={!canEdit}
+          onPress={() => { onDismissAmountKeypad(); noteRef.current?.focus(); }}
+          style={S.fieldRow}
+        >
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Note</Text>
           <BottomSheetTextInput
+            ref={noteRef}
             value={editNote}
             onChangeText={setEditNote}
             editable={canEdit}
@@ -752,7 +763,7 @@ function EditSection({
             onFocus={onDismissAmountKeypad}
             style={[S.fieldInput, { color: theme.text, flex: 1 }]}
           />
-        </View>
+        </Pressable>
       </View>
 
       {/* Category picker */}

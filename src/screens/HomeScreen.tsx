@@ -558,6 +558,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   const overage = mb.spent - mb.budget;
   const over = hasIncome && mb.spent > mb.budget;
   const openSelectedMonthActivity = useCallback(() => {
+    Haptics.selectionAsync().catch(() => {});
     onViewActivity({
       dateFrom: selectedMonthRange.from,
       dateTo: selectedMonthRange.to,
@@ -709,7 +710,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                       {mb.remainingLabel}
                     </Text>
                   </>
-                ) : null}
+                ) : (
+                  <Text style={[styles.heroStatusLabel, { color: pWallpaper.textSec }, shadow]} numberOfLines={1}>
+                    Set your income to get started
+                  </Text>
+                )}
               </View>
               {loading ? (
                 <Skeleton width={88} height={13} radius={4} onMedia={theme.dark} />
@@ -743,22 +748,18 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                 <Skeleton width={220} height={42} radius={8} onMedia={theme.dark} style={{ marginBottom: 20 }} />
                 <Skeleton width="100%" height={5} radius={3} onMedia={theme.dark} />
               </>
-            ) : hasIncome ? (
+            ) : (
               <Animated.View>
                 <View style={styles.heroAmountRow}>
                   <HeroAmount
-                    value={over ? overage : available}
-                    prefix={over ? '-$' : '$'}
-                    color={over ? OVER_DOT : pWallpaper.text}
+                    value={hasIncome ? (over ? overage : available) : 0}
+                    prefix={hasIncome && over ? '-$' : '$'}
+                    color={hasIncome && over ? OVER_DOT : pWallpaper.text}
                     shadow={shadow}
                   />
                 </View>
                 <BudgetBar pct={rawPct} trackBg={pWallpaper.trackBg} />
               </Animated.View>
-            ) : (
-              <Text style={[styles.heroNoIncome, { color: pWallpaper.textSec }, shadow]}>
-                Set income to start tracking your budget
-              </Text>
             )}
           </View>
 
@@ -1245,10 +1246,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACE.lg,
     alignItems: 'flex-start',
   },
-  heroNoIncome: {
-    ...TYPE.onMediaStatusSub,
-    marginBottom: SPACE.xl,
-  },
+
   heroAmount: {
     ...TYPE.onMediaAmount,
   },

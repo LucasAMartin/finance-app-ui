@@ -105,6 +105,7 @@ export interface Bill extends SyncFields {
   icon: string;
   cat: string;
   amount: number;
+  fullAmount: number;
   dueDate: string;
   recurring: boolean;
   daysUntil: number;

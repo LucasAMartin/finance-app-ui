@@ -20,6 +20,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { Button as SwiftButton, Host, Menu } from '@expo/ui/swift-ui';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '../ThemeProvider';
 import {
@@ -237,11 +238,10 @@ function buildInsightBins(
 
 function money(n: number, decimals = 0): string {
   const abs = Math.abs(n);
-  const value =
-    abs >= 1000 && decimals === 0
-      ? Math.round(abs).toLocaleString()
-      : abs.toFixed(decimals);
-  return `$${value}`;
+  if (decimals > 0) {
+    return `$${abs.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+  }
+  return `$${abs >= 1000 ? Math.round(abs).toLocaleString() : abs.toFixed(0)}`;
 }
 
 function signedMoney(n: number): string {
@@ -374,11 +374,13 @@ function InsightBottomSheet({
   theme,
   onClose,
   onViewActivity,
+  onViewSpendingChart,
 }: {
   detail: InsightDetail | null;
   theme: Theme;
   onClose: () => void;
   onViewActivity: (filter: ActivityInitialFilter) => void;
+  onViewSpendingChart?: () => void;
 }) {
   const lastDetail = useRef<InsightDetail | null>(null);
   if (detail) lastDetail.current = detail;
@@ -559,12 +561,33 @@ function InsightBottomSheet({
               <SheetPrimaryButton
                 label="View matching transactions"
                 onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
                   onClose();
                   onViewActivity(d.filter!);
                 }}
                 theme={theme}
                 style={styles.insightSheetAction}
               />
+            )}
+            {d.showSpendingChart && onViewSpendingChart && (
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  onClose();
+                  onViewSpendingChart();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="View spending chart"
+                style={({ pressed }) => [
+                  styles.insightSheetSecondary,
+                  { opacity: pressed ? 0.5 : 1 },
+                ]}
+              >
+                <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>
+                  View spending chart
+                </Text>
+                <Icon name="chevR" size={13} color={theme.accent.dot} stroke={2.2} />
+              </Pressable>
             )}
           </>
         )}
@@ -1023,6 +1046,7 @@ export function InsightsScreen({
             caption: `peak ${money(peak.value, dec(peak.value))} · ${peak.label}`,
           },
           filter: { dateFrom: peak.from, dateTo: peak.to },
+          showSpendingChart: true,
         },
       });
     }
@@ -1113,6 +1137,7 @@ export function InsightsScreen({
               caption: `${zero} no-spend · ${money(total, dec(total))} spent`,
             },
             filter: { ...range },
+            showSpendingChart: true,
           },
         });
       }
@@ -1152,6 +1177,7 @@ export function InsightsScreen({
           caption: `avg ${money(perDay, dec(perDay))}/day`,
         },
         filter: { ...range },
+        showSpendingChart: true,
       },
     });
 
@@ -1667,7 +1693,7 @@ export function InsightsScreen({
                 </View>
                 <Text style={[styles.tileHeroAmount, { color: p.text }]}>
                   {spendDisplay.whole}
-                  <Text style={{ color: p.textSec }}>{spendDisplay.cents}</Text>
+                  <Text style={{ color: p.text }}>{spendDisplay.cents}</Text>
                 </Text>
                 <View
                   style={styles.heroChart}
@@ -1685,6 +1711,7 @@ export function InsightsScreen({
                     verticalInset={28}
                     play={chartsArmed}
                     onScrub={setScrubIdx}
+                    haptics={false}
                   />
                 </View>
               </BentoTile>
@@ -1703,7 +1730,7 @@ export function InsightsScreen({
                       accentColor: savingsTint,
                     })
                   }
-                  accessibilityLabel={`Total saved, ${money(savedAmount)}`}
+                  accessibilityLabel={`Total saved, ${money(savedAmount, 2)}`}
                 >
                   <Text style={[TYPE.labelSm, { color: p.textTer }]}>
                     Total saved
@@ -1712,7 +1739,7 @@ export function InsightsScreen({
                     style={[styles.tileValue, { color: savingsTint }]}
                     numberOfLines={1}
                   >
-                    {money(savedAmount)}
+                    {money(savedAmount, 2)}
                   </Text>
                   <Text
                     style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
@@ -1751,7 +1778,7 @@ export function InsightsScreen({
                       icon: 'chart',
                     })
                   }
-                  accessibilityLabel={`Spending trends, ${trendRightLabel} ${money(trendAmount)}`}
+                  accessibilityLabel={`Spending trends, ${trendRightLabel} ${money(trendAmount, 2)}`}
                 >
                   <Text style={[TYPE.labelSm, { color: p.textTer }]}>
                     Spending trends
@@ -1760,7 +1787,7 @@ export function InsightsScreen({
                     style={[styles.tileValue, { color: p.text }]}
                     numberOfLines={1}
                   >
-                    {money(trendAmount)}
+                    {money(trendAmount, 2)}
                   </Text>
                   <Text
                     style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
@@ -1793,7 +1820,7 @@ export function InsightsScreen({
 
               {/* What changed — movement vs the previous period */}
               {changeSnapshots.length > 0 ? (
-                <BentoTile dark={theme.dark}>
+                <BentoTile dark={theme.dark} tier="secondary">
                   <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
                     What changed
                   </Text>
@@ -1842,7 +1869,7 @@ export function InsightsScreen({
                   lists read as a matched pair; the picker switches the sub-view
                   and a row tap opens the same insight sheet. */}
               {hasSpending ? (
-                <BentoTile dark={theme.dark}>
+                <BentoTile dark={theme.dark} tier="secondary">
                   <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
                     Where it went
                   </Text>
@@ -1875,16 +1902,18 @@ export function InsightsScreen({
                       </Text>
                     ) : (
                       whereItems.map((it, i) => {
-                        const dec = Math.abs(it.spent) < 100 ? 2 : 0;
                         const fill = whereMax > 0 ? it.spent / whereMax : 0;
                         return (
                           <Pressable
                             key={it.key}
                             onPress={() => setInsightDetail(it.detail)}
-                            onLongPress={() => onViewActivity(it.detail.filter!)}
+                            onLongPress={() => {
+                              Haptics.selectionAsync().catch(() => {});
+                              onViewActivity(it.detail.filter!);
+                            }}
                             delayLongPress={400}
                             accessibilityRole="button"
-                            accessibilityLabel={`${it.label}, ${money(it.spent, dec)}`}
+                            accessibilityLabel={`${it.label}, ${money(it.spent, 2)}`}
                             accessibilityHint="Long press to see matching transactions"
                             style={({ pressed }) => [
                               styles.catRow,
@@ -1929,14 +1958,19 @@ export function InsightsScreen({
                                   {it.label}
                                 </Text>
                                 <View style={styles.catRight}>
-                                  <Text style={[TYPE.body, { color: p.text }]}>
-                                    {money(it.spent, dec)}
+                                  <View style={styles.deltaSlot}>
+                                    <DeltaBadge
+                                      spent={it.spent}
+                                      prevSpent={it.prevSpent}
+                                      dark={theme.dark}
+                                    />
+                                  </View>
+                                  <Text style={[TYPE.body, { color: p.text, textAlign: 'right' }]}>
+                                    {money(it.spent, 2)}
                                   </Text>
-                                  <DeltaBadge
-                                    spent={it.spent}
-                                    prevSpent={it.prevSpent}
-                                    dark={theme.dark}
-                                  />
+                                  <View style={styles.catChevron}>
+                                    <Icon name="chevR" size={12} color={p.textTer} stroke={2.2} />
+                                  </View>
                                 </View>
                               </View>
                               <View
@@ -1963,11 +1997,11 @@ export function InsightsScreen({
                   </View>
                 </BentoTile>
               ) : (
-                <BentoTile dark={theme.dark}>
+                <BentoTile dark={theme.dark} tier="secondary">
                   <EmptyState
                     theme={theme}
                     title="No spending yet this period"
-                    body="Log an expense and your top categories, merchants, and what changed since last period show up here."
+                    body="Log an expense to see your top categories and merchants here."
                   />
                 </BentoTile>
               )}
@@ -1981,6 +2015,7 @@ export function InsightsScreen({
           theme={theme}
           onClose={() => setInsightDetail(null)}
           onViewActivity={onViewActivity}
+          onViewSpendingChart={() => onOpenInsight({ title: 'Spending', subtitle: rangeContextLabel, icon: 'chart' })}
         />
     </View>
   );
@@ -2087,8 +2122,19 @@ const styles = StyleSheet.create({
   catRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACE.sm,
     flexShrink: 0,
+    gap: SPACE.xs,
+  },
+  catChevron: {
+    width: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deltaSlot: {
+    width: 42,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginRight: SPACE.xs,
   },
   catBar: {
     height: 5,
@@ -2251,5 +2297,13 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.button,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  insightSheetSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACE.xs,
+    marginTop: SPACE.md,
+    paddingVertical: SPACE.sm,
   },
 });
