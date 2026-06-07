@@ -2080,7 +2080,6 @@ function FilterSheet({
                 fallbackBg={theme.chipBg}
                 accessibilityLabel="Done"
               />
-              <Text style={[FS.title, { color: theme.text }]}>Filters</Text>
             </View>
             {activeCount > 0 && (
               <TouchableOpacity

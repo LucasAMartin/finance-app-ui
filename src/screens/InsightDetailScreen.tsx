@@ -586,8 +586,8 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
                       fades out at the bottom so there's no hard band edge. */}
                   <LinearGradient
                     pointerEvents="none"
-                    colors={['rgba(3,5,8,0.3)', 'rgba(3,5,8,0.3)', 'rgba(3,5,8,0)']}
-                    locations={[0, 0.85, 1]}
+                    colors={['rgba(3,5,8,0.10)', 'rgba(3,5,8,0.10)', 'rgba(3,5,8,0)']}
+                    locations={[0, 0.9, 1]}
                     style={styles.heroBacking}
                   />
                   <View style={styles.metricHeroTop}>

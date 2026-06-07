@@ -7,6 +7,9 @@
 // "Card interior" (p = makeP(theme.dark)): text inside BlurView section cards.
 // Flips to near-ink in light mode so dark text reads on the light frosted glass.
 
+// Near-black for on-wallpaper surfaces in light mode (mirrors MEDIA.text for dark).
+export const MEDIA_INK = '#0E0C18';
+
 export const MEDIA = {
   text: '#F2F4F5',
   textSec: 'rgba(242,244,245,0.72)',
@@ -42,6 +45,19 @@ export type WallpaperP = ReturnType<typeof makeP>;
 // Darker than makeP(false).hairline (9%) — used for sticky card borders and
 // header backdrop dividers that need a slightly crisper edge.
 export const ONMEDIA_BORDER_LIGHT = 'rgba(14,12,24,0.08)';
+
+// Palette for the spend-group panels inside dark BlurView cards on HomeScreen.
+// Tuned for legibility on the frosted-dark surface; separate from MEDIA which
+// targets text sitting directly on the wallpaper/scrim.
+export const SPEND_CARD_DARK = {
+  text: '#FFFFFF',
+  textTer: 'rgba(255,255,255,0.78)',
+  hairline: 'rgba(255,255,255,0.18)',
+  sep: 'rgba(255,255,255,0.14)',
+  trackBg: 'rgba(255,255,255,0.18)',
+  // Hex alpha appended to a group color string to get the tinted header fill.
+  headerTintAlpha: '50',
+};
 
 // Scrim colors that match the HomeScreen aesthetic.
 // Light mode: subtle dark tint (wallpaper shows through vividly).

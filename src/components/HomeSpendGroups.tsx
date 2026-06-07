@@ -5,6 +5,9 @@ import type { SpendGroup } from '../repositories/types';
 import { Icon } from './Icon';
 import { Collapsible } from './Collapsible';
 import { TYPE } from '../typography';
+import { SPACE, LAYOUT } from '../spacing';
+import { RADIUS } from '../radius';
+import { SPEND_CARD_DARK } from '../wallpaperPalette';
 
 interface Props {
   theme: Theme;
@@ -14,7 +17,6 @@ interface Props {
   onMedia?: boolean;
 }
 
-// Spending amounts always read as dollars-and-cents, e.g. $1,234.00 / $1,234.50.
 const fmtAmount = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -34,18 +36,6 @@ export function HomeSpendGroups({ theme, groups, income, compact, onMedia }: Pro
     </View>
   );
 }
-
-// On-media palette: used when this component renders inside a translucent dark
-// BlurView (HomeScreen wallpaper layout). Flips text and hairline tokens to a
-// light-on-dark vocabulary; lifts the colored header tint so it reads on blur.
-const ON_MEDIA = {
-  text: '#FFFFFF',
-  textTer: 'rgba(255,255,255,0.78)',
-  hairline: 'rgba(255,255,255,0.18)',
-  sep: 'rgba(255,255,255,0.14)',
-  trackBg: 'rgba(255,255,255,0.18)',
-  headerTintHex: '50',
-};
 
 function GroupPanel({
   theme,
@@ -90,20 +80,18 @@ function GroupPanel({
     : onTrack ? 'On Track' : 'Over Budget';
 
   const headerTint = onMedia
-    ? `${color}${ON_MEDIA.headerTintHex}`
+    ? `${color}${SPEND_CARD_DARK.headerTintAlpha}`
     : theme.dark ? `${color}12` : `${color}26`;
-  const textColor = onMedia ? ON_MEDIA.text : theme.text;
-  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.dark ? theme.textTer : theme.textSec;
+  const textColor = onMedia ? SPEND_CARD_DARK.text : theme.text;
+  const textTerColor = onMedia ? SPEND_CARD_DARK.textTer : theme.dark ? theme.textTer : theme.textSec;
   const trackBg = onMedia
-    ? ON_MEDIA.trackBg
+    ? SPEND_CARD_DARK.trackBg
     : theme.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)';
 
   return (
     <View style={s.panel}>
-      {/* Tinted container — grows to contain both header and expanded sub-rows */}
       <View style={[s.tintedContainer, { backgroundColor: headerTint }]}>
 
-        {/* Press target is header area only — Collapsible is a sibling below */}
         <TouchableOpacity
           onPress={() => setOpen(o => !o)}
           activeOpacity={0.7}
@@ -136,7 +124,6 @@ function GroupPanel({
           </Text>
         </TouchableOpacity>
 
-        {/* Sibling to the touch target — expands the tinted container downward */}
         <Collapsible open={open}>
           <View style={s.subContent}>
             {group.key === 'wants' ? (
@@ -152,16 +139,14 @@ function GroupPanel({
   );
 }
 
-// ── Sub-content components ───────────────────────────────────────
-
 function DetailRows({
   theme, group, color, isSavings, onMedia,
 }: {
   theme: Theme; group: SpendGroup; color: string; isSavings: boolean; onMedia?: boolean;
 }) {
-  const textColor = onMedia ? ON_MEDIA.text : theme.text;
-  const textTerColor = onMedia ? ON_MEDIA.textTer : theme.dark ? theme.textTer : theme.textSec;
-  const trackBg = onMedia ? ON_MEDIA.hairline : theme.hairline;
+  const textColor = onMedia ? SPEND_CARD_DARK.text : theme.text;
+  const textTerColor = onMedia ? SPEND_CARD_DARK.textTer : theme.dark ? theme.textTer : theme.textSec;
+  const trackBg = onMedia ? SPEND_CARD_DARK.hairline : theme.hairline;
 
   return (
     <View style={s.detailList}>
@@ -188,7 +173,7 @@ function DetailRows({
                     ${fmtAmount(sub.spent)}
                   </Text>
                   {(!funded || over) && (
-                    <Text style={[s.subBudget, { color: textTerColor }]}>
+                    <Text style={[TYPE.caption, { fontSize: 11, lineHeight: 14, color: textTerColor }]}>
                       {'  /  $'}{fmtAmount(sub.budget)}
                     </Text>
                   )}
@@ -210,8 +195,8 @@ function WantsChips({
 }: {
   theme: Theme; group: SpendGroup; color: string; onMedia?: boolean;
 }) {
-  const textColor = onMedia ? ON_MEDIA.text : theme.text;
-  const hairlineColor = onMedia ? ON_MEDIA.hairline : theme.hairline;
+  const textColor = onMedia ? SPEND_CARD_DARK.text : theme.text;
+  const hairlineColor = onMedia ? SPEND_CARD_DARK.hairline : theme.hairline;
   const total = group.subs.reduce((s, x) => s + x.spent, 0);
 
   return (
@@ -229,11 +214,11 @@ function WantsChips({
                 height: '100%',
                 backgroundColor: color,
                 opacity: 0.4 + ratio * 0.5,
-                marginLeft: isFirst ? 0 : 2,
-                borderTopLeftRadius: isFirst ? 3 : 0,
-                borderBottomLeftRadius: isFirst ? 3 : 0,
-                borderTopRightRadius: isLast ? 3 : 0,
-                borderBottomRightRadius: isLast ? 3 : 0,
+                marginLeft: isFirst ? 0 : SPACE.px2,
+                borderTopLeftRadius: isFirst ? RADIUS.bar : 0,
+                borderBottomLeftRadius: isFirst ? RADIUS.bar : 0,
+                borderTopRightRadius: isLast ? RADIUS.bar : 0,
+                borderBottomRightRadius: isLast ? RADIUS.bar : 0,
               }}
             />
           );
@@ -266,44 +251,40 @@ function WantsChips({
 
 const s = StyleSheet.create({
   panel: {
-    paddingBottom: 4,
+    paddingBottom: SPACE.xs,
   },
   tintedContainer: {
-    borderRadius: 10,
-    marginBottom: 2,
+    borderRadius: RADIUS.chip,
+    marginBottom: SPACE.px2,
   },
   headerContent: {
-    paddingHorizontal: 12,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: SPACE.md,
+    paddingTop: SPACE.lg,
+    paddingBottom: SPACE.md,
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: SPACE.sm,
   },
   labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: SPACE.sm,
   },
   totalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: SPACE.sm,
   },
   groupDot: {
     width: 7,
     height: 7,
-    borderRadius: 4,
+    borderRadius: RADIUS.bar,
   },
   groupLabel: {
-    ...TYPE.labelLg,
-    textTransform: 'none',
-    letterSpacing: 0,
-    fontSize: 16,
-    lineHeight: 18,
+    ...TYPE.groupPanelLabel,
   },
   groupTotal: {
     ...TYPE.subsectionTitle,
@@ -312,7 +293,7 @@ const s = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: SPACE.sm,
   },
   fill: {
     height: '100%',
@@ -324,18 +305,18 @@ const s = StyleSheet.create({
     letterSpacing: -0.1,
   },
   subContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 16,
+    paddingHorizontal: SPACE.md,
+    paddingBottom: SPACE.lg,
   },
 
   // Detail rows
   detailList: {
-    gap: 12,
+    gap: SPACE.md,
   },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: SPACE.md,
   },
   iconWrap: {
     width: 28,
@@ -349,12 +330,12 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginBottom: 5,
+    marginBottom: SPACE.xs,
   },
   subName: {
     ...TYPE.bodySm,
     flex: 1,
-    marginRight: 8,
+    marginRight: SPACE.sm,
   },
   subAmtGroup: {
     flexDirection: 'row',
@@ -367,11 +348,6 @@ const s = StyleSheet.create({
   subSpent: {
     ...TYPE.captionEm,
     letterSpacing: -0.2,
-  },
-  subBudget: {
-    ...TYPE.caption,
-    fontSize: 11,
-    lineHeight: 14,
   },
   subTrack: {
     height: 4,
@@ -389,13 +365,13 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     borderRadius: 3,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: SPACE.sm,
   },
   wantRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
   },
   wantLabel: {
     flex: 1,

@@ -26,6 +26,9 @@ export const TYPE = {
   pageTitle:      { fontSize: 17, fontWeight: '600', letterSpacing: -0.4, lineHeight: 22 },
   sectionTitle:   { fontSize: 18, fontWeight: '600', letterSpacing: -0.4, lineHeight: 22 },
   subsectionTitle:{ fontSize: 15, fontWeight: '600', letterSpacing: -0.3, lineHeight: 20 },
+  // Spending group panel header — sits between subsectionTitle and body in the
+  // collapsible groups on HomeScreen. Not uppercase; weight matches subsectionTitle.
+  groupPanelLabel:{ fontSize: 16, fontWeight: '600', letterSpacing: -0.3, lineHeight: 20 },
 
   // Body
   body:           { fontSize: 14, fontWeight: '500', letterSpacing: -0.2, lineHeight: 19 },
