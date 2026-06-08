@@ -31,6 +31,7 @@ interface PopupNumericKeypadProps {
   onHeightChange?: (height: number) => void;
   zIndex?: number;
   passthrough?: boolean;
+  hideDone?: boolean;
 }
 
 export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, PopupNumericKeypadProps>(function PopupNumericKeypad({
@@ -44,6 +45,7 @@ export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, Popu
   onHeightChange,
   zIndex = 40,
   passthrough = false,
+  hideDone = false,
 }, ref) {
   const insets = useSafeAreaInsets();
   const [interactive, setInteractive] = useState(visible);
@@ -113,14 +115,16 @@ export const PopupNumericKeypad = memo(forwardRef<PopupNumericKeypadHandle, Popu
         </BlurView>
       </Reanimated.View>
 
-      <Reanimated.View
-        pointerEvents={interactive ? 'box-none' : 'none'}
-        style={[styles.doneFloat, { bottom: keypadH + 12, zIndex: zIndex + 1 }, doneStyle]}
-      >
-        <View style={styles.doneWrap} pointerEvents={interactive ? 'auto' : 'none'}>
-          <SheetPrimaryButton label="Done" onPress={onDone} theme={theme} />
-        </View>
-      </Reanimated.View>
+      {!hideDone && (
+        <Reanimated.View
+          pointerEvents={interactive ? 'box-none' : 'none'}
+          style={[styles.doneFloat, { bottom: keypadH + 12, zIndex: zIndex + 1 }, doneStyle]}
+        >
+          <View style={styles.doneWrap} pointerEvents={interactive ? 'auto' : 'none'}>
+            <SheetPrimaryButton label="Done" onPress={onDone} theme={theme} />
+          </View>
+        </Reanimated.View>
+      )}
     </>
   );
 }));

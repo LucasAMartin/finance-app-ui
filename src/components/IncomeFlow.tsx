@@ -7,7 +7,7 @@ import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, OVER_DOT } from '../theme';
 import { Icon } from './Icon';
-import { SheetPrimaryButton } from './shared';
+import { SheetPrimaryButton, FIELD_CARD, FIELD_ROW } from './shared';
 import { TYPE } from '../typography';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
@@ -37,19 +37,29 @@ interface IncomeFlowProps {
 
 // ─── helpers (same logic as BudgetScreen) ─────────────────────────────────────
 
-type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
+type Cadence = 'Mo' | 'Sm' | '2w' | 'Wk' | 'Yr' | 'Cu';
 const CADENCES: { value: Cadence; label: string }[] = [
   { value: 'Mo', label: 'Monthly' },
+  { value: 'Sm', label: 'Twice a month' },
   { value: '2w', label: 'Every 2 weeks' },
   { value: 'Wk', label: 'Weekly' },
   { value: 'Yr', label: 'Yearly' },
+  { value: 'Cu', label: 'Custom…' },
 ];
 const CADENCE_TO_INCOME: Record<Cadence, Income['cadence']> = {
-  Mo: 'monthly', '2w': 'biweekly', Wk: 'weekly', Yr: 'annual',
+  Mo: 'monthly', Sm: 'semimonthly', '2w': 'biweekly', Wk: 'weekly', Yr: 'annual', Cu: 'custom',
 };
 const INCOME_TO_CADENCE: Partial<Record<Income['cadence'], Cadence>> = {
-  monthly: 'Mo', biweekly: '2w', weekly: 'Wk', annual: 'Yr',
+  monthly: 'Mo', semimonthly: 'Sm', biweekly: '2w', weekly: 'Wk', annual: 'Yr', custom: 'Cu',
 };
+
+type CustomUnit = 'month' | 'year';
+const CUSTOM_UNITS: { value: CustomUnit; label: string }[] = [
+  { value: 'month', label: 'month' },
+  { value: 'year', label: 'year' },
+];
+const CUSTOM_MAX = 60;
+const perYearFrom = (count: number, unit: CustomUnit) => (unit === 'month' ? count * 12 : count);
 
 const CURRENT_MONTH = new Date().toISOString().slice(0, 7);
 
@@ -103,6 +113,8 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const [source, setSource] = useState('');
   const [draft, setDraft] = useState('0.00');
   const [cadence, setCadence] = useState<Cadence>('Mo');
+  const [customCount, setCustomCount] = useState(3);
+  const [customUnit, setCustomUnit] = useState<CustomUnit>('month');
   const [startDate, setStartDate] = useState<Date>(defaultDate);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [receivedDate, setReceivedDate] = useState<Date>(defaultDate);
@@ -114,6 +126,19 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     setEditingId(inc.id);
     setSource(inc.source);
     setCadence(INCOME_TO_CADENCE[inc.cadence] ?? 'Mo');
+    if (inc.cadence === 'custom') {
+      const storedCount = Number(inc.meta?.customCount);
+      const storedUnit = inc.meta?.customUnit === 'year' ? 'year' : inc.meta?.customUnit === 'month' ? 'month' : null;
+      if (storedCount > 0 && storedUnit) {
+        setCustomCount(storedCount);
+        setCustomUnit(storedUnit);
+      } else {
+        // Derive from perYear when the raw inputs weren't stored.
+        const perYear = Number(inc.meta?.perYear) || 12;
+        if (perYear % 12 === 0) { setCustomCount(perYear / 12); setCustomUnit('month'); }
+        else { setCustomCount(perYear); setCustomUnit('year'); }
+      }
+    }
     setDraft(inc.amount.toFixed(2));
     setStartDate(dateFromYMD(inc.startDate));
     setEndDate(inc.endDate ? dateFromYMD(inc.endDate) : null);
@@ -129,7 +154,8 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
 
   const resetRegular = () => {
     setKind('regular'); setEditingId(null); setSource('');
-    setCadence('Mo'); setDraft('0.00'); setStartDate(defaultDate()); setEndDate(null);
+    setCadence('Mo'); setCustomCount(3); setCustomUnit('month');
+    setDraft('0.00'); setStartDate(defaultDate()); setEndDate(null);
   };
 
   const resetOneTime = () => {
@@ -202,10 +228,14 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
     const src = source.trim();
     if (!src) return;
     const incomeCadence = CADENCE_TO_INCOME[cadence];
+    const meta = incomeCadence === 'custom'
+      ? { perYear: perYearFrom(customCount, customUnit), customCount, customUnit }
+      : undefined;
     const payload = {
       amount: v, source: src, kind: 'regular' as const, cadence: incomeCadence,
       startDate: toYMD(startDate),
       endDate: endDate ? toYMD(endDate) : undefined,
+      meta,
       updatedByUserId: 'local',
     };
     if (editingId) {
@@ -367,6 +397,56 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                   </Menu>
                 </Host>
               </View>
+              {cadence === 'Cu' && (
+                <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
+                  <Text style={[S.fieldLabel, { color: theme.textSec }]}>Repeats</Text>
+                  <View style={S.stepperRow}>
+                    <Pressable
+                      onPress={() => { if (canEditIncome) { Haptics.selectionAsync().catch(() => {}); setCustomCount(c => Math.max(1, c - 1)); } }}
+                      disabled={!canEditIncome || customCount <= 1}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Fewer times"
+                      style={[S.stepBtn, { backgroundColor: theme.chipBg }, customCount <= 1 && S.stepBtnDisabled]}
+                    >
+                      <Icon name="minus" size={13} color={theme.text} stroke={2.4} />
+                    </Pressable>
+                    <Text style={[S.stepCount, { color: theme.text }]}>{customCount}×</Text>
+                    <Pressable
+                      onPress={() => { if (canEditIncome) { Haptics.selectionAsync().catch(() => {}); setCustomCount(c => Math.min(CUSTOM_MAX, c + 1)); } }}
+                      disabled={!canEditIncome || customCount >= CUSTOM_MAX}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="More times"
+                      style={[S.stepBtn, { backgroundColor: theme.chipBg }, customCount >= CUSTOM_MAX && S.stepBtnDisabled]}
+                    >
+                      <Icon name="plus" size={13} color={theme.text} stroke={2.4} />
+                    </Pressable>
+                    <Text style={[S.stepPer, { color: theme.textSec }]}>per</Text>
+                    <Host key="income-custom-unit" ignoreSafeArea="all" style={S.unitHost}>
+                      <Menu
+                        label={
+                          <View style={[S.menuTrigger, S.unitTrigger]}>
+                            <Text style={[S.menuText, { color: theme.text }]} numberOfLines={1}>
+                              {CUSTOM_UNITS.find(u => u.value === customUnit)?.label ?? 'month'}
+                            </Text>
+                            <Icon name="chevDown" size={11} color={theme.text} stroke={2} />
+                          </View>
+                        }
+                      >
+                        {CUSTOM_UNITS.map(u => (
+                          <Button
+                            key={u.value}
+                            systemImage={u.value === customUnit ? 'checkmark' : undefined}
+                            onPress={() => { if (canEditIncome) setCustomUnit(u.value); }}
+                            label={u.label}
+                          />
+                        ))}
+                      </Menu>
+                    </Host>
+                  </View>
+                </View>
+              )}
               <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Starts</Text>
                 <Host key="income-starts" matchContents ignoreSafeArea="all">
@@ -537,11 +617,8 @@ const S = StyleSheet.create({
   heroCircle: {
     width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
   },
-  fieldCard: { borderRadius: 14, overflow: 'hidden' },
-  fieldRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    minHeight: 54, paddingVertical: 14, paddingHorizontal: 16, gap: 12,
-  },
+  fieldCard: FIELD_CARD,
+  fieldRow: FIELD_ROW,
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', padding: 0 },
   amountValue: {
@@ -559,4 +636,13 @@ const S = StyleSheet.create({
     gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1,
   },
   menuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stepBtn: {
+    width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+  },
+  stepBtnDisabled: { opacity: 0.4 },
+  stepCount: { ...TYPE.subsectionTitle, minWidth: 30, textAlign: 'center' },
+  stepPer: { ...TYPE.body, marginLeft: 2 },
+  unitHost: { width: 78, height: 28 },
+  unitTrigger: { width: 78, justifyContent: 'flex-end' },
 });

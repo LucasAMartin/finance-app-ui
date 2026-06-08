@@ -6,8 +6,52 @@ import { frame, glassEffect, foregroundStyle, font, contentShape, shapes, disabl
 import { Theme } from '../theme';
 import { TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
+import { RADIUS } from '../radius';
 import { OVER_DOT } from '../theme';
 import { SUPPORTS_GLASS } from './GlassButton';
+
+// ── Grouped field rows (shared by every edit sheet) ────────────
+// Canonical geometry for the "grouped list" field card used in TxSheet,
+// BillSheet, IncomeFlow, and the Goal sheets. Import these instead of
+// re-declaring the same row/card values per file.
+export const FIELD_CARD = {
+  borderRadius: RADIUS.field,
+  overflow: 'hidden' as const,
+};
+
+export const FIELD_ROW = {
+  flexDirection: 'row' as const,
+  alignItems: 'center' as const,
+  justifyContent: 'space-between' as const,
+  minHeight: 54,
+  paddingVertical: LAYOUT.rowPadY,
+  paddingHorizontal: 16,
+  gap: 12,
+};
+
+// ── Progress bar (category + goal progress) ────────────────────
+interface ProgressBarProps {
+  pct: number;
+  color: string;
+  trackColor: string;
+  height: number;
+}
+
+export function ProgressBar({ pct, color, trackColor, height }: ProgressBarProps) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <View style={{ height, borderRadius: height / 2, backgroundColor: trackColor, overflow: 'hidden' }}>
+      <View
+        style={{
+          height: '100%',
+          width: `${clamped}%`,
+          borderRadius: height / 2,
+          backgroundColor: color,
+        }}
+      />
+    </View>
+  );
+}
 
 // ── Money display ──────────────────────────────────────────────
 interface MoneyProps {

@@ -303,6 +303,7 @@ interface Props {
   onAddManual: (source: SourceRect) => void;
   onLogIncome: (source: SourceRect) => void;
   onOpenTheme: () => void;
+  onContributeGoal: () => void;
   onOpenTx: (tx: Transaction) => void;
   onPrepareTx?: (tx: Transaction) => void;
   onDeleteTx: (tx: Transaction) => void;
@@ -310,7 +311,7 @@ interface Props {
   morphResetToken?: number;
 }
 
-export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
+export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onContributeGoal, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   const { showToast } = useAppFeedback();
   // Morph sources — all measured at press time from the circle (radius 28).
@@ -751,7 +752,13 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             <QuickAction ref={voiceMorph.ref}  icon="mic"    glassSymbol="mic.fill"             label="Voice"  onPrepare={prepareVoiceFromHero}  href="/expense?mode=voice"  theme={theme} p={pWallpaper} shadow={shadow} />
             <QuickAction ref={manualMorph.ref} icon="keypad" glassSymbol="square.grid.3x3.fill" label="Manual" onPrepare={prepareManualFromHero} href="/expense?mode=manual" theme={theme} p={pWallpaper} shadow={shadow} />
             <QuickAction ref={incomeMorph.ref} icon="plus"   glassSymbol="plus"                 label="Income" onPrepare={prepareIncomeFromHero} href="/income"               theme={theme} p={pWallpaper} shadow={shadow} />
-            <MoreMenuButton theme={theme} p={pWallpaper} shadow={shadow} onEditTheme={handleEditTheme} />
+            <MoreMenuButton
+              theme={theme}
+              p={pWallpaper}
+              shadow={shadow}
+              onEditTheme={handleEditTheme}
+              onContributeGoal={onContributeGoal}
+            />
           </View>
 
           {/* ─── Sections stack ──────────────────── */}
@@ -1114,12 +1121,13 @@ const TxRow = React.memo(function TxRow({
 // SwiftUI Menu but without the SwiftUI Host lifecycle bug that broke
 // off-screen menus on app foreground.
 function MoreMenuButton({
-  theme, p, shadow, onEditTheme,
+  theme, p, shadow, onEditTheme, onContributeGoal,
 }: {
   theme: Theme;
   p: P;
   shadow?: object;
   onEditTheme: () => void;
+  onContributeGoal: () => void;
 }) {
   const colors = quickActionColors(theme, p);
   return (
@@ -1127,10 +1135,12 @@ function MoreMenuButton({
       shouldOpenOnLongPress={false}
       themeVariant={theme.dark ? 'dark' : 'light'}
       actions={[
+        { id: 'contribute-goal', title: 'Contribute to goal', image: 'target', imageColor: colors.menuImageColor },
         { id: 'theme', title: 'Edit theme', image: 'paintbrush', imageColor: colors.menuImageColor },
       ]}
       onPressAction={({ nativeEvent }) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (nativeEvent.event === 'contribute-goal') onContributeGoal();
         if (nativeEvent.event === 'theme') onEditTheme();
       }}
       style={styles.qa}

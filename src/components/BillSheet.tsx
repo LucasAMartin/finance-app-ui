@@ -27,11 +27,10 @@ import type { Bill } from '../repositories/types';
 import { advanceDueDate } from '../selectors/finance';
 import { MerchantMark } from './MerchantMark';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
-import { Money, SheetPrimaryButton, SheetTextButton } from './shared';
+import { Money, SheetPrimaryButton, SheetTextButton, FIELD_CARD, FIELD_ROW } from './shared';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
 import { TYPE } from '../typography';
-import { LAYOUT } from '../spacing';
 
 const SCREEN_H = Dimensions.get('window').height;
 const COMPACT_SNAP_PCT = 60;
@@ -315,7 +314,6 @@ export function BillSheet({
   const handleIndicatorStyle = useMemo(() => ({ backgroundColor: theme.textTer }), [theme.textTer]);
   const backgroundStyle = useMemo(() => ({
     backgroundColor: theme.surface,
-    borderRadius: 32,
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
   }), [theme.surface]);
@@ -481,21 +479,12 @@ const S = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Matches IncomeFlow's fieldCard + fieldRow pattern exactly.
+  // Shared grouped-field geometry (see shared.tsx FIELD_CARD / FIELD_ROW).
   fieldCard: {
-    borderRadius: 14,
-    overflow: 'hidden',
+    ...FIELD_CARD,
     marginTop: 16,
   },
-  fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 54,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 12,
-  },
+  fieldRow: FIELD_ROW,
   fieldLabel: {
     ...TYPE.body,
     flexShrink: 0,

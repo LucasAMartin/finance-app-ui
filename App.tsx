@@ -97,6 +97,8 @@ export function DashboardApp() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
+  const [goalContributeToken, setGoalContributeToken] = useState(0);
+  const [pendingBudgetEditCategoryId, setPendingBudgetEditCategoryId] = useState<string | undefined>(undefined);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
   const [activityFilterToken, setActivityFilterToken] = useState(0);
   const activityFilterTokenRef = useRef(0);
@@ -315,6 +317,10 @@ export function DashboardApp() {
   }, [closeDrawer, navigate]);
 
   const openTheme = useCallback(() => setThemeOpen(true), []);
+  const openGoalContribution = useCallback(() => {
+    setGoalsOpen(true);
+    setGoalContributeToken(token => token + 1);
+  }, []);
   const openBudgetIncome = useCallback((_node: View) => router.push('/income'), []);
   const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
@@ -338,6 +344,7 @@ export function DashboardApp() {
       onAddManual={openManualExpense}
       onLogIncome={openIncomeRoute}
       onOpenTheme={openTheme}
+      onContributeGoal={openGoalContribution}
       onOpenTx={openTx}
       onPrepareTx={prepareTx}
       onDeleteTx={handleDeleteTx}
@@ -352,6 +359,7 @@ export function DashboardApp() {
     openDrawer,
     openIncomeRoute,
     openManualExpense,
+    openGoalContribution,
     openTheme,
     openTx,
     prepareTx,
@@ -390,8 +398,10 @@ export function DashboardApp() {
       onOpenDrawer={openDrawer}
       onOpenIncome={openBudgetIncome}
       onKeypadOpenChange={handleKeypadOpenChange}
+      pendingEditCategoryId={pendingBudgetEditCategoryId}
+      onPendingEditHandled={() => setPendingBudgetEditCategoryId(undefined)}
     />
-  ), [handleKeypadOpenChange, openBudgetIncome, openDrawer, theme]);
+  ), [handleKeypadOpenChange, openBudgetIncome, openDrawer, pendingBudgetEditCategoryId, theme]);
 
   const backdropOpacity = drawerAnim.interpolate({
     inputRange:  [0, 1],
@@ -494,7 +504,13 @@ export function DashboardApp() {
         <GoalsScreen
           theme={theme}
           visible={goalsOpen}
+          contributeRequestToken={goalContributeToken}
           onClose={closeGoals}
+          onEditGoalCategory={(catId) => {
+            closeGoals();
+            setPendingBudgetEditCategoryId(catId);
+            navigate('budget');
+          }}
         />
 
         <SettingsScreen

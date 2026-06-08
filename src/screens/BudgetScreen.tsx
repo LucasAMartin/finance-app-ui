@@ -25,7 +25,7 @@ const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON } from '../theme';
+import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON, cautionText } from '../theme';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
 import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
@@ -46,6 +46,7 @@ import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUt
 import { memberDisplayName } from '../repositories/memberLabels';
 import type { Bill, Category, GroupKey, Income, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
+import { contributionTotal, goalFromCategory, goalProgressPct, goalRemaining, goalSavedFromParts, statusFor } from '../selectors/goals';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
 import {
   BottomSheetModal,
@@ -72,6 +73,9 @@ interface Props {
   onOpenIncome?: (ref: View) => void;
   // Fired when the inline amount keypad opens/closes so the app can hide the tab bar.
   onKeypadOpenChange?: (open: boolean) => void;
+  // When set, auto-opens the category editor for this category ID on mount/change.
+  pendingEditCategoryId?: string;
+  onPendingEditHandled?: () => void;
 }
 
 type Cadence = 'Mo' | '2w' | 'Wk' | 'Yr';
@@ -162,18 +166,22 @@ const INCOME_TO_CADENCE: Partial<Record<Income['cadence'], Cadence>> = {
 const INCOME_CADENCE_LABEL: Record<Income['cadence'], string> = {
   monthly: 'Monthly',
   biweekly: 'Bi-weekly',
+  semimonthly: 'Twice a month',
   weekly: 'Weekly',
   annual: 'Annual',
+  custom: 'Custom',
   oneTime: 'One-time',
 };
 // Monthly-equivalent of a single income source, matching monthlyIncome()'s math.
 const incomeMonthly = (inc: Income): number => {
   switch (inc.cadence) {
-    case 'weekly':   return Math.round(inc.amount * 52 / 12);
-    case 'biweekly': return Math.round(inc.amount * 26 / 12);
-    case 'annual':   return Math.round(inc.amount / 12);
-    case 'oneTime':  return 0;
-    default:         return inc.amount;
+    case 'weekly':      return Math.round(inc.amount * 52 / 12);
+    case 'biweekly':    return Math.round(inc.amount * 26 / 12);
+    case 'semimonthly': return inc.amount * 2;
+    case 'annual':      return Math.round(inc.amount / 12);
+    case 'custom':      return Math.round(inc.amount * (Number(inc.meta?.perYear) || 12) / 12);
+    case 'oneTime':     return 0;
+    default:            return inc.amount;
   }
 };
 
@@ -395,22 +403,43 @@ function CollapsingRow({ removing, children }: { removing: boolean; children: Re
 }
 
 // Allocation bar segments
-function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, wantsCol, savingsCol, height = 8, accessibilityLabel }: {
+function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, wantsCol, savingsCol, height = 8, accessibilityLabel, tickFracs }: {
   needsFrac: number; wantsFrac: number; savingsFrac: number;
   trackBg: string; needsCol: string; wantsCol: string; savingsCol: string;
   height?: number;
   accessibilityLabel?: string;
+  // Positions (0–1) where target-boundary tick marks are drawn over the bar.
+  tickFracs?: number[];
 }) {
   const r = height / 2;
   return (
-    <View
-      style={{ height, borderRadius: r, overflow: 'hidden', flexDirection: 'row', backgroundColor: trackBg }}
-      accessibilityRole="image"
-      accessibilityLabel={accessibilityLabel}
-    >
-      {needsFrac > 0 && <View style={{ height: '100%', width: `${(needsFrac * 100).toFixed(2)}%` as any, backgroundColor: needsCol }} />}
-      {wantsFrac > 0 && <View style={{ height: '100%', width: `${(wantsFrac * 100).toFixed(2)}%` as any, backgroundColor: wantsCol }} />}
-      {savingsFrac > 0 && <View style={{ height: '100%', width: `${(savingsFrac * 100).toFixed(2)}%` as any, backgroundColor: savingsCol }} />}
+    <View style={{ position: 'relative' }}>
+      <View
+        style={{ height, borderRadius: r, overflow: 'hidden', flexDirection: 'row', backgroundColor: trackBg }}
+        accessibilityRole="image"
+        accessibilityLabel={accessibilityLabel}
+      >
+        {needsFrac > 0 && <View style={{ height: '100%', width: `${(needsFrac * 100).toFixed(2)}%` as any, backgroundColor: needsCol }} />}
+        {wantsFrac > 0 && <View style={{ height: '100%', width: `${(wantsFrac * 100).toFixed(2)}%` as any, backgroundColor: wantsCol }} />}
+        {savingsFrac > 0 && <View style={{ height: '100%', width: `${(savingsFrac * 100).toFixed(2)}%` as any, backgroundColor: savingsCol }} />}
+      </View>
+      {tickFracs?.map((frac, i) =>
+        frac > 0.02 && frac < 0.98 ? (
+          <View
+            key={i}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: `${(frac * 100).toFixed(2)}%` as any,
+              top: 0,
+              height,
+              width: 1.5,
+              borderRadius: 1,
+              backgroundColor: 'rgba(255,255,255,0.55)',
+            }}
+          />
+        ) : null,
+      )}
     </View>
   );
 }
@@ -511,7 +540,7 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
   );
 }
 
-export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenChange }: Props) {
+export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenChange, pendingEditCategoryId, onPendingEditHandled }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
@@ -744,6 +773,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     () => budgetRecords.some(b => b.month === selectedMonth),
     [budgetRecords, selectedMonth],
   );
+  const prevMonthKey = useMemo(() => monthKeyFromOffset(selectedMonth, -1), [selectedMonth]);
+  const prevMonthHasBudgets = useMemo(
+    () => budgetRecords.some(b => b.month === prevMonthKey),
+    [budgetRecords, prevMonthKey],
+  );
+  const showCopyPrompt = !selectedMonthHasBudgets && prevMonthHasBudgets;
   const showNotice = useCallback((label: string) => {
     if (pendingDeleteRef.current) {
       pendingDeleteRef.current();
@@ -991,8 +1026,14 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     const icon = iconOverride ?? inferCategoryIcon(label);
     const catMeta: Record<string, unknown> = { custom: true };
     if (goalTarget && goalTarget > 0) {
+      const startingBalance = Math.max(0, goalSaved ?? 0);
       catMeta.goalTarget = goalTarget;
-      catMeta.goalSaved = goalSaved ?? 0;
+      catMeta.goalStartingBalance = startingBalance;
+      catMeta.goalSaved = goalSavedFromParts(goalTarget, startingBalance, []);
+      catMeta.goalMonthlyContribution = budget && budget > 0 ? budget : undefined;
+      catMeta.goalContributions = [];
+      catMeta.goalStatus = startingBalance >= goalTarget ? 'completed' : 'active';
+      if (startingBalance >= goalTarget) catMeta.goalCompletedAt = new Date().toISOString().slice(0, 10);
       if (goalDeadline) catMeta.goalDeadline = goalDeadline;
     }
     const created = categoriesRepo.create({
@@ -1045,9 +1086,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setCategoryLabelDraft(category.label);
     setCategoryIconDraft(category.icon);
     const meta = category.meta ?? {};
-    setCategoryGoalTarget(typeof meta.goalTarget === 'number' ? String(meta.goalTarget) : '');
-    setCategoryGoalSaved(typeof meta.goalSaved === 'number' ? String(meta.goalSaved) : '');
-    setCategoryGoalDeadline(typeof meta.goalDeadline === 'string' ? meta.goalDeadline : '');
+    const goal = goalFromCategory(category);
+    setCategoryGoalTarget(goal ? String(goal.target) : '');
+    setCategoryGoalSaved(goal ? String(goal.saved) : '');
+    setCategoryGoalDeadline(goal?.deadline ?? (typeof meta.goalDeadline === 'string' ? meta.goalDeadline : ''));
     const amt = budgets[bKey(category.group, category.label)] ?? category.defaultBudget ?? 0;
     setCategoryBudgetDraft(amt > 0 ? String(amt) : '');
     setCategoryNotes(typeof meta.notes === 'string' ? meta.notes : '');
@@ -1055,6 +1097,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setDuplicateNameError(false);
     setCategoryFormError('');
   };
+
+  useEffect(() => {
+    if (!pendingEditCategoryId) return;
+    openCategoryEditor(pendingEditCategoryId);
+    onPendingEditHandled?.();
+  }, [pendingEditCategoryId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const closeCategoryEditor = () => {
     setEditingCategory(null);
@@ -1104,10 +1152,30 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       return false;
     }
     setCategoryFormError('');
+    const budgetValue = parseAmountDraft(categoryBudgetDraft);
+    const nextDefaultBudget = budgetValue !== null
+      ? budgetValue
+      : budgets[bKey(editingCategory.group, editingCategory.label)] ?? editingCategory.defaultBudget;
     const nextMeta: Record<string, unknown> = { ...(editingCategory.meta ?? {}) };
     if (categoryGroupDraft === 'savings' && goalTarget && goalTarget > 0) {
+      const existingGoal = goalFromCategory(editingCategory);
+      const contributions = existingGoal?.contributions ?? [];
+      const saved = goalSaved && goalSaved > 0 ? goalSaved : 0;
+      const startingBalance = Math.max(0, saved - contributionTotal(contributions));
+      const nextSaved = goalSavedFromParts(goalTarget, startingBalance, contributions);
       nextMeta.goalTarget = goalTarget;
-      nextMeta.goalSaved = goalSaved && goalSaved > 0 ? goalSaved : 0;
+      nextMeta.goalStartingBalance = startingBalance;
+      nextMeta.goalSaved = nextSaved;
+      nextMeta.goalMonthlyContribution = nextDefaultBudget > 0 ? nextDefaultBudget : undefined;
+      nextMeta.goalContributions = contributions;
+      nextMeta.goalStatus = nextSaved >= goalTarget ? 'completed' : 'active';
+      if (nextSaved >= goalTarget) {
+        nextMeta.goalCompletedAt = typeof nextMeta.goalCompletedAt === 'string'
+          ? nextMeta.goalCompletedAt
+          : new Date().toISOString().slice(0, 10);
+      } else {
+        delete nextMeta.goalCompletedAt;
+      }
       if (categoryGoalDeadline.trim()) {
         nextMeta.goalDeadline = categoryGoalDeadline.trim();
       } else {
@@ -1116,17 +1184,18 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     } else {
       delete nextMeta.goalTarget;
       delete nextMeta.goalSaved;
+      delete nextMeta.goalStartingBalance;
       delete nextMeta.goalDeadline;
+      delete nextMeta.goalMonthlyContribution;
+      delete nextMeta.goalContributions;
+      delete nextMeta.goalStatus;
+      delete nextMeta.goalCompletedAt;
     }
     if (categoryNotes.trim()) {
       nextMeta.notes = categoryNotes.trim();
     } else {
       delete nextMeta.notes;
     }
-    const budgetValue = parseAmountDraft(categoryBudgetDraft);
-    const nextDefaultBudget = budgetValue !== null
-      ? budgetValue
-      : budgets[bKey(editingCategory.group, editingCategory.label)] ?? editingCategory.defaultBudget;
     categoriesRepo.update(editingCategory.id, {
       label,
       icon: categoryIconDraft,
@@ -1193,10 +1262,14 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const remaining     = income - totalBudgeted;
   const isOver        = remaining < 0;
 
-  const barMax      = Math.max(totalBudgeted, income);
-  const needsFrac   = barMax > 0 ? needsTotal   / barMax : 0;
-  const wantsFrac   = barMax > 0 ? wantsTotal   / barMax : 0;
-  const savingsFrac = barMax > 0 ? savingsTotal / barMax : 0;
+  const barMax          = Math.max(totalBudgeted, income);
+  const needsFrac       = barMax > 0 ? needsTotal   / barMax : 0;
+  const wantsFrac       = barMax > 0 ? wantsTotal   / barMax : 0;
+  const savingsFrac     = barMax > 0 ? savingsTotal / barMax : 0;
+  // Positions of the 50/30/20 target boundaries on the bar (relative to barMax).
+  const targetNeedsFrac = barMax > 0 ? (income * 0.5) / barMax : 0.5;
+  const targetWantsFrac = barMax > 0 ? (income * 0.8) / barMax : 0.8;
+  const isPastMonth     = selectedMonth < currentMonthKey();
 
   const gCol = (key: string) =>
     (theme.dark ? GROUP_COLORS[key]?.dark : GROUP_COLORS[key]?.light) ?? theme.textTer;
@@ -1257,40 +1330,40 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const _savingsPct = Math.round(savingsTotal / _base * 100);
   const _remainPct  = 100 - _needsPct - _wantsPct - _savingsPct;
 
-  const legendItems = [
-    { label: 'Needs',                        dotColor: needsCol,                           amount: needsTotal,   pct: _needsPct            },
-    { label: 'Wants',                         dotColor: wantsCol,                           amount: wantsTotal,   pct: _wantsPct            },
-    { label: 'Savings',                       dotColor: savingsCol,                         amount: savingsTotal, pct: _savingsPct          },
-    { label: isOver ? 'Over' : 'Unassigned', dotColor: isOver ? OVER_DOT : p.textTer, amount: Math.abs(remaining), pct: isOver ? null : Math.abs(_remainPct) },
-  ];
+  // Inline in allocationBarBody — legendItems removed after distillation.
 
   // Shared allocation-card body — rendered identically by both the in-scroll
   // card and the pinned overlay so the hand-off is a seamless swap, not a fade.
   // Only the bar + legend animates — the income button lives in its own card below.
-  const allocationBarBody = useMemo(() => (
-    <>
-      <AllocationBar
-        needsFrac={needsFrac} wantsFrac={wantsFrac} savingsFrac={savingsFrac}
-        trackBg={p.trackBg} needsCol={needsCol} wantsCol={wantsCol} savingsCol={savingsCol}
-        height={7}
-        accessibilityLabel={`Budget allocation: Needs ${Math.round(needsFrac * 100)}%, Wants ${Math.round(wantsFrac * 100)}%, Savings ${Math.round(savingsFrac * 100)}%`}
-      />
-      <View style={styles.legendRow}>
-        {legendItems.map(item => (
-          <View key={item.label} style={styles.legendItem}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.dotColor }} />
-              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.label, { color: item.dotColor }]}>{item.label}</Text>
+  const allocationBarBody = useMemo(() => {
+    // One compliance signal per group: pct colored by on-track vs over/short.
+    // Dollar amounts live in the group headers below — no need to repeat them here.
+    const groups = [
+      { key: 'Needs',   dot: needsCol,   pct: _needsPct,   pctColor: _needsPct   > 50 ? OVER_DOT : p.text },
+      { key: 'Wants',   dot: wantsCol,   pct: _wantsPct,   pctColor: _wantsPct   > 30 ? OVER_DOT : p.text },
+      { key: 'Savings', dot: savingsCol, pct: _savingsPct, pctColor: _savingsPct >= 20 ? savingsCol : p.text },
+    ];
+    return (
+      <>
+        <AllocationBar
+          needsFrac={needsFrac} wantsFrac={wantsFrac} savingsFrac={savingsFrac}
+          trackBg={p.trackBg} needsCol={needsCol} wantsCol={wantsCol} savingsCol={savingsCol}
+          height={7}
+          tickFracs={[targetNeedsFrac, targetWantsFrac]}
+          accessibilityLabel={`Budget allocation: Needs ${_needsPct}%, Wants ${_wantsPct}%, Savings ${_savingsPct}%`}
+        />
+        <View style={styles.compactLegend}>
+          {groups.map(item => (
+            <View key={item.key} style={styles.compactLegendItem}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.dot }} />
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.label, { color: p.textSec }]}>{item.key}</Text>
+              <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.bodySmEm, { color: item.pctColor }]}>{item.pct}%</Text>
             </View>
-            <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.subsectionTitle, { color: p.text }]}>
-              ${Math.round(item.amount).toLocaleString()}
-            </Text>
-            {item.pct !== null && <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[TYPE.caption, { color: p.textSec }]}>{item.pct}%</Text>}
-          </View>
-        ))}
-      </View>
-    </>
-  ), [needsFrac, wantsFrac, savingsFrac, p.trackBg, p.text, p.textSec, needsCol, wantsCol, savingsCol, legendItems]);
+          ))}
+        </View>
+      </>
+    );
+  }, [needsFrac, wantsFrac, savingsFrac, targetNeedsFrac, targetWantsFrac, _needsPct, _wantsPct, _savingsPct, p.trackBg, p.text, p.textSec, needsCol, wantsCol, savingsCol, isOver, remaining]);
 
   const incomeBtnRef = useRef<View>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
@@ -1420,6 +1493,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
               <View
                 style={styles.hero}
               >
+                {isPastMonth && (
+                  <View style={[styles.pastMonthBanner, { backgroundColor: 'rgba(8,6,20,0.32)', borderColor: pWallpaper.hairline }]}>
+                    <Text style={[TYPE.caption, { color: pWallpaper.textSec }]} numberOfLines={1}>
+                      Viewing {monthLabel(selectedMonth)} — editing historical data
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.heroTopRow}>
                   <TouchableOpacity
                     activeOpacity={0.7}
@@ -1433,8 +1513,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                         <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> Income</Text>
                       </View>
                       <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> · </Text>
-                      <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, shadow]}>${fmtMoney(totalBudgeted)}</Text>
-                      <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> Assigned</Text>
+                      <Text style={[TYPE.onMediaStatus, { color: isOver ? OVER_DOT : pWallpaper.text }, shadow]}>${fmtMoney(totalBudgeted)}</Text>
+                      <Text style={[TYPE.onMediaStatusSub, { color: isOver ? OVER_DOT : pWallpaper.textSec }, shadow]}> Assigned</Text>
                     </View>
                   </TouchableOpacity>
                   <Host ignoreSafeArea="all" style={styles.monthPickerHost}>
@@ -1476,6 +1556,24 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                   {allocationBarBody}
                 </SectionCard>
               </Animated.View>
+
+              {/* Copy-from-previous-month prompt — shown when current month has no budgets */}
+              {showCopyPrompt && (
+                <View style={[styles.copyPromptCard, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>No budgets for {monthLabel(selectedMonth)}</Text>
+                    <Text style={[TYPE.bodySm, { color: p.textSec }]} numberOfLines={1}>Copy allocations from {monthLabel(prevMonthKey)}?</Text>
+                  </View>
+                  <Pressable
+                    onPress={copyFromPreviousMonth}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Copy budgets from ${monthLabel(prevMonthKey)}`}
+                    style={[styles.copyPromptBtn, { backgroundColor: theme.accent.fill }]}
+                  >
+                    <Text style={[TYPE.bodySmEm, { color: theme.accent.ink }]}>Copy</Text>
+                  </Pressable>
+                </View>
+              )}
 
               {/* 50/30/20 framework card — shown once on first visit */}
               {!metaFlag('frameworkCardDismissed') && (
@@ -1528,12 +1626,17 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                    <View>
 	                    {visibleOrigSubs.map((sub, si) => {
                       const isLast = si === visibleOrigSubs.length - 1 && customs.length === 0 && !hasRecurringSection;
-                      const rowKey = bKey(g.key, sub.label);
+	                      const rowKey = bKey(g.key, sub.label);
                       const isRemoving = pendingRemoveKeys.has(rowKey);
 	                      const subCat = categories.find(c => c.id === sub.cat);
-	                      const subGoalTarget = subCat && typeof subCat.meta?.goalTarget === 'number' ? subCat.meta.goalTarget as number : 0;
-	                      const subGoalSaved = subCat && typeof subCat.meta?.goalSaved === 'number' ? subCat.meta.goalSaved as number : 0;
-	                      const subGoalPct = subGoalTarget > 0 ? Math.min(100, Math.round(subGoalSaved / subGoalTarget * 100)) : 0;
+	                      const subGoal = subCat ? goalFromCategory(subCat) : null;
+	                      const subGoalPct = subGoal ? goalProgressPct(subGoal) : 0;
+	                      const subGoalStatus = subGoal ? statusFor(subGoal) : null;
+	                      const subGoalStatusColor = subGoalStatus?.tone === 'caution'
+                          ? (theme.dark ? cautionText(true) : OVER_DOT)
+                          : subGoalStatus?.tone === 'good'
+                            ? groupColor
+                            : p.textTer;
 	                      const subBudget = budgets[rowKey] ?? sub.budget;
                       const canEditRow = canEditBudgetKey(rowKey) && canEditCategoryId(sub.cat);
 	                      return (
@@ -1555,13 +1658,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                               </View>
 	                              <View style={{ flex: 1, minWidth: 0 }}>
 	                                <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
-	                                {subGoalTarget > 0 && (
+	                                {subGoal && (
                                   <>
                                     <View style={[styles.subGoalTrack, { backgroundColor: p.hairline, marginTop: 5, width: '100%' }]}>
                                       <View style={{ height: '100%', borderRadius: 2, width: `${subGoalPct}%`, backgroundColor: groupColor }} />
                                     </View>
                                     <Text style={[TYPE.caption, { color: p.textSec, marginTop: 3 }]}>
-                                      {subGoalPct}% · ${Math.max(0, subGoalTarget - subGoalSaved).toLocaleString()} to go
+                                      <Text style={{ color: subGoalStatusColor }}>
+                                        {subGoalStatus?.label}
+                                      </Text>
+                                      {' · '}{subGoalPct}% · ${goalRemaining(subGoal).toLocaleString()} to go
                                     </Text>
                                   </>
                                 )}
@@ -1893,6 +1999,8 @@ function CategoryEditSheet({
   const [goalTargetDisplay, setGoalTargetDisplay] = useState('');
   const [goalSavedDisplay, setGoalSavedDisplay] = useState('');
   const [deadlineDate, setDeadlineDate] = useState<Date | null>(null);
+  const deadlineAutoFilled = useRef(false);
+  const deadlineDateRef = useRef<Date | null>(null);
   useEffect(() => {
     if (shouldPresent) {
       if (!presentedRef.current) {
@@ -1909,12 +2017,48 @@ function CategoryEditSheet({
   useEffect(() => {
     if (category !== null || addingForGroup !== null) {
       iconManuallySet.current = false;
+      deadlineAutoFilled.current = false;
+      const parsed = parseDeadline(goalDeadline);
+      deadlineDateRef.current = parsed;
       setBudgetDisplay(budget ? `$${budget}` : '');
       setGoalTargetDisplay(goalTarget ? `$${goalTarget}` : '');
       setGoalSavedDisplay(goalSaved ? `$${goalSaved}` : '');
-      setDeadlineDate(parseDeadline(goalDeadline));
+      setDeadlineDate(parsed);
+      setActiveNumField(null);
+      sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
     }
   }, [category, addingForGroup]);
+
+  useEffect(() => {
+    if (!showGoalFields) return;
+    const target = parseAmountDraft(goalTargetDisplay) ?? 0;
+    const saved = parseAmountDraft(goalSavedDisplay) ?? 0;
+    const budg = parseAmountDraft(budgetDisplay) ?? 0;
+    if (target > 0 && budg > 0 && (deadlineAutoFilled.current || !deadlineDateRef.current)) {
+      const remaining = Math.max(0, target - saved);
+      const months = Math.ceil(remaining / budg);
+      const now = new Date();
+      const projected = new Date(now.getFullYear(), now.getMonth() + months, 1);
+      deadlineDateRef.current = projected;
+      deadlineAutoFilled.current = true;
+      setDeadlineDate(projected);
+      onGoalDeadlineChange(projected.toISOString().slice(0, 10));
+    } else if (deadlineAutoFilled.current && (target <= 0 || budg <= 0)) {
+      deadlineDateRef.current = null;
+      deadlineAutoFilled.current = false;
+      setDeadlineDate(null);
+      onGoalDeadlineChange('');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goalTargetDisplay, goalSavedDisplay, budgetDisplay]);
+
+  useEffect(() => {
+    // Close any open keypad and reset scroll when the group changes so content
+    // always renders from the top regardless of prior scroll state.
+    setActiveNumField(null);
+    sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group]);
 
   const sep = { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth };
 
@@ -1958,7 +2102,13 @@ function CategoryEditSheet({
   const activateNumFieldNow = (field: NumField, currentDisplay: string) => {
     if (activeNumField && activeNumField !== field) commitNumField(activeNumField);
     const raw = currentDisplay.replace(/[$,\s]/g, '');
-    setNumDraft(raw);
+    const n = Number(raw);
+    // Cash-register keypad expects "X.XX" format. A bare integer like "900"
+    // would be misread as 900¢ = $9.00 on the first key press.
+    const initialDraft = Number.isFinite(n) && n > 0
+      ? `${Math.floor(n)}.${String(Math.round((n % 1) * 100)).padStart(2, '0')}`
+      : '0.00';
+    setNumDraft(initialDraft);
     setActiveNumField(field);
     // Scroll after the keypad has risen enough to know its final height.
     setTimeout(() => scrollFieldIntoView(fieldRowRefs[field], sheetKbH), 180);
@@ -1978,6 +2128,7 @@ function CategoryEditSheet({
   const closeNumKeypad = () => {
     commitNumField();
     setActiveNumField(null);
+    sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
   };
   const handleSheetKey = useCallback((k: KeypadKey) => {
     setNumDraft(prev => applyKeypadKey(prev, k));
@@ -1992,8 +2143,12 @@ function CategoryEditSheet({
   // switching to Savings only appends the goal fields at the bottom — nothing
   // above them shifts up or down. (Detent is a fixed 'large', so there's room.)
   const compactSheet = true;
+  // Savings group adds ~200pt of content (section header + 3 goal rows + preview).
+  // Use the bare minimum top padding so everything stays on screen without scrolling.
   const sheetTopPadding = compactSheet
-    ? Math.max(insets.top, 10) + 8
+    ? showGoalFields
+      ? 24
+      : Math.max(insets.top, 10) + 8
     : Math.max(insets.top, 16) + 18;
   const sheetBottomPadding = compactSheet
     ? Math.max(insets.bottom, 10) + 8
@@ -2237,30 +2392,33 @@ function CategoryEditSheet({
             </Text>
           )}
 
-          {/* Goal fields — compact date pickers, no inline expansion */}
+          {/* Goal fields */}
           {showGoalFields && (
             <>
-	              <View pointerEvents={canEdit ? 'auto' : 'none'} style={[styles.catFieldCard, !canEdit && styles.lockedFields, { backgroundColor: theme.chipBg, marginTop: compactSheet ? 10 : 14 }]}>
-                <View ref={fieldRowRefs.target} style={[fieldRowStyle, sep]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target</Text>
+              <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: compactSheet ? 20 : 24, marginBottom: compactSheet ? 10 : 12 }]}>
+                SAVINGS GOAL
+              </Text>
+	              <View pointerEvents={canEdit ? 'auto' : 'none'} style={[styles.catFieldCard, !canEdit && styles.lockedFields, { backgroundColor: theme.chipBg }]}>
+                <View ref={fieldRowRefs.target} style={[fieldRowStyle, sep, { minHeight: 50 }]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Goal amount</Text>
                   <SheetNumericField
                     displayValue={goalTargetDisplay}
                     draft={activeNumField === 'target' ? numDraft : ''}
                     active={activeNumField === 'target'}
-                    placeholder="$0"
+                    placeholder="Optional"
                     color={theme.text}
                     accentColor={theme.accent.dot}
                     underlineColor={theme.hairline}
 	                    onActivate={() => { if (canEdit) activateNumField('target', goalTargetDisplay); }}
                   />
                 </View>
-                <View ref={fieldRowRefs.saved} style={[fieldRowStyle, sep]}>
+                <View ref={fieldRowRefs.saved} style={[fieldRowStyle, sep, { minHeight: 50 }]}>
                   <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Saved so far</Text>
                   <SheetNumericField
                     displayValue={goalSavedDisplay}
                     draft={activeNumField === 'saved' ? numDraft : ''}
                     active={activeNumField === 'saved'}
-                    placeholder="$0"
+                    placeholder="Optional"
                     color={theme.text}
                     accentColor={theme.accent.dot}
                     underlineColor={theme.hairline}
@@ -2268,24 +2426,24 @@ function CategoryEditSheet({
                   />
                 </View>
                 {/* Target date — fixed-height row so the picker never shifts layout */}
-                <View style={[fieldRowStyle, styles.catFieldRowFixed]}>
-                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Target date</Text>
+                <View style={[fieldRowStyle, { height: 50 }]}>
+                  <Text style={[styles.catFieldLabel, { color: theme.textSec }]}>Goal by</Text>
                   {deadlineDate ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
                         <DatePicker
                           selection={deadlineDate}
-	                          onDateChange={(d) => { if (!canEdit) return; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
+	                          onDateChange={(d) => { if (!canEdit) return; deadlineAutoFilled.current = false; deadlineDateRef.current = d; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
                           displayedComponents={['date']}
                           modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
                         />
                       </Host>
-	                      <Pressable onPress={() => { if (!canEdit) return; setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8} disabled={!canEdit}>
+	                      <Pressable onPress={() => { if (!canEdit) return; deadlineAutoFilled.current = false; deadlineDateRef.current = null; setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8} disabled={!canEdit}>
                         <Icon name="close" size={11} color={theme.textTer} stroke={2} />
                       </Pressable>
                     </View>
                   ) : (
-	                    <Pressable onPress={() => { if (!canEdit) return; const d = new Date(); d.setFullYear(d.getFullYear() + 1); setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only" disabled={!canEdit}>
+	                    <Pressable onPress={() => { if (!canEdit) return; const d = new Date(); d.setFullYear(d.getFullYear() + 1); deadlineAutoFilled.current = false; deadlineDateRef.current = d; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only" disabled={!canEdit}>
                       <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
                     </Pressable>
                   )}
@@ -2376,6 +2534,31 @@ const styles = StyleSheet.create({
     paddingTop: SPACE.sm,
     paddingBottom: SPACE.md,
   },
+  pastMonthBanner: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    paddingHorizontal: SPACE.md,
+    paddingVertical: 5,
+    marginBottom: SPACE.sm,
+  },
+  copyPromptCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.md,
+    borderRadius: RADIUS.card,
+    borderWidth: 1,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingVertical: SPACE.lg,
+    marginBottom: SPACE.md,
+  },
+  copyPromptBtn: {
+    borderRadius: RADIUS.button,
+    paddingVertical: SPACE.sm,
+    paddingHorizontal: SPACE.lg,
+  },
   heroTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2432,15 +2615,16 @@ const styles = StyleSheet.create({
     gap: SPACE.sm,
     flexShrink: 0,
   },
-  legendRow: {
+  compactLegend: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: SPACE.md,
-    marginBottom: SPACE.xs,
-  },
-  legendItem: {
     alignItems: 'center',
-    flex: 1,
+    marginTop: SPACE.md,
+    gap: SPACE.xl,
+  },
+  compactLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.xs,
   },
   incomeNativeSheet: {
     flex: 1,

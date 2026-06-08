@@ -93,7 +93,7 @@ function GlassTabBar({ theme, active, onTabPress }: TabBarProps) {
             {/* Add button — a circular accent-tinted glass marks it as the
                 primary action. Explicit circle shape (not glassProminent, which
                 renders a capsule/oval) keeps it perfectly round. */}
-            <Image systemName="plus" size={1} color="transparent" modifiers={[frame({ width: ADD_SIZE, height: ADD_SIZE })]} />
+            <Image systemName="mic.fill" size={1} color="transparent" modifiers={[frame({ width: ADD_SIZE, height: ADD_SIZE })]} />
           </HStack>
         </Host>
         <Link href="/expense?mode=voice" asChild>
@@ -108,7 +108,7 @@ function GlassTabBar({ theme, active, onTabPress }: TabBarProps) {
               <Link.AppleZoom>
                 <View collapsable={false} style={glassStyles.addZoomSource}>
                   <GlassCircleIcon
-                    systemImage="plus"
+                    systemImage="mic.fill"
                     size={ADD_SIZE}
                     iconSize={24}
                     iconColor={theme.accent.ink}
@@ -146,6 +146,9 @@ const glassStyles = StyleSheet.create({
   addZoomSource: {
     width: ADD_SIZE,
     height: ADD_SIZE,
+    borderRadius: ADD_SIZE / 2,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
   },
 });
 
@@ -214,7 +217,7 @@ function FallbackTabBar({ theme, active, onTabPress }: TabBarProps) {
               { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
             ]}
           >
-            <Icon name="plus" size={24} color={theme.text} stroke={2} />
+            <Icon name="mic" size={24} color={theme.text} stroke={1.8} />
           </Pressable>
         </Link.Trigger>
       </Link>
@@ -281,6 +284,7 @@ const fallbackStyles = StyleSheet.create({
     width: TAB_W,
     height: TAB_W,
     borderRadius: TAB_W / 2,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },

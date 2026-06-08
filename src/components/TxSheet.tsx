@@ -46,7 +46,7 @@ import type { Category, GroupKey, LedgerMember, Transaction } from '../repositor
 import { Icon } from './Icon';
 import { MerchantMark } from './MerchantMark';
 import { transactionUsesMerchantLogo } from '../merchantLogos';
-import { Money, SheetPrimaryButton, SheetTextButton } from './shared';
+import { Money, SheetPrimaryButton, SheetTextButton, FIELD_CARD, FIELD_ROW } from './shared';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
@@ -74,6 +74,10 @@ const formatOccurredAt = (d: Date) =>
     hour: 'numeric',
     minute: '2-digit',
   }).format(d);
+
+function isGoalContributionTx(tx: Transaction): boolean {
+  return tx.meta?.kind === 'goal-contribution';
+}
 
 export function TxSheet({
   tx,
@@ -557,20 +561,23 @@ function SheetBody({
 }) {
   const cat = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
-  const useLogo = logoEnabled && transactionUsesMerchantLogo(tx);
-  const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
+  const isGoalContribution = isGoalContributionTx(tx);
+  const useLogo = logoEnabled && !isGoalContribution && transactionUsesMerchantLogo(tx);
+  const categoryLabel = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
+  const meta = isGoalContribution ? `Goal contribution · ${categoryLabel}` : categoryLabel;
+  const title = isGoalContribution && cat?.label ? `${cat.label} contribution` : tx.merchant;
 
   return (
     <View style={[S.hero, isExpanded && S.heroCompact]}>
       <MerchantMark
-        merchant={tx.merchant}
-        catIcon={cat?.icon}
+        merchant={title}
+        catIcon={isGoalContribution ? 'target' : cat?.icon}
         color={groupColor}
         iconSize={isExpanded ? 18 : 24}
         logoEnabled={useLogo}
         size={isExpanded ? 40 : 52}
       />
-      <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{tx.merchant}</Text>
+      <Text style={[S.merchant, isExpanded && S.merchantCompact, { color: theme.text }]}>{title}</Text>
       <Text style={[S.metaLine, isExpanded && S.metaLineCompact, { color: theme.textSec }]} numberOfLines={1}>
         {meta}
         <Text style={{ color: theme.textTer }}> · </Text>
@@ -601,6 +608,7 @@ function CompactSummary({
   members: LedgerMember[];
 }) {
   const cat = cats[tx.cat];
+  const isGoalContribution = isGoalContributionTx(tx);
   const categoryLabel = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const catBudget = cat?.budget ?? 0;
@@ -934,19 +942,8 @@ const S = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
-  fieldCard: {
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 50,
-    paddingVertical: LAYOUT.rowPadY,
-    paddingHorizontal: 16,
-    gap: 12,
-  },
+  fieldCard: FIELD_CARD,
+  fieldRow: FIELD_ROW,
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
   amountDisplay: {
@@ -972,7 +969,7 @@ const S = StyleSheet.create({
     paddingVertical: 8,
   },
   categoryPanel: {
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     overflow: 'hidden',
   },

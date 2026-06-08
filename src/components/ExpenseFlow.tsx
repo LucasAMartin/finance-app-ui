@@ -14,6 +14,7 @@ import { SheetPrimaryButton } from './shared';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
 import { TYPE } from '../typography';
+import { LAYOUT } from '../spacing';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
@@ -842,10 +843,10 @@ const S = StyleSheet.create({
   fieldCard: { borderRadius: 14, overflow: 'hidden', marginBottom: 16 },
   fieldRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 14, paddingHorizontal: 16, gap: 12, minHeight: 54,
+    paddingVertical: LAYOUT.rowPadY, paddingHorizontal: 16, gap: 12, minHeight: 54,
   },
   fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
-  categoryPanel: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
+  categoryPanel: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   categoryWrap: { marginBottom: 12 },
   categoryGroupHost: { width: '100%', height: 42 },
   subcategoryRow: {

@@ -91,7 +91,8 @@ export interface Income extends SyncFields {
   kind?: 'regular' | 'irregular';
   amount: number;
   source: string;
-  cadence: 'weekly' | 'biweekly' | 'monthly' | 'annual' | 'oneTime';
+  // 'custom' uses meta.perYear (number of paychecks per year) for the monthly factor.
+  cadence: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual' | 'custom' | 'oneTime';
   startDate: string;
   endDate?: string;
   receivedAt?: string;

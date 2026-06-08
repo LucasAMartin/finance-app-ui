@@ -1,67 +1,116 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   ScrollView,
   StyleSheet,
   Animated,
+  Easing,
   ImageBackground,
   Pressable,
   TextInput,
+  Keyboard,
 } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Button as SwiftButton, DatePicker, Host, Menu } from '@expo/ui/swift-ui';
+import { datePickerStyle, environment, tint } from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
+import BottomSheet, {
   BottomSheetBackdrop,
-  BottomSheetModal,
+  BottomSheetModalProvider,
   BottomSheetScrollView,
+  useBottomSheetTimingConfigs,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
+import { Easing as ReEasing } from 'react-native-reanimated';
 
 import { CAUTION_AMBER, GROUP_COLORS, ON_GROUP_ICON, OVER_DOT, Theme, cautionText } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import type { Category } from '../repositories/types';
-import { makeP, makeScrim, deriveFloor, DARK_TEXT_SHADOW } from '../wallpaperPalette';
+import { makeP, makeScrim, deriveFloor } from '../wallpaperPalette';
 import { SectionCard } from '../components/SectionCard';
-import { Money, SheetPrimaryButton } from '../components/shared';
+import { SheetPrimaryButton, ProgressBar, Money, FIELD_CARD, FIELD_ROW } from '../components/shared';
+import { MerchantMark } from '../components/MerchantMark';
+import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
+import { applyKeypadKey } from '../components/NumericKeypad';
 import { Icon } from '../components/Icon';
-import { ScreenExitButton, EXIT_FLOAT_STYLE } from '../components/GlassButton';
+import {
+  ScreenExitButton,
+  EXIT_FLOAT_STYLE,
+  EXIT_BTN_SIZE,
+  GlassCircleButton,
+  SUPPORTS_GLASS,
+} from '../components/GlassButton';
 import { TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
-import { inferCategoryIcon } from '../categoryIcons';
+import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
+import {
+  archivedGoalsFromCategories,
+  clampPct,
+  contributionDateLabel,
+  contributionTotal,
+  deadlineLabel,
+  goalMeta,
+  goalProgressPct,
+  goalRemaining,
+  goalsFromCategories,
+  goalSavedFromParts,
+  money0,
+  monthDeltaVsDeadline,
+  monthDistance,
+  parseAmount,
+  parseGoalDate,
+  projectedFinishDate,
+  statusFor,
+  suggestedMonthly,
+  todayKey,
+  type Goal,
+  type GoalContribution,
+} from '../selectors/goals';
+
+const ICON_SF_SYMBOL: Record<string, string> = {
+  cart: 'cart', fork: 'fork.knife', car: 'car', bag: 'bag', doc: 'doc',
+  film: 'film', home: 'house', wallet: 'wallet.pass', receipt: 'receipt',
+  cards: 'creditcard', repeat: 'repeat', tag: 'tag', sparkle: 'sparkles',
+  cup: 'cup.and.saucer', cal: 'calendar', note: 'note.text', chart: 'chart.bar',
+  profile: 'person', bell: 'bell', sun: 'sun.max', moon: 'moon',
+};
+
+const fmtAmt = (n: number) => n % 1 !== 0 ? n.toFixed(2) : n.toLocaleString();
+const formatGoalDraft = (draft: string): string => {
+  if (!draft) return '0';
+  const dot = draft.indexOf('.');
+  const intRaw = dot === -1 ? draft : draft.slice(0, dot);
+  const intGrouped = intRaw ? Number(intRaw).toLocaleString() : '0';
+  return dot === -1 ? intGrouped : `${intGrouped}.${draft.slice(dot + 1)}`;
+};
+
+// Crisp ease-out settle for every goal sheet — matches TxSheet's feel instead of
+// gorhom's default spring.
+const SHEET_EASING = ReEasing.out(ReEasing.cubic);
+const SHEET_ANIM_MS = 300;
+
+// Date bridge for the native DatePicker. Goals store dates as `YYYY-MM-DD`
+// strings; parseGoalDate reads them back at local noon, so round-trip through
+// noon here too to avoid a UTC day-shift (mirrors IncomeFlow's toYMD).
+const ymdFromDate = (d: Date): string => {
+  const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+  return noon.toISOString().slice(0, 10);
+};
 
 interface Props {
   theme: Theme;
   visible: boolean;
+  contributeRequestToken?: number;
   onClose: () => void;
-}
-
-interface GoalContribution {
-  id: string;
-  amount: number;
-  date: string;
-  note?: string;
-}
-
-interface Goal {
-  id: string;
-  label: string;
-  icon: string;
-  target: number;
-  saved: number;
-  deadline?: string;
-  monthlyContribution?: number;
-  contributions: GoalContribution[];
-  category: Category;
+  onEditGoalCategory?: (catId: string) => void;
 }
 
 interface GoalDraft {
   label: string;
   target: string;
-  saved: string;
   deadline: string;
   monthlyContribution: string;
 }
@@ -72,112 +121,28 @@ interface ContributionDraft {
   note: string;
 }
 
-const todayKey = () => new Date().toISOString().slice(0, 10);
-const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
-const clampPct = (n: number) => Math.max(0, Math.min(100, n));
-const parseAmount = (value: string): number | null => {
-  const cleaned = value.replace(/[$,\s]/g, '');
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
-};
-
-const parseDate = (value?: string): Date | null => {
-  if (!value) return null;
-  const d = new Date(`${value}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
-
-const monthDistance = (deadline?: string): number | null => {
-  const target = parseDate(deadline);
-  if (!target) return null;
-  const now = new Date();
-  const raw = (target.getFullYear() - now.getFullYear()) * 12 + target.getMonth() - now.getMonth();
-  return Math.max(1, raw + 1);
-};
-
-const deadlineLabel = (deadline?: string): string => {
-  const d = parseDate(deadline);
-  if (!d) return deadline ?? 'No date';
-  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-};
-
-const contributionDateLabel = (date: string): string => {
-  const d = parseDate(date);
-  if (!d) return date;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-};
-
-const goalMeta = (goal: Goal, patch: Record<string, unknown>) => ({
-  ...(goal.category.meta ?? {}),
-  ...patch,
-});
-
-function suggestedMonthly(target: number, saved: number, deadline?: string): number {
-  const months = monthDistance(deadline);
-  if (!months) return 0;
-  return Math.max(0, Math.ceil((target - saved) / months));
+interface ContributionTarget {
+  goalId: string;
 }
 
-function statusFor(goal: Goal) {
-  const remaining = Math.max(0, goal.target - goal.saved);
-  if (remaining <= 0) return { label: 'Complete', tone: 'good' as const };
-  const needed = suggestedMonthly(goal.target, goal.saved, goal.deadline);
-  if (!goal.deadline) return { label: 'Active', tone: 'neutral' as const };
-  if (!goal.monthlyContribution || goal.monthlyContribution <= 0) return { label: `${money0(needed)}/mo needed`, tone: 'neutral' as const };
-  if (goal.monthlyContribution + 1 < needed) return { label: 'Behind plan', tone: 'caution' as const };
-  if (goal.monthlyContribution > needed * 1.18) return { label: 'Ahead', tone: 'good' as const };
-  return { label: 'On track', tone: 'good' as const };
-}
-
-export function GoalsScreen({ theme, visible, onClose }: Props) {
+export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClose, onEditGoalCategory }: Props) {
   const insets = useSafeAreaInsets();
   const { wallpaper, wallpaperFloorBase } = useTheme();
-  const { categoriesRepo } = useRepositories();
+  const { categoriesRepo, transactionsRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
-  const [formGoal, setFormGoal] = useState<Goal | 'new' | null>(null);
+  const [formGoalOpen, setFormGoalOpen] = useState(false);
   const [detailGoalId, setDetailGoalId] = useState<string | null>(null);
-  const [contributionGoalId, setContributionGoalId] = useState<string | null>(null);
+  const [contributionTarget, setContributionTarget] = useState<ContributionTarget | null>(null);
+  const [contributionPickerOpen, setContributionPickerOpen] = useState(false);
+  const lastContributeRequestRef = useRef(contributeRequestToken);
+  const returningToDetailRef = useRef<string | null>(null);
 
-  const goals = useMemo<Goal[]>(
-    () =>
-      categories
-        .filter(
-          c =>
-            !c.archived &&
-            c.group === 'savings' &&
-            typeof c.meta?.goalTarget === 'number' &&
-            (c.meta.goalTarget as number) > 0,
-        )
-        .map(c => ({
-          id: c.id,
-          label: c.label,
-          icon: c.icon,
-          target: c.meta!.goalTarget as number,
-          saved: typeof c.meta?.goalSaved === 'number' ? (c.meta!.goalSaved as number) : 0,
-          deadline: typeof c.meta?.goalDeadline === 'string' ? (c.meta!.goalDeadline as string) : undefined,
-          monthlyContribution: typeof c.meta?.goalMonthlyContribution === 'number' ? c.meta!.goalMonthlyContribution as number : undefined,
-          contributions: Array.isArray(c.meta?.goalContributions) ? c.meta!.goalContributions as GoalContribution[] : [],
-          category: c,
-        }))
-        .sort((a, b) => {
-          const aStatus = statusFor(a).tone === 'caution' ? 1 : 0;
-          const bStatus = statusFor(b).tone === 'caution' ? 1 : 0;
-          if (aStatus !== bStatus) return bStatus - aStatus;
-          return (a.saved / a.target) - (b.saved / b.target);
-        }),
-    [categories],
-  );
+  const goals = useMemo<Goal[]>(() => goalsFromCategories(categories), [categories]);
+  const archivedGoals = useMemo<Goal[]>(() => archivedGoalsFromCategories(categories), [categories]);
 
-  const totals = useMemo(() => {
-    const target = goals.reduce((s, g) => s + g.target, 0);
-    const saved = goals.reduce((s, g) => s + Math.min(g.saved, g.target), 0);
-    return { target, saved, pct: target > 0 ? clampPct(Math.round((saved / target) * 100)) : 0 };
-  }, [goals]);
-
-  const featured = goals[0];
-  const detailGoal = goals.find(goal => goal.id === detailGoalId) ?? null;
-  const contributionGoal = goals.find(goal => goal.id === contributionGoalId) ?? null;
+  const allGoals = useMemo(() => [...goals, ...archivedGoals], [goals, archivedGoals]);
+  const detailGoal = allGoals.find(goal => goal.id === detailGoalId) ?? null;
+  const contributionGoal = allGoals.find(goal => goal.id === contributionTarget?.goalId) ?? null;
 
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -195,59 +160,131 @@ export function GoalsScreen({ theme, visible, onClose }: Props) {
   const pWallpaper = makeP(true);
   const scrim = makeScrim(theme.dark);
   const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
+  const goalsBehind = goals.filter(goal => statusFor(goal).tone === 'caution').length;
+  const goalSavedTotal = goals.reduce((sum, goal) => sum + goal.saved, 0);
+  const monthlyPlanTotal = goals.reduce((sum, goal) => sum + (goal.monthlyContribution ?? 0), 0);
 
-  const saveGoal = (draft: GoalDraft, goal: Goal | 'new') => {
+  const beginContribution = (goal: Goal) => {
+    setContributionPickerOpen(false);
+    setDetailGoalId(null);
+    setFormGoalOpen(false);
+    requestAnimationFrame(() => setContributionTarget({ goalId: goal.id }));
+  };
+
+
+  useEffect(() => {
+    if (contributeRequestToken === lastContributeRequestRef.current) return;
+    if (!visible) return;
+    lastContributeRequestRef.current = contributeRequestToken;
+    setContributionTarget(null);
+    setDetailGoalId(null);
+    setFormGoalOpen(false);
+
+    if (goals.length === 0) {
+      setFormGoalOpen(true);
+    } else if (goals.length === 1) {
+      beginContribution(goals[0]);
+    } else {
+      setContributionPickerOpen(true);
+    }
+  }, [contributeRequestToken, goals, visible]);
+
+  const saveGoal = (draft: GoalDraft, _goal: 'new') => {
     const target = parseAmount(draft.target);
-    const saved = parseAmount(draft.saved) ?? 0;
     const monthly = parseAmount(draft.monthlyContribution);
-    if (!draft.label.trim() || !target || saved > target) return false;
-    const icon = goal === 'new' ? (inferCategoryIcon(draft.label) || 'wallet') : goal.icon;
-    const monthlyValue = monthly ?? suggestedMonthly(target, saved, draft.deadline.trim());
+    if (!draft.label.trim() || !target) return false;
+    const icon = inferCategoryIcon(draft.label) || 'wallet';
+    const contributions: GoalContribution[] = [];
+    const startingBalance = 0;
+    const nextSaved = goalSavedFromParts(target, startingBalance, contributions);
+    const monthlyValue = monthly ?? suggestedMonthly(target, nextSaved, draft.deadline.trim());
     const meta = {
       custom: true,
       goalTarget: target,
-      goalSaved: saved,
+      goalStartingBalance: startingBalance,
+      goalSaved: nextSaved,
       goalDeadline: draft.deadline.trim() || undefined,
       goalMonthlyContribution: monthlyValue > 0 ? monthlyValue : undefined,
-      goalContributions: goal !== 'new' ? goal.contributions : [],
+      goalContributions: contributions,
+      goalStatus: nextSaved >= target ? 'completed' : 'active',
+      goalCompletedAt: nextSaved >= target ? todayKey() : undefined,
     };
 
-    if (goal === 'new') {
-      categoriesRepo.create({
-        label: draft.label.trim(),
-        icon,
-        group: 'savings',
-        defaultBudget: monthlyValue,
-        sortOrder: Math.max(0, ...categories.map(cat => cat.sortOrder)) + 10,
-        meta,
-        createdByUserId: 'local',
-        updatedByUserId: 'local',
-      });
-    } else {
-      categoriesRepo.update(goal.id, {
-        label: draft.label.trim(),
-        icon,
-        defaultBudget: monthlyValue,
-        meta: { ...(goal.category.meta ?? {}), ...meta },
-        updatedByUserId: 'local',
-      });
-    }
+    categoriesRepo.create({
+      label: draft.label.trim(),
+      icon,
+      group: 'savings',
+      defaultBudget: monthlyValue,
+      sortOrder: Math.max(0, ...categories.map(cat => cat.sortOrder)) + 10,
+      meta,
+      createdByUserId: 'local',
+      updatedByUserId: 'local',
+    });
     return true;
+  };
+
+  const contributionStatusPatch = (goal: Goal, saved: number) => {
+    const completed = saved >= goal.target;
+    return {
+      goalSaved: saved,
+      goalStatus: completed ? 'completed' : goal.status === 'paused' ? 'paused' : 'active',
+      goalCompletedAt: completed ? (goal.completedAt ?? todayKey()) : undefined,
+    };
+  };
+
+  const upsertContributionTransaction = (
+    goal: Goal,
+    contribution: GoalContribution,
+    draft: ContributionDraft,
+    occurredAt: Date,
+  ) => {
+    const meta = {
+      kind: 'goal-contribution',
+      goalId: goal.id,
+      contributionId: contribution.id,
+    };
+    const txInput = {
+      merchant: goal.label,
+      cat: goal.id,
+      amount: contribution.amount,
+      note: draft.note.trim(),
+      occurredAt: occurredAt.toISOString(),
+      type: 'expense' as const,
+      visibility: 'shared' as const,
+      updatedByUserId: 'local',
+      meta,
+    };
+
+    if (contribution.transactionId && transactionsRepo.get(contribution.transactionId)) {
+      transactionsRepo.update(contribution.transactionId, txInput);
+      return contribution.transactionId;
+    }
+
+    const tx = transactionsRepo.create({
+      ...txInput,
+      createdByUserId: 'local',
+    });
+    return tx.id;
   };
 
   const saveContribution = (goal: Goal, draft: ContributionDraft) => {
     const amount = parseAmount(draft.amount);
     if (!amount || amount <= 0) return false;
+    const date = todayKey();
+    const occurredAt = parseGoalDate(date);
+    if (!occurredAt) return false;
     const contribution: GoalContribution = {
       id: `goal-contribution-${Date.now()}`,
       amount,
-      date: draft.date.trim() || todayKey(),
-      note: draft.note.trim() || undefined,
+      date,
     };
+    contribution.transactionId = upsertContributionTransaction(goal, contribution, draft, occurredAt);
+    const contributions = [contribution, ...goal.contributions];
+    const saved = goalSavedFromParts(goal.target, goal.startingBalance, contributions);
     categoriesRepo.update(goal.id, {
       meta: goalMeta(goal, {
-        goalSaved: Math.min(goal.target, goal.saved + amount),
-        goalContributions: [contribution, ...goal.contributions],
+        goalContributions: contributions,
+        ...contributionStatusPatch(goal, saved),
       }),
       updatedByUserId: 'local',
     });
@@ -255,8 +292,44 @@ export function GoalsScreen({ theme, visible, onClose }: Props) {
   };
 
   const markComplete = (goal: Goal) => {
+    const startingBalance = Math.max(0, goal.target - contributionTotal(goal.contributions));
     categoriesRepo.update(goal.id, {
-      meta: goalMeta(goal, { goalSaved: goal.target, goalCompletedAt: todayKey() }),
+      meta: goalMeta(goal, {
+        goalStartingBalance: startingBalance,
+        goalSaved: goal.target,
+        goalStatus: 'completed',
+        goalCompletedAt: todayKey(),
+      }),
+      updatedByUserId: 'local',
+    });
+  };
+
+  const setGoalPaused = (goal: Goal, paused: boolean) => {
+    categoriesRepo.update(goal.id, {
+      meta: goalMeta(goal, {
+        goalStatus: paused ? 'paused' : goal.saved >= goal.target ? 'completed' : 'active',
+      }),
+      updatedByUserId: 'local',
+    });
+  };
+
+  const archiveGoal = (goal: Goal) => {
+    categoriesRepo.update(goal.id, {
+      meta: goalMeta(goal, {
+        goalStatus: 'archived',
+        goalArchivedAt: todayKey(),
+      }),
+      updatedByUserId: 'local',
+    });
+    setDetailGoalId(null);
+  };
+
+  const restoreGoal = (goal: Goal) => {
+    const meta = { ...(goal.category.meta ?? {}) };
+    meta.goalStatus = goal.saved >= goal.target ? 'completed' : 'active';
+    delete meta.goalArchivedAt;
+    categoriesRepo.update(goal.id, {
+      meta,
       updatedByUserId: 'local',
     });
   };
@@ -267,280 +340,456 @@ export function GoalsScreen({ theme, visible, onClose }: Props) {
       style={[StyleSheet.absoluteFill, { zIndex: 78, opacity: anim, transform: [{ translateY }] }]}
     >
       <View style={[styles.root, { backgroundColor: floorColor }]}>
-        <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFill}>
-          <LinearGradient
-            pointerEvents="none"
-            colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}
-            locations={[0, 0.3, 0.7, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-
-          <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-            <ScreenExitButton
-              variant="back"
-              onPress={onClose}
-              tint={pWallpaper.text}
-              fallbackBg="rgba(8,6,20,0.45)"
-              accessibilityLabel="Back"
+        <BottomSheetModalProvider>
+          <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFill}>
+            <LinearGradient
+              pointerEvents="none"
+              colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}
+              locations={[0, 0.3, 0.7, 1]}
+              style={StyleSheet.absoluteFill}
             />
-            <Text style={[styles.headerTitle, { color: pWallpaper.text }]}>Goals</Text>
-            <Pressable
-              onPress={() => setFormGoal('new')}
-              accessibilityRole="button"
-              accessibilityLabel="Add goal"
-              style={[styles.headerAdd, { backgroundColor: 'rgba(8,6,20,0.35)', borderColor: pWallpaper.hairline }]}
-            >
-              <Icon name="plus" size={17} color={pWallpaper.text} stroke={2} />
-            </Pressable>
-          </View>
 
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{
-              paddingTop: insets.top + 68,
-              paddingHorizontal: LAYOUT.screenGutter,
-              paddingBottom: insets.bottom + SPACE.xxxl,
-            }}
-            showsVerticalScrollIndicator={false}
-          >
-            {featured ? (
-              <FeaturedGoal
-                goal={featured}
-                theme={theme}
-                tint={teal}
-                caution={caution}
-                pWallpaper={pWallpaper}
-                onOpen={() => setDetailGoalId(featured.id)}
-                onContribute={() => setContributionGoalId(featured.id)}
+            <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+              <ScreenExitButton
+                variant="back"
+                onPress={onClose}
+                tint={pWallpaper.text}
+                fallbackBg="rgba(8,6,20,0.45)"
+                accessibilityLabel="Back"
               />
-            ) : (
-              <EmptyGoals theme={theme} tint={teal} p={p} onAdd={() => setFormGoal('new')} />
-            )}
+              <Text style={[styles.headerTitle, { color: pWallpaper.text }]}>Goals</Text>
+              {SUPPORTS_GLASS ? (
+                <GlassCircleButton
+                  onPress={() => setFormGoalOpen(true)}
+                  systemImage="plus"
+                  size={EXIT_BTN_SIZE}
+                  iconSize={18}
+                  iconColor={pWallpaper.text}
+                  accessibilityLabel="Add goal"
+                />
+              ) : (
+                <Pressable
+                  onPress={() => setFormGoalOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add goal"
+                  style={[
+                    styles.headerAdd,
+                    { backgroundColor: 'rgba(8,6,20,0.40)', borderColor: pWallpaper.hairline },
+                  ]}
+                >
+                  <Icon name="plus" size={17} color={pWallpaper.text} stroke={2} />
+                </Pressable>
+              )}
+            </View>
 
-            {goals.length > 0 && (
-              <>
-                <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.lg }}>
-                  <View style={styles.totalHeader}>
-                    <Text style={[TYPE.labelLg, { color: p.textTer }]}>TOTAL SAVED</Text>
-                    <Text style={[TYPE.captionEm, { color: teal }]}>{totals.pct}% funded</Text>
-                  </View>
-                  <View style={styles.summaryAmountRow}>
-                    <Money value={totals.saved} theme={theme} size={32} color={p.text} prefix="$" />
-                    <Text style={[TYPE.subsectionTitle, { color: p.textSec, marginBottom: 3 }]}>
-                      {' '}of ${totals.target.toLocaleString()}
-                    </Text>
-                  </View>
-                  <ProgressBar pct={totals.pct} color={teal} trackColor={p.hairline} height={10} />
-                </SectionCard>
-
-                <SectionCard dark={theme.dark} noPad>
-                  {goals.map((goal, i) => (
-                    <GoalRow
-                      key={goal.id}
-                      goal={goal}
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{
+                paddingTop: insets.top + 68,
+                paddingHorizontal: LAYOUT.screenGutter,
+                paddingBottom: insets.bottom + SPACE.xxxl,
+              }}
+              showsVerticalScrollIndicator={false}
+            >
+              {goals.length === 0 && archivedGoals.length === 0 ? (
+                <EmptyGoals theme={theme} tint={teal} p={p} onAdd={() => setFormGoalOpen(true)} />
+              ) : (
+                <>
+                  {goals.length > 0 && (
+                    <GoalSummary
                       theme={theme}
                       p={p}
+                      activeCount={goals.length}
+                      savedTotal={goalSavedTotal}
+                      monthlyPlan={monthlyPlanTotal}
+                      behindCount={goalsBehind}
                       tint={teal}
                       caution={caution}
-                      last={i === goals.length - 1}
-                      onPress={() => setDetailGoalId(goal.id)}
                     />
+                  )}
+                  {goals.length === 0 && (
+                    <EmptyActiveGoals theme={theme} p={p} onAdd={() => setFormGoalOpen(true)} />
+                  )}
+                  {goals.map(goal => (
+                    <Pressable
+                      key={goal.id}
+                      onPress={() => setDetailGoalId(goal.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open ${goal.label} goal`}
+                      style={({ pressed }) => [
+                        { marginBottom: SPACE.md },
+                        pressed && { opacity: 0.72 },
+                      ]}
+                    >
+                      <SectionCard dark={theme.dark}>
+                        <GoalCard
+                          goal={goal}
+                          p={p}
+                          tint={teal}
+                          caution={caution}
+                        />
+                      </SectionCard>
+                    </Pressable>
                   ))}
-                </SectionCard>
-              </>
-            )}
-          </ScrollView>
+                  {archivedGoals.length > 0 && (
+                    <>
+                      <View style={styles.archivedHeader}>
+                        <Text style={[TYPE.labelLg, { color: p.textTer }]}>ARCHIVED</Text>
+                        <Text style={[TYPE.caption, { color: p.textTer }]}>
+                          {archivedGoals.length}
+                        </Text>
+                      </View>
+                      {archivedGoals.map(goal => (
+                        <Pressable
+                          key={goal.id}
+                          onPress={() => setDetailGoalId(goal.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open archived ${goal.label} goal`}
+                          style={({ pressed }) => [
+                            { marginBottom: SPACE.md, opacity: pressed ? 0.56 : 0.78 },
+                          ]}
+                        >
+                          <SectionCard dark={theme.dark}>
+                            <GoalCard
+                              goal={goal}
+                              p={p}
+                              tint={teal}
+                              caution={caution}
+                            />
+                          </SectionCard>
+                        </Pressable>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+            </ScrollView>
 
-          <GoalDetailSheet
-            theme={theme}
-            goal={detailGoal}
-            tint={teal}
-            caution={caution}
-            onClose={() => setDetailGoalId(null)}
-            onAddContribution={(goal) => {
-              setDetailGoalId(null);
-              setContributionGoalId(goal.id);
-            }}
-            onEdit={(goal) => {
-              setDetailGoalId(null);
-              setFormGoal(goal);
-            }}
-            onComplete={markComplete}
-          />
-          <GoalFormSheet
-            theme={theme}
-            goal={formGoal}
-            onClose={() => setFormGoal(null)}
-            onSave={saveGoal}
-          />
-          <ContributionSheet
-            theme={theme}
-            goal={contributionGoal}
-            onClose={() => setContributionGoalId(null)}
-            onSave={saveContribution}
-          />
-        </ImageBackground>
+            <GoalDetailSheet
+              theme={theme}
+              goal={detailGoal}
+              tint={teal}
+              caution={caution}
+              onClose={() => setDetailGoalId(null)}
+              onAddContribution={goal => {
+                returningToDetailRef.current = goal.id;
+                setDetailGoalId(null);
+                setContributionTarget({ goalId: goal.id });
+              }}
+              onEditCategory={goal => {
+                setDetailGoalId(null);
+                onEditGoalCategory?.(goal.id);
+              }}
+              onComplete={markComplete}
+              onPauseToggle={goal => setGoalPaused(goal, goal.status !== 'paused')}
+              onArchive={archiveGoal}
+              onRestore={restoreGoal}
+            />
+            <GoalFormSheet
+              theme={theme}
+              open={formGoalOpen}
+              onClose={() => setFormGoalOpen(false)}
+              onSave={saveGoal}
+            />
+            <ContributionGoalPickerSheet
+              theme={theme}
+              open={contributionPickerOpen}
+              goals={goals}
+              tint={teal}
+              caution={caution}
+              onClose={() => setContributionPickerOpen(false)}
+              onChoose={beginContribution}
+            />
+            <ContributionSheet
+              theme={theme}
+              goal={contributionGoal}
+              onClose={() => {
+                returningToDetailRef.current = null;
+                setContributionTarget(null);
+              }}
+              onSave={saveContribution}
+              onDidSave={() => {
+                const goalId = returningToDetailRef.current;
+                returningToDetailRef.current = null;
+                if (goalId) setTimeout(() => setDetailGoalId(goalId), SHEET_ANIM_MS + 50);
+              }}
+            />
+          </ImageBackground>
+        </BottomSheetModalProvider>
       </View>
     </Animated.View>
   );
 }
 
-function FeaturedGoal({
+function GoalCard({
   goal,
-  theme,
+  p,
   tint,
   caution,
-  pWallpaper,
-  onOpen,
-  onContribute,
 }: {
   goal: Goal;
-  theme: Theme;
+  p: ReturnType<typeof makeP>;
   tint: string;
   caution: string;
-  pWallpaper: ReturnType<typeof makeP>;
-  onOpen: () => void;
-  onContribute: () => void;
 }) {
-  const pct = goal.target > 0 ? clampPct(Math.round((goal.saved / goal.target) * 100)) : 0;
-  const remaining = Math.max(0, goal.target - goal.saved);
+  const pct = goalProgressPct(goal);
+  const remaining = goalRemaining(goal);
   const status = statusFor(goal);
-  const needed = suggestedMonthly(goal.target, goal.saved, goal.deadline);
-  const statusColor = status.tone === 'caution' ? caution : tint;
+  const statusColor =
+    status.tone === 'caution' ? caution : status.tone === 'good' ? tint : p.textTer;
+
+  const monthly = goal.monthlyContribution;
+  const proj = monthly && remaining > 0 ? projectedFinishDate(goal) : null;
+  const delta = proj ? monthDeltaVsDeadline(goal) : null;
+
+  // Single-line footer: factual rate + deadline. Status (on track / behind) lives
+  // in the badge above — no need to repeat pace signals here.
+  let footerLine: string | null = null;
+  let footerLineColor = p.textSec;
+
+  if (goal.status === 'archived') {
+    footerLine = goal.archivedAt
+      ? `Archived ${contributionDateLabel(goal.archivedAt)}`
+      : 'Archived';
+    footerLineColor = p.textTer;
+  } else if (remaining > 0) {
+    if (monthly && monthly > 0) {
+      footerLine = goal.deadline
+        ? `${money0(monthly)}/mo · ${deadlineLabel(goal.deadline)}`
+        : `${money0(monthly)}/mo`;
+    } else if (goal.deadline) {
+      footerLine = `Target ${deadlineLabel(goal.deadline)}`;
+      footerLineColor = p.textTer;
+    } else {
+      footerLine = 'Add a target date and monthly amount';
+      footerLineColor = p.textTer;
+    }
+  }
 
   return (
-    <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={`Open ${goal.label} goal`} style={styles.hero}>
-      <View style={styles.heroTopRow}>
-        <View style={[styles.statusPill, { backgroundColor: 'rgba(8,6,20,0.35)', borderColor: pWallpaper.hairline }]}>
-          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-          <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, DARK_TEXT_SHADOW]}>{status.label}</Text>
+    <View>
+      <View style={styles.cardTopRow}>
+        <View style={[styles.cardIcon, { backgroundColor: `${tint}28` }]}>
+          <Icon name={goal.icon} size={16} color={tint} stroke={1.6} />
         </View>
-        <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, DARK_TEXT_SHADOW]}>
-          {goal.deadline ? deadlineLabel(goal.deadline) : 'No target date'}
+        <Text style={[TYPE.body, { color: p.text, flex: 1 }]} numberOfLines={1}>
+          {goal.label}
+        </Text>
+        <View style={[styles.cardBadge, { backgroundColor: `${statusColor}22` }]}>
+          <View style={[styles.cardBadgeDot, { backgroundColor: statusColor }]} />
+          <Text style={[TYPE.captionEm, { color: statusColor }]}>{status.label}</Text>
+        </View>
+      </View>
+
+      <View style={styles.cardBarRow}>
+        <View style={{ flex: 1 }}>
+          <ProgressBar pct={pct} color={tint} trackColor={p.hairline} height={8} />
+        </View>
+        <Text style={[TYPE.captionEm, { color: p.textSec, marginLeft: SPACE.sm }]}>{pct}%</Text>
+      </View>
+
+      <View style={styles.cardAmountRow}>
+        <Text style={[TYPE.bodySmEm, { color: p.text }]}>
+          {money0(goal.saved)}
+          <Text style={[TYPE.bodySm, { color: p.textSec }]}> of {money0(goal.target)}</Text>
+        </Text>
+        <Text style={[TYPE.bodySm, { color: p.textSec }]}>
+          {remaining > 0 ? `${money0(remaining)} to go` : 'Complete'}
         </Text>
       </View>
 
-      <View style={styles.heroMain}>
-        <ProgressRing pct={pct} color={tint} trackColor={pWallpaper.hairline} size={172} stroke={10}>
-          <View style={[styles.heroIcon, { backgroundColor: tint }]}>
-            <Icon name={goal.icon} size={30} color={ON_GROUP_ICON} stroke={1.6} />
-          </View>
-          <Text style={[TYPE.headline, { color: pWallpaper.text, marginTop: SPACE.sm }, DARK_TEXT_SHADOW]} numberOfLines={1}>
-            {goal.label}
-          </Text>
-          <Text style={[TYPE.captionEm, { color: pWallpaper.textSec }, DARK_TEXT_SHADOW]}>{pct}% funded</Text>
-        </ProgressRing>
-      </View>
-
-      <View style={styles.heroAmountBlock}>
-        <Money value={goal.saved} theme={theme} size={38} color={pWallpaper.text} prefix="$" />
-        <Text style={[TYPE.bodySmEm, { color: pWallpaper.textSec, marginTop: SPACE.xs }, DARK_TEXT_SHADOW]}>
-          {money0(remaining)} remaining of {money0(goal.target)}
+      {footerLine ? (
+        <Text style={[TYPE.caption, { color: footerLineColor, marginTop: SPACE.sm }]} numberOfLines={1}>
+          {footerLine}
         </Text>
-      </View>
-
-      <View style={styles.heroStats}>
-        <HeroStat label="Monthly" value={goal.monthlyContribution ? money0(goal.monthlyContribution) : 'Unset'} />
-        <HeroStat label="Needed" value={needed > 0 ? money0(needed) : 'Done'} />
-        <HeroStat label="Activity" value={`${goal.contributions.length}`} />
-      </View>
-
-      <Pressable
-        onPress={(e) => {
-          e.stopPropagation();
-          onContribute();
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={`Add contribution to ${goal.label}`}
-        style={[styles.heroAction, { backgroundColor: pWallpaper.text, borderColor: pWallpaper.hairline }]}
-      >
-        <Icon name="plus" size={14} color={theme.bg} stroke={2.2} />
-        <Text style={[TYPE.captionEm, { color: theme.bg }]}>Add contribution</Text>
-      </Pressable>
-    </Pressable>
-  );
-}
-
-function HeroStat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.heroStat}>
-      <Text style={[TYPE.labelSm, { color: 'rgba(242,244,245,0.58)' }]}>{label}</Text>
-      <Text style={[TYPE.subsectionTitle, { color: 'rgba(242,244,245,0.94)' }]}>{value}</Text>
+      ) : null}
     </View>
   );
 }
 
-function GoalRow({
+function GoalTimeline({
   goal,
-  theme,
-  p,
   tint,
   caution,
-  last,
-  onPress,
+  theme,
 }: {
   goal: Goal;
-  theme: Theme;
-  p: ReturnType<typeof makeP>;
   tint: string;
   caution: string;
-  last: boolean;
-  onPress: () => void;
+  theme: Theme;
 }) {
-  const pct = goal.target > 0 ? clampPct(Math.round((goal.saved / goal.target) * 100)) : 0;
-  const remaining = Math.max(0, goal.target - goal.saved);
-  const status = statusFor(goal);
-  const statusColor = status.tone === 'caution' ? caution : tint;
+  if (goal.saved >= goal.target) return null;
+
+  const pct = goalProgressPct(goal);
+  const proj = projectedFinishDate(goal);
+  const delta = proj && goal.deadline ? monthDeltaVsDeadline(goal) : null;
+  const isLate = delta !== null && delta > 0;
+  const barColor = isLate ? caution : tint;
+
+  if (!proj && !goal.deadline) return null;
+
+  // Estimated finish: only annotate when behind (not when ahead).
+  let finishLabel: string | null = null;
+  if (proj) {
+    if (isLate) {
+      const n = delta!;
+      finishLabel = `Est. ${proj.label} · ${n} ${n === 1 ? 'month' : 'months'} behind`;
+    } else {
+      finishLabel = `Est. ${proj.label}`;
+    }
+  }
+
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${goal.label} goal`}
-      style={({ pressed }) => [
-        styles.goalRow,
-        !last && { borderBottomColor: p.hairline, borderBottomWidth: StyleSheet.hairlineWidth },
-        pressed && { opacity: 0.62 },
-      ]}
-    >
-      <View style={[styles.goalIcon, { backgroundColor: `${tint}26` }]}>
-        <Icon name={goal.icon} size={16} color={tint} stroke={1.6} />
+    <View style={styles.timelineWrap}>
+      <Text style={[TYPE.labelSm, { color: theme.textTer, marginBottom: SPACE.sm }]}>
+        SAVINGS PROGRESS
+      </Text>
+      <ProgressBar pct={pct} color={barColor} trackColor={theme.hairline} height={8} />
+      <View style={[styles.timelineLabelRow, { marginTop: SPACE.sm }]}>
+        {finishLabel ? (
+          <Text style={[TYPE.captionEm, { color: barColor, flex: 1 }]} numberOfLines={1}>
+            {finishLabel}
+          </Text>
+        ) : <View style={{ flex: 1 }} />}
+        {goal.deadline && (
+          <Text style={[TYPE.caption, { color: theme.textTer }]}>
+            Target {deadlineLabel(goal.deadline)}
+          </Text>
+        )}
       </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <View style={styles.goalTitleRow}>
-          <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{goal.label}</Text>
-          <View style={[styles.smallStatus, { backgroundColor: `${statusColor}22` }]}>
-            <Text style={[TYPE.labelSmPlain, { color: statusColor }]}>{status.label}</Text>
-          </View>
-        </View>
-        <View style={styles.goalBarRow}>
-          <ProgressBar pct={pct} color={tint} trackColor={p.hairline} height={5} />
-        </View>
-        <Text style={[TYPE.caption, { color: p.textSec, marginTop: SPACE.xs }]}>
-          {money0(remaining)} to go · {pct}% · {goal.deadline ? deadlineLabel(goal.deadline) : 'no date'}
-        </Text>
-      </View>
-      <View style={styles.goalAmounts}>
-        <Money value={goal.saved} theme={theme} size={15} color={p.text} prefix="$" />
-        <Icon name="chevR" size={13} color={p.textTer} stroke={2.1} />
-      </View>
-    </Pressable>
+    </View>
   );
 }
 
-function EmptyGoals({ theme, tint, p, onAdd }: { theme: Theme; tint: string; p: ReturnType<typeof makeP>; onAdd: () => void }) {
+function EmptyGoals({
+  theme,
+  tint,
+  p,
+  onAdd,
+}: {
+  theme: Theme;
+  tint: string;
+  p: ReturnType<typeof makeP>;
+  onAdd: () => void;
+}) {
   return (
     <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.lg }}>
       <View style={styles.emptyWrap}>
         <View style={[styles.emptyIcon, { backgroundColor: tint }]}>
           <Icon name="target" size={22} color={ON_GROUP_ICON} stroke={1.6} />
         </View>
-        <Text style={[TYPE.subsectionTitle, { color: p.text, marginTop: SPACE.md, textAlign: 'center' }]}>
+        <Text
+          style={[TYPE.subsectionTitle, { color: p.text, marginTop: SPACE.md, textAlign: 'center' }]}
+        >
           No goals yet
         </Text>
-        <Text style={[TYPE.bodySm, { color: p.textSec, marginTop: SPACE.xs, textAlign: 'center' }]}>
+        <Text
+          style={[TYPE.bodySm, { color: p.textSec, marginTop: SPACE.xs, textAlign: 'center' }]}
+        >
           Create a goal for any savings plan, then track contributions here.
         </Text>
-        <SheetPrimaryButton label="Add goal" onPress={onAdd} theme={theme} style={{ marginTop: SPACE.lg }} />
+        <SheetPrimaryButton
+          label="Add goal"
+          onPress={onAdd}
+          theme={theme}
+          style={{ marginTop: SPACE.lg }}
+        />
+      </View>
+    </SectionCard>
+  );
+}
+
+function GoalSummary({
+  theme,
+  p,
+  activeCount,
+  savedTotal,
+  monthlyPlan,
+  behindCount,
+  tint,
+  caution,
+}: {
+  theme: Theme;
+  p: ReturnType<typeof makeP>;
+  activeCount: number;
+  savedTotal: number;
+  monthlyPlan: number;
+  behindCount: number;
+  tint: string;
+  caution: string;
+}) {
+  return (
+    <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.md }}>
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryTopRow}>
+          <View>
+            <Text style={[TYPE.labelLg, { color: p.textTer }]}>GOAL PLAN</Text>
+            <Text style={[TYPE.sectionTitle, { color: p.text, marginTop: SPACE.xs }]}>
+              {activeCount} active {activeCount === 1 ? 'goal' : 'goals'}
+            </Text>
+          </View>
+          <View style={[styles.summaryStatusPill, { backgroundColor: `${behindCount > 0 ? caution : tint}1F` }]}>
+            <View style={[styles.summaryStatusDot, { backgroundColor: behindCount > 0 ? caution : tint }]} />
+            <Text style={[TYPE.captionEm, { color: behindCount > 0 ? caution : tint }]}>
+              {behindCount > 0 ? `${behindCount} behind` : 'On track'}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.summaryStatRow}>
+          <SummaryStat label="Saved" value={money0(savedTotal)} color={p.text} labelColor={p.textTer} />
+          <SummaryStat label="Monthly plan" value={money0(monthlyPlan)} color={p.text} labelColor={p.textTer} />
+          <SummaryStat label="Attention" value={String(behindCount)} color={behindCount > 0 ? caution : p.text} labelColor={p.textTer} />
+        </View>
+      </View>
+    </SectionCard>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  color,
+  labelColor,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  labelColor: string;
+}) {
+  return (
+    <View style={styles.summaryStat}>
+      <Text style={[TYPE.labelSm, { color: labelColor }]}>{label}</Text>
+      <Text style={[TYPE.subsectionTitle, { color }]} numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
+
+function EmptyActiveGoals({
+  theme,
+  p,
+  onAdd,
+}: {
+  theme: Theme;
+  p: ReturnType<typeof makeP>;
+  onAdd: () => void;
+}) {
+  return (
+    <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.md }}>
+      <View style={styles.emptyActiveWrap}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[TYPE.body, { color: p.text }]}>No active goals</Text>
+          <Text style={[TYPE.caption, { color: p.textSec, marginTop: SPACE.px2 }]}>
+            Restore an archived goal or start a new one.
+          </Text>
+        </View>
+        <Pressable
+          onPress={onAdd}
+          accessibilityRole="button"
+          accessibilityLabel="Add goal"
+          style={[styles.emptyActiveButton, { borderColor: p.hairline }]}
+        >
+          <Text style={[TYPE.captionEm, { color: p.text }]}>Add</Text>
+        </Pressable>
       </View>
     </SectionCard>
   );
@@ -553,8 +802,11 @@ function GoalDetailSheet({
   caution,
   onClose,
   onAddContribution,
-  onEdit,
+  onEditCategory,
+  onPauseToggle,
   onComplete,
+  onArchive,
+  onRestore,
 }: {
   theme: Theme;
   goal: Goal | null;
@@ -562,191 +814,736 @@ function GoalDetailSheet({
   caution: string;
   onClose: () => void;
   onAddContribution: (goal: Goal) => void;
-  onEdit: (goal: Goal) => void;
+  onEditCategory: (goal: Goal) => void;
+  onPauseToggle: (goal: Goal) => void;
   onComplete: (goal: Goal) => void;
+  onArchive: (goal: Goal) => void;
+  onRestore: (goal: Goal) => void;
 }) {
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const sheetRef = useRef<BottomSheet>(null);
+  const animationConfigs = useBottomSheetTimingConfigs({ duration: SHEET_ANIM_MS, easing: SHEET_EASING });
+  const openedRef = useRef(false);
+  const closingRef = useRef(false);
+  const closeSheet = () => {
+    closingRef.current = true;
+    sheetRef.current?.close();
+  };
   useEffect(() => {
-    if (goal) sheetRef.current?.present();
-    else sheetRef.current?.dismiss();
+    if (goal) {
+      openedRef.current = true;
+      closingRef.current = false;
+      requestAnimationFrame(() => sheetRef.current?.snapToIndex(0));
+    } else {
+      openedRef.current = false;
+      closingRef.current = false;
+      sheetRef.current?.close();
+    }
   }, [goal]);
+  const handleSheetChange = (index: number) => {
+    if (index === -1 && (openedRef.current || closingRef.current)) {
+      openedRef.current = false;
+      closingRef.current = false;
+      onClose();
+    }
+  };
   const renderBackdrop = (props: BottomSheetBackdropProps) => (
-    <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.42} pressBehavior="close" />
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
   );
   const status = goal ? statusFor(goal) : null;
+  const statusColor =
+    status?.tone === 'caution' ? caution : status?.tone === 'good' ? tint : theme.textTer;
+  const isArchived = goal?.status === 'archived';
 
   return (
-    <BottomSheetModal
+    <BottomSheet
       ref={sheetRef}
-      index={0}
-      snapPoints={['74%']}
+      index={-1}
+      snapPoints={['93%']}
+      animateOnMount={false}
+      enableDynamicSizing={false}
       enablePanDownToClose
-      onDismiss={onClose}
+      animationConfigs={animationConfigs}
+      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }}
+      containerStyle={styles.sheetModalContainer}
+      backgroundStyle={{
+        backgroundColor: theme.surface,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+      }}
       handleIndicatorStyle={{ backgroundColor: theme.textTer }}
     >
       {goal && (
-        <BottomSheetScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
-          <ScreenExitButton variant="close" onPress={onClose} tint={theme.textSec} fallbackBg={theme.chipBg} style={EXIT_FLOAT_STYLE} />
-          <View style={styles.sheetHeroCenter}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheetContent, { paddingTop: SPACE.md }]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header row: close left, more menu right */}
+          <View style={styles.sheetHeaderRow}>
+            <ScreenExitButton
+              variant="close"
+              onPress={closeSheet}
+              tint={theme.textSec}
+              fallbackBg={theme.chipBg}
+            />
+            {!isArchived && (
+              <Host ignoreSafeArea="all" style={{ width: EXIT_BTN_SIZE, height: EXIT_BTN_SIZE }}>
+                <Menu
+                  label={
+                    <View style={[styles.moreBtn, { backgroundColor: theme.chipBg }]}>
+                      <Icon name="ellipsis" size={15} color={theme.textSec} />
+                    </View>
+                  }
+                >
+                  <SwiftButton label="Edit goal" onPress={() => onEditCategory(goal)} />
+                  <SwiftButton
+                    label={goal.status === 'paused' ? 'Resume goal' : 'Pause goal'}
+                    onPress={() => onPauseToggle(goal)}
+                  />
+                  {goal.saved < goal.target && (
+                    <SwiftButton
+                      label="Mark complete"
+                      onPress={() => Alert.alert(
+                        'Mark complete?',
+                        `Mark "${goal.label}" as complete.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Mark complete', onPress: () => onComplete(goal) },
+                        ],
+                      )}
+                    />
+                  )}
+                  <SwiftButton
+                    label="Archive goal"
+                    onPress={() => Alert.alert(
+                      'Archive goal?',
+                      `"${goal.label}" will be hidden from your active goals. You can restore it later.`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Archive', style: 'destructive', onPress: () => { closeSheet(); onArchive(goal); } },
+                      ],
+                    )}
+                  />
+                </Menu>
+              </Host>
+            )}
+          </View>
+
+          <View style={[styles.sheetHeroCenter, { paddingTop: SPACE.md }]}>
             <View style={[styles.sheetIcon, { backgroundColor: tint }]}>
               <Icon name={goal.icon} size={24} color={ON_GROUP_ICON} stroke={1.6} />
             </View>
-            <Text style={[TYPE.headline, { color: theme.text, marginTop: SPACE.sm }]}>{goal.label}</Text>
-            <Text style={[TYPE.bodySm, { color: theme.textSec, marginTop: SPACE.xs }]}>
-              {status?.label} · {goal.deadline ? deadlineLabel(goal.deadline) : 'No target date'}
+            <Text style={[TYPE.headline, { color: theme.text, marginTop: SPACE.sm }]}>
+              {goal.label}
             </Text>
+            <View style={styles.sheetStatusRow}>
+              <View style={[styles.sheetStatusDot, { backgroundColor: statusColor }]} />
+              <Text style={[TYPE.bodySm, { color: theme.textSec }]}>
+                {status?.label}
+                {status?.subtext ? `  ·  ${status.subtext}` : ''}
+              </Text>
+            </View>
           </View>
+
+          <GoalTimeline goal={goal} tint={tint} caution={caution} theme={theme} />
 
           <View style={[styles.detailStatGrid, { borderColor: theme.hairline }]}>
-            <DetailStat label="Saved" value={money0(goal.saved)} color={theme.text} />
-            <DetailStat label="Remaining" value={money0(Math.max(0, goal.target - goal.saved))} color={theme.text} />
-            <DetailStat label="Monthly" value={goal.monthlyContribution ? money0(goal.monthlyContribution) : 'Unset'} color={theme.text} />
-            <DetailStat label="Needed" value={money0(suggestedMonthly(goal.target, goal.saved, goal.deadline))} color={status?.tone === 'caution' ? caution : tint} />
+            <DetailStat label="Saved" value={money0(goal.saved)} color={theme.text} labelColor={theme.textTer} />
+            <DetailStat
+              label="To go"
+              value={money0(Math.max(0, goal.target - goal.saved))}
+              color={theme.text}
+              labelColor={theme.textTer}
+            />
           </View>
 
-          <SheetPrimaryButton label="Add contribution" onPress={() => onAddContribution(goal)} theme={theme} style={{ marginTop: SPACE.lg }} />
-          <Pressable onPress={() => onEdit(goal)} accessibilityRole="button" style={styles.sheetSecondary}>
-            <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>Edit goal</Text>
-            <Icon name="chevR" size={13} color={theme.accent.dot} stroke={2.2} />
-          </Pressable>
-          {goal.saved < goal.target && (
-            <Pressable onPress={() => onComplete(goal)} accessibilityRole="button" style={styles.sheetSecondary}>
-              <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>Mark complete</Text>
-              <Icon name="check" size={13} color={theme.accent.dot} stroke={2.2} />
-            </Pressable>
+          {!isArchived && <DeltaCallout goal={goal} tint={tint} caution={caution} theme={theme} />}
+
+          {isArchived ? (
+            <SheetPrimaryButton
+              label="Restore goal"
+              onPress={() => onRestore(goal)}
+              theme={theme}
+              style={{ marginTop: SPACE.lg }}
+            />
+          ) : (
+            <SheetPrimaryButton
+              label="Add contribution"
+              onPress={() => onAddContribution(goal)}
+              theme={theme}
+              style={{ marginTop: SPACE.lg }}
+            />
           )}
 
-          <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: SPACE.xl, marginBottom: SPACE.sm }]}>ACTIVITY</Text>
-          {goal.contributions.length === 0 ? (
-            <Text style={[TYPE.bodySm, { color: theme.textSec }]}>No contributions logged yet.</Text>
-          ) : (
-            <View style={[styles.activityCard, { backgroundColor: theme.chipBg }]}>
-              {goal.contributions.map((item, idx) => (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.activityRow,
-                    idx < goal.contributions.length - 1 && { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth },
-                  ]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[TYPE.body, { color: theme.text }]}>{money0(item.amount)}</Text>
-                    <Text style={[TYPE.caption, { color: theme.textSec }]}>{item.note || 'Contribution'}</Text>
-                  </View>
-                  <Text style={[TYPE.bodySm, { color: theme.textTer }]}>{contributionDateLabel(item.date)}</Text>
-                </View>
-              ))}
-            </View>
+          {goal.contributions.length > 0 && (
+            <>
+              <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: SPACE.xl, marginBottom: SPACE.sm }]}>
+                ACTIVITY
+              </Text>
+              <View style={[styles.activityCard, { backgroundColor: theme.chipBg }]}>
+                {goal.contributions.map((item, idx) => (
+                  <ContributionRow
+                    key={item.id}
+                    contribution={item}
+                    goalLabel={goal.label}
+                    tint={tint}
+                    theme={theme}
+                    last={idx === goal.contributions.length - 1}
+                  />
+                ))}
+              </View>
+            </>
           )}
         </BottomSheetScrollView>
       )}
-    </BottomSheetModal>
+    </BottomSheet>
   );
 }
 
-function DetailStat({ label, value, color }: { label: string; value: string; color: string }) {
+function DeltaCallout({
+  goal,
+  tint,
+  caution,
+  theme,
+}: {
+  goal: Goal;
+  tint: string;
+  caution: string;
+  theme: Theme;
+}) {
+  if (!goal.monthlyContribution || !goal.deadline) return null;
+  const needed = suggestedMonthly(goal.target, goal.saved, goal.deadline);
+  const deficit = needed - goal.monthlyContribution;
+  if (Math.abs(deficit) < 1) return null;
+  const isDeficit = deficit > 0;
+  const monthsAhead = isDeficit ? null : Math.abs(monthDeltaVsDeadline(goal) ?? 0);
+  return (
+    <View
+      style={[
+        styles.deltaCallout,
+        { backgroundColor: isDeficit ? `${caution}18` : `${tint}18` },
+      ]}
+    >
+      <Text style={[TYPE.bodySm, { color: isDeficit ? caution : tint }]}>
+        {isDeficit
+          ? `${money0(Math.ceil(deficit))}/mo more to stay on track.`
+          : `${monthsAhead} ${monthsAhead === 1 ? 'month' : 'months'} ahead of target.`}
+      </Text>
+    </View>
+  );
+}
+
+function DetailStat({
+  label,
+  value,
+  color,
+  labelColor,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  labelColor: string;
+}) {
   return (
     <View style={styles.detailStat}>
-      <Text style={[TYPE.labelSm, { color: 'rgba(142,142,147,0.9)' }]}>{label}</Text>
+      <Text style={[TYPE.labelSm, { color: labelColor }]}>{label}</Text>
       <Text style={[TYPE.subsectionTitle, { color }]}>{value}</Text>
     </View>
   );
 }
 
+function ContributionRow({
+  contribution,
+  goalLabel,
+  tint,
+  theme,
+  last,
+}: {
+  contribution: GoalContribution;
+  goalLabel: string;
+  tint: string;
+  theme: Theme;
+  last: boolean;
+}) {
+  const meta = [
+    contribution.note,
+    contributionDateLabel(contribution.date),
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <View
+      style={[
+        styles.activityRow,
+        !last && { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth },
+      ]}
+    >
+      <MerchantMark
+        merchant={goalLabel}
+        catIcon="target"
+        color={tint}
+        size={32}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[TYPE.body, { color: theme.text }]} numberOfLines={1}>
+          {goalLabel} contribution
+        </Text>
+        <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]} numberOfLines={1}>
+          {meta}
+        </Text>
+      </View>
+      <Money
+        value={contribution.amount}
+        size={13}
+        weight="500"
+        prefix="−$"
+        color={tint}
+        theme={theme}
+      />
+    </View>
+  );
+}
+
+function EditCaret({ color }: { color: string }) {
+  const blink = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(blink, { toValue: 0, duration: 480, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(blink, { toValue: 1, duration: 480, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [blink]);
+  return <Animated.View style={[styles.editCaret, { backgroundColor: color, opacity: blink }]} />;
+}
+
+function GoalAmountField({
+  label,
+  value,
+  onPress,
+  active,
+  theme,
+  last,
+}: {
+  label: string;
+  value: string;
+  onPress: () => void;
+  active?: boolean;
+  theme: Theme;
+  last?: boolean;
+}) {
+  const raw = value.replace(/[$,\s]/g, '');
+  const num = Number(raw);
+  const hasValue = !!value;
+  const sep = !last ? { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth } : {};
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Edit ${label}`}
+      style={[styles.fieldRow, sep]}
+    >
+      <Text style={[TYPE.body, { color: active ? theme.accent.dot : theme.textSec, flexShrink: 0 }]}>{label}</Text>
+      {active ? (
+        <View style={[styles.numFieldWrap, { borderBottomColor: theme.accent.dot }]}>
+          <Text style={[styles.numFieldText, { color: theme.text }]}>
+            <Text style={{ opacity: 0.55 }}>$</Text>{formatGoalDraft(value || '0')}
+          </Text>
+          <EditCaret color={theme.accent.dot} />
+        </View>
+      ) : (
+        <View style={[styles.numFieldWrap, { borderBottomColor: theme.hairline }]}>
+          <Text style={[styles.numFieldText, { color: hasValue ? theme.text : theme.hairline }]}>
+            <Text style={{ opacity: 0.55 }}>$</Text>{hasValue ? fmtAmt(isNaN(num) ? 0 : num) : '0'}
+          </Text>
+          <View style={styles.numFieldCaretSpacer} />
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function GoalFormSheet({
   theme,
-  goal,
+  open,
   onClose,
   onSave,
 }: {
   theme: Theme;
-  goal: Goal | 'new' | null;
+  open: boolean;
   onClose: () => void;
-  onSave: (draft: GoalDraft, goal: Goal | 'new') => boolean;
+  onSave: (draft: GoalDraft, goal: 'new') => boolean;
 }) {
-  const sheetRef = useRef<BottomSheetModal>(null);
-  const [draft, setDraft] = useState<GoalDraft>({ label: '', target: '', saved: '', deadline: '', monthlyContribution: '' });
+  const insets = useSafeAreaInsets();
+  const sheetRef = useRef<BottomSheet>(null);
+  const animationConfigs = useBottomSheetTimingConfigs({ duration: SHEET_ANIM_MS, easing: SHEET_EASING });
+  const openedRef = useRef(false);
+  const closingRef = useRef(false);
+  const iconManuallySet = useRef(false);
+  const labelRef = useRef<TextInput>(null);
+
+  const [draft, setDraft] = useState<GoalDraft>({
+    label: '', target: '', deadline: '', monthlyContribution: '',
+  });
+  const [icon, setIcon] = useState('wallet');
   const [error, setError] = useState('');
-  const isOpen = goal !== null;
-  const editing = goal && goal !== 'new' ? goal : null;
+  const [keypadField, setKeypadField] = useState<'target' | 'monthlyContribution' | null>(null);
+
+  const tealColor = theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light;
+  const darkScheme = theme.dark ? 'dark' : 'light';
+  const target = parseAmount(draft.target) ?? 0;
+  const suggested = suggestedMonthly(target, 0, draft.deadline.trim());
 
   useEffect(() => {
-    if (goal) {
-      setDraft(goal === 'new'
-        ? { label: '', target: '', saved: '', deadline: '', monthlyContribution: '' }
-        : {
-          label: goal.label,
-          target: String(goal.target),
-          saved: String(goal.saved),
-          deadline: goal.deadline ?? '',
-          monthlyContribution: goal.monthlyContribution ? String(goal.monthlyContribution) : '',
-        });
+    if (open) {
+      setDraft({ label: '', target: '', deadline: '', monthlyContribution: '' });
+      setIcon('wallet');
       setError('');
-      sheetRef.current?.present();
+      setKeypadField(null);
+      iconManuallySet.current = false;
+      openedRef.current = true;
+      closingRef.current = false;
+      requestAnimationFrame(() => sheetRef.current?.snapToIndex(0));
     } else {
-      sheetRef.current?.dismiss();
+      openedRef.current = false;
+      closingRef.current = false;
+      sheetRef.current?.close();
     }
-  }, [goal]);
+  }, [open]);
 
-  const target = parseAmount(draft.target) ?? 0;
-  const saved = parseAmount(draft.saved) ?? 0;
-  const suggested = suggestedMonthly(target, saved, draft.deadline.trim());
-  const renderBackdrop = (props: BottomSheetBackdropProps) => (
-    <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.42} pressBehavior="close" />
-  );
-  const update = (key: keyof GoalDraft) => (value: string) => {
-    setDraft(prev => ({ ...prev, [key]: value }));
-    if (error) setError('');
-  };
-  const handleSave = () => {
-    if (!goal) return;
-    const ok = onSave(draft, goal);
-    if (!ok) {
-      setError('Add a name, target amount, and make sure saved is not above target.');
-      return;
+  const handleSheetChange = (index: number) => {
+    if (index === -1 && (openedRef.current || closingRef.current)) {
+      openedRef.current = false;
+      closingRef.current = false;
+      setKeypadField(null);
+      onClose();
     }
+  };
+
+  const renderBackdrop = (props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.4} pressBehavior="close" />
+  );
+
+  const openKeypad = (field: 'target' | 'monthlyContribution') => {
+    Keyboard.dismiss();
+    setKeypadField(field);
+  };
+
+  const handleSave = () => {
+    const ok = onSave(draft, 'new');
+    if (!ok) { setError('Add a name and target amount.'); return; }
+    setKeypadField(null);
     onClose();
   };
 
+  const sep = { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth };
+
   return (
-    <BottomSheetModal
+    <BottomSheet
       ref={sheetRef}
-      index={0}
-      snapPoints={['84%']}
+      index={-1}
+      snapPoints={['85%']}
+      animateOnMount={false}
+      enableDynamicSizing={false}
       enablePanDownToClose
-      onDismiss={onClose}
+      animationConfigs={animationConfigs}
+      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
+      containerStyle={styles.sheetModalContainer}
       backgroundStyle={{ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }}
       handleIndicatorStyle={{ backgroundColor: theme.textTer }}
     >
-      {isOpen && (
-        <BottomSheetScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-          <ScreenExitButton variant="close" onPress={onClose} tint={theme.textSec} fallbackBg={theme.chipBg} style={EXIT_FLOAT_STYLE} />
-          <Text style={[TYPE.headline, styles.sheetTitle, { color: theme.text }]}>{editing ? 'Edit goal' : 'Add goal'}</Text>
-          <Text style={[TYPE.bodySm, { color: theme.textSec, textAlign: 'center', marginBottom: SPACE.lg }]}>
-            Goals create a savings category automatically, then track progress here.
-          </Text>
+      {open && (
+        <View style={{ flex: 1 }}>
+          <ScreenExitButton
+            variant="close"
+            onPress={() => { setKeypadField(null); onClose(); }}
+            tint={theme.textSec}
+            fallbackBg={theme.chipBg}
+            style={[EXIT_FLOAT_STYLE, { zIndex: 25 }]}
+          />
 
-          <View style={[styles.formCard, { backgroundColor: theme.chipBg }]}>
-            <Field label="Goal name" value={draft.label} onChangeText={update('label')} theme={theme} placeholder="Vacation fund" />
-            <Field label="Target" value={draft.target} onChangeText={update('target')} theme={theme} placeholder="$0" keyboardType="decimal-pad" />
-            <Field label="Saved so far" value={draft.saved} onChangeText={update('saved')} theme={theme} placeholder="$0" keyboardType="decimal-pad" />
-            <Field label="Target date" value={draft.deadline} onChangeText={update('deadline')} theme={theme} placeholder="2026-12-31" />
-            <Field label="Monthly plan" value={draft.monthlyContribution} onChangeText={update('monthlyContribution')} theme={theme} placeholder={suggested > 0 ? `${suggested}` : '$0'} keyboardType="decimal-pad" last />
+          <BottomSheetScrollView
+            contentContainerStyle={[
+              styles.goalFormContent,
+              keypadField !== null && { paddingBottom: SPACE.xxxl + 360 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            onScrollBeginDrag={() => { if (keypadField) setKeypadField(null); }}
+          >
+            {/* Hero: tappable icon circle + live name preview */}
+            <View style={styles.goalFormHero}>
+              <Host ignoreSafeArea="all" style={{ width: 52, height: 52 }}>
+                <Menu
+                  label={
+                    <View style={{ width: 52, height: 52 }} accessibilityRole="button" accessibilityLabel="Choose icon">
+                      <View style={[styles.goalFormCircle, { backgroundColor: tealColor }]}>
+                        <Icon name={icon} size={22} color={ON_GROUP_ICON} stroke={1.5} />
+                      </View>
+                      <View style={[styles.goalFormIconBadge, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
+                        <Icon name="chevDown" size={7} color={theme.dark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)'} stroke={2.4} />
+                      </View>
+                    </View>
+                  }
+                >
+                  {CATEGORY_ICON_OPTIONS.map(opt => (
+                    <SwiftButton
+                      key={opt}
+                      systemImage={opt === icon ? 'checkmark' : (ICON_SF_SYMBOL[opt] ?? 'tag') as any}
+                      onPress={() => { iconManuallySet.current = true; setIcon(opt); }}
+                      label={ICON_DISPLAY_NAMES[opt] ?? opt}
+                    />
+                  ))}
+                </Menu>
+              </Host>
+              <Text style={[TYPE.headline, { color: theme.text, textAlign: 'center', marginTop: 4 }]} numberOfLines={1}>
+                {draft.label.trim() || 'New goal'}
+              </Text>
+            </View>
+
+            {/* Field card: Name + Monthly plan */}
+            <View style={[styles.formCard, { backgroundColor: theme.chipBg }]}>
+              <Pressable
+                onPress={() => { setKeypadField(null); labelRef.current?.focus(); }}
+                style={[styles.fieldRow, sep]}
+              >
+                <Text style={[TYPE.body, { color: theme.textSec, flexShrink: 0 }]}>Name</Text>
+                <TextInput
+                  ref={labelRef}
+                  value={draft.label}
+                  onChangeText={text => {
+                    setDraft(prev => ({ ...prev, label: text }));
+                    if (!iconManuallySet.current) setIcon(inferCategoryIcon(text) || 'wallet');
+                    if (error) setError('');
+                  }}
+                  placeholder="Vacation fund"
+                  placeholderTextColor={theme.textTer}
+                  keyboardAppearance={darkScheme}
+                  returnKeyType="done"
+                  selectTextOnFocus
+                  onFocus={() => setKeypadField(null)}
+                  style={[TYPE.body, { color: theme.text, flex: 1, textAlign: 'right', padding: 0 }]}
+                />
+              </Pressable>
+              <GoalAmountField
+                label="Monthly plan"
+                value={draft.monthlyContribution}
+                active={keypadField === 'monthlyContribution'}
+                onPress={() => openKeypad('monthlyContribution')}
+                theme={theme}
+                last
+              />
+            </View>
+
+            {/* Savings goal section */}
+            <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: 20, marginBottom: 10 }]}>
+              SAVINGS GOAL
+            </Text>
+            <View style={[styles.formCard, { backgroundColor: theme.chipBg }]}>
+              <GoalAmountField
+                label="Goal amount"
+                value={draft.target}
+                active={keypadField === 'target'}
+                onPress={() => openKeypad('target')}
+                theme={theme}
+              />
+              <DateField
+                label="Goal by"
+                value={draft.deadline}
+                onChange={value => { setKeypadField(null); setDraft(prev => ({ ...prev, deadline: value })); }}
+                onClear={() => setDraft(prev => ({ ...prev, deadline: '' }))}
+                theme={theme}
+                placeholderLabel="Set date"
+                last
+              />
+            </View>
+
+            {target > 0 && (
+              <View style={styles.goalFormPreview}>
+                <View style={[styles.goalTrack, { backgroundColor: theme.hairline }]} />
+                <Text style={[TYPE.caption, { color: theme.textSec }]}>
+                  ${target.toLocaleString()} goal
+                  {suggested > 0 ? `  ·  ${money0(suggested)}/mo suggested` : ''}
+                </Text>
+              </View>
+            )}
+
+            {error ? (
+              <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: SPACE.sm }]}>{error}</Text>
+            ) : null}
+          </BottomSheetScrollView>
+
+          <View style={[styles.goalFormFooter, { paddingBottom: Math.max(insets.bottom, SPACE.lg) + SPACE.sm }]}>
+            <SheetPrimaryButton label="Create goal" onPress={handleSave} theme={theme} />
           </View>
 
-          {suggested > 0 && (
-            <Text style={[TYPE.caption, { color: theme.textSec, marginTop: SPACE.sm }]}>
-              Suggested plan: {money0(suggested)} per month.
-            </Text>
-          )}
-          {error ? <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: SPACE.sm }]}>{error}</Text> : null}
-          <SheetPrimaryButton label={editing ? 'Save goal' : 'Create goal'} onPress={handleSave} theme={theme} style={{ marginTop: SPACE.xl }} />
+          <PopupNumericKeypad
+            visible={keypadField !== null}
+            theme={theme}
+            onKey={key => {
+              const field = keypadField;
+              if (!field) return;
+              setDraft(prev => ({ ...prev, [field]: applyKeypadKey(prev[field], key) }));
+            }}
+            onDone={() => setKeypadField(null)}
+            passthrough
+          />
+        </View>
+      )}
+    </BottomSheet>
+  );
+}
+
+function ContributionGoalPickerSheet({
+  theme,
+  open,
+  goals,
+  tint,
+  caution,
+  onClose,
+  onChoose,
+}: {
+  theme: Theme;
+  open: boolean;
+  goals: Goal[];
+  tint: string;
+  caution: string;
+  onClose: () => void;
+  onChoose: (goal: Goal) => void;
+}) {
+  const sheetRef = useRef<BottomSheet>(null);
+  const animationConfigs = useBottomSheetTimingConfigs({ duration: SHEET_ANIM_MS, easing: SHEET_EASING });
+  const openedRef = useRef(false);
+  const closingRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      openedRef.current = true;
+      closingRef.current = false;
+      requestAnimationFrame(() => sheetRef.current?.snapToIndex(0));
+    } else {
+      openedRef.current = false;
+      closingRef.current = false;
+      sheetRef.current?.close();
+    }
+  }, [open]);
+
+  const handleSheetChange = (index: number) => {
+    if (index === -1 && (openedRef.current || closingRef.current)) {
+      openedRef.current = false;
+      closingRef.current = false;
+      onClose();
+    }
+  };
+
+  const renderBackdrop = (props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  );
+
+  return (
+    <BottomSheet
+      ref={sheetRef}
+      index={-1}
+      snapPoints={['58%', '78%']}
+      animateOnMount={false}
+      enableDynamicSizing={false}
+      enablePanDownToClose
+      animationConfigs={animationConfigs}
+      onChange={handleSheetChange}
+      backdropComponent={renderBackdrop}
+      containerStyle={styles.sheetModalContainer}
+      backgroundStyle={{
+        backgroundColor: theme.surface,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+      }}
+      handleIndicatorStyle={{ backgroundColor: theme.textTer }}
+    >
+      {open && (
+        <BottomSheetScrollView
+          contentContainerStyle={styles.sheetContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <ScreenExitButton
+            variant="close"
+            onPress={onClose}
+            tint={theme.textSec}
+            fallbackBg={theme.chipBg}
+            style={EXIT_FLOAT_STYLE}
+          />
+          <Text style={[TYPE.pageTitle, styles.sheetTitle, { color: theme.text }]}>
+            Contribute to goal
+          </Text>
+          <Text
+            style={[
+              TYPE.bodySm,
+              { color: theme.textSec, textAlign: 'center', marginBottom: SPACE.lg },
+            ]}
+          >
+            Choose which savings goal this expense should count toward.
+          </Text>
+
+          <View style={[styles.pickerCard, { backgroundColor: theme.chipBg }]}>
+            {goals.map((goal, idx) => {
+              const pct = goalProgressPct(goal);
+              const status = statusFor(goal);
+              const statusColor =
+                status.tone === 'caution' ? caution : status.tone === 'good' ? tint : theme.textTer;
+              return (
+                <Pressable
+                  key={goal.id}
+                  onPress={() => onChoose(goal)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Contribute to ${goal.label}`}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    idx < goals.length - 1 && {
+                      borderBottomColor: theme.sep,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                    },
+                    pressed && { opacity: 0.68 },
+                  ]}
+                >
+                  <View style={[styles.pickerIcon, { backgroundColor: `${tint}28` }]}>
+                    <Icon name={goal.icon} size={16} color={tint} stroke={1.6} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={styles.pickerTitleRow}>
+                      <Text style={[TYPE.body, { color: theme.text, flex: 1 }]} numberOfLines={1}>
+                        {goal.label}
+                      </Text>
+                      <Text style={[TYPE.captionEm, { color: statusColor }]}>{status.label}</Text>
+                    </View>
+                    <Text style={[TYPE.caption, { color: theme.textSec, marginTop: SPACE.px2 }]}>
+                      {money0(goal.saved)} of {money0(goal.target)} · {pct}%
+                    </Text>
+                    <View style={{ marginTop: SPACE.xs }}>
+                      <ProgressBar pct={pct} color={tint} trackColor={theme.hairline} height={5} />
+                    </View>
+                  </View>
+                  <Icon name="chevR" size={13} color={theme.textTer} stroke={2.1} />
+                </Pressable>
+              );
+            })}
+          </View>
         </BottomSheetScrollView>
       )}
-    </BottomSheetModal>
+    </BottomSheet>
   );
 }
 
@@ -755,69 +1552,120 @@ function ContributionSheet({
   goal,
   onClose,
   onSave,
+  onDidSave,
 }: {
   theme: Theme;
   goal: Goal | null;
   onClose: () => void;
   onSave: (goal: Goal, draft: ContributionDraft) => boolean;
+  onDidSave?: () => void;
 }) {
-  const sheetRef = useRef<BottomSheetModal>(null);
-  const [draft, setDraft] = useState<ContributionDraft>({ amount: '', date: todayKey(), note: '' });
-  const [error, setError] = useState('');
+  const sheetRef = useRef<BottomSheet>(null);
+  const animationConfigs = useBottomSheetTimingConfigs({ duration: SHEET_ANIM_MS, easing: SHEET_EASING });
+  const openedRef = useRef(false);
+  const closingRef = useRef(false);
+  const [amount, setAmount] = useState('');
 
   useEffect(() => {
     if (goal) {
-      setDraft({ amount: '', date: todayKey(), note: '' });
-      setError('');
-      sheetRef.current?.present();
+      setAmount('');
+      openedRef.current = true;
+      closingRef.current = false;
+      requestAnimationFrame(() => sheetRef.current?.snapToIndex(0));
     } else {
-      sheetRef.current?.dismiss();
+      openedRef.current = false;
+      closingRef.current = false;
+      sheetRef.current?.close();
     }
   }, [goal]);
 
-  const renderBackdrop = (props: BottomSheetBackdropProps) => (
-    <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.42} pressBehavior="close" />
-  );
-  const update = (key: keyof ContributionDraft) => (value: string) => {
-    setDraft(prev => ({ ...prev, [key]: value }));
-    if (error) setError('');
-  };
-  const handleSave = () => {
-    if (!goal) return;
-    const ok = onSave(goal, draft);
-    if (!ok) {
-      setError('Enter a contribution amount.');
-      return;
+  const handleSheetChange = (index: number) => {
+    if (index === -1 && (openedRef.current || closingRef.current)) {
+      openedRef.current = false;
+      closingRef.current = false;
+      onClose();
     }
-    onClose();
   };
 
+  const handleSave = () => {
+    if (!goal) return;
+    const ok = onSave(goal, { amount, date: todayKey(), note: '' });
+    if (ok) {
+      onDidSave?.();
+      onClose();
+    }
+  };
+
+  const renderBackdrop = (props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={0}
+      disappearsOnIndex={-1}
+      opacity={0.4}
+      pressBehavior="close"
+    />
+  );
+
   return (
-    <BottomSheetModal
+    <BottomSheet
       ref={sheetRef}
-      index={0}
-      snapPoints={['58%']}
+      index={-1}
+      snapPoints={[560]}
+      animateOnMount={false}
+      enableDynamicSizing={false}
       enablePanDownToClose
-      onDismiss={onClose}
+      animationConfigs={animationConfigs}
+      onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
-      backgroundStyle={{ backgroundColor: theme.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32 }}
+      containerStyle={styles.sheetModalContainer}
+      backgroundStyle={{
+        backgroundColor: theme.surface,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
+      }}
       handleIndicatorStyle={{ backgroundColor: theme.textTer }}
     >
       {goal && (
-        <BottomSheetScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
-          <ScreenExitButton variant="close" onPress={onClose} tint={theme.textSec} fallbackBg={theme.chipBg} style={EXIT_FLOAT_STYLE} />
-          <Text style={[TYPE.headline, styles.sheetTitle, { color: theme.text }]}>Add contribution</Text>
-          <Text style={[TYPE.bodySm, { color: theme.textSec, textAlign: 'center', marginBottom: SPACE.lg }]}>{goal.label}</Text>
-          <View style={[styles.formCard, { backgroundColor: theme.chipBg }]}>
-            <Field label="Amount" value={draft.amount} onChangeText={update('amount')} theme={theme} placeholder="$0" keyboardType="decimal-pad" />
-            <Field label="Date" value={draft.date} onChangeText={update('date')} theme={theme} placeholder={todayKey()} />
-            <Field label="Note" value={draft.note} onChangeText={update('note')} theme={theme} placeholder="Paycheck transfer" last />
-          </View>
-          {error ? <Text style={[TYPE.caption, { color: OVER_DOT, marginTop: SPACE.sm }]}>{error}</Text> : null}
-          <SheetPrimaryButton label="Save contribution" onPress={handleSave} theme={theme} style={{ marginTop: SPACE.xl }} />
-        </BottomSheetScrollView>
+        <View style={{ flex: 1 }}>
+          <BottomSheetScrollView
+            contentContainerStyle={[styles.sheetContent, { paddingBottom: SPACE.xxxl + 300 }]}
+            scrollEnabled={false}
+          >
+            <ScreenExitButton
+              variant="close"
+              onPress={onClose}
+              tint={theme.textSec}
+              fallbackBg={theme.chipBg}
+              style={EXIT_FLOAT_STYLE}
+            />
+            <Text style={[TYPE.pageTitle, styles.sheetTitle, { color: theme.text }]}>
+              Add contribution
+            </Text>
+            <Text style={[TYPE.bodySm, { color: theme.textSec, textAlign: 'center', marginBottom: SPACE.xl }]}>
+              {goal.label}
+            </Text>
+            <Text style={{ fontSize: 40, fontWeight: '600', letterSpacing: -1.4, color: theme.text, textAlign: 'center' }}>
+              ${amount || '0'}
+            </Text>
+            <SheetPrimaryButton
+              label="Save"
+              onPress={handleSave}
+              theme={theme}
+              disabled={!amount || amount === '0'}
+              style={{ marginTop: SPACE.xl }}
+            />
+          </BottomSheetScrollView>
+          <PopupNumericKeypad
+            visible
+            theme={theme}
+            onKey={key => setAmount(prev => applyKeypadKey(prev, key))}
+            onDone={handleSave}
+            passthrough
+            hideDone
+          />
+        </View>
       )}
-    </BottomSheetModal>
+    </BottomSheet>
   );
 }
 
@@ -839,7 +1687,12 @@ function Field({
   last?: boolean;
 }) {
   return (
-    <View style={[styles.fieldRow, !last && { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+    <View
+      style={[
+        styles.fieldRow,
+        !last && { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth },
+      ]}
+    >
       <Text style={[TYPE.body, { color: theme.textSec }]}>{label}</Text>
       <TextInput
         value={value}
@@ -854,51 +1707,100 @@ function Field({
   );
 }
 
-function ProgressRing({
-  pct,
-  color,
-  trackColor,
-  size,
-  stroke,
-  children,
+function AmountField({
+  label,
+  value,
+  onPress,
+  active,
+  theme,
+  placeholder = '0',
+  last,
 }: {
-  pct: number;
-  color: string;
-  trackColor: string;
-  size: number;
-  stroke: number;
-  children: React.ReactNode;
+  label: string;
+  value: string;
+  onPress: () => void;
+  active?: boolean;
+  theme: Theme;
+  placeholder?: string;
+  last?: boolean;
 }) {
-  const r = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * r;
-  const offset = circumference - (clampPct(pct) / 100) * circumference;
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
-        <Circle cx={size / 2} cy={size / 2} r={r} stroke={trackColor} strokeWidth={stroke} fill="none" />
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          stroke={color}
-          strokeWidth={stroke}
-          fill="none"
-          strokeLinecap="round"
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={offset}
-          rotation="-90"
-          origin={`${size / 2}, ${size / 2}`}
-        />
-      </Svg>
-      {children}
-    </View>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Edit ${label}`}
+      style={[
+        styles.fieldRow,
+        !last && { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth },
+      ]}
+    >
+      <Text style={[TYPE.body, { color: active ? theme.accent.dot : theme.textSec }]}>{label}</Text>
+      <Text style={[TYPE.body, styles.fieldInput, { color: value ? theme.text : theme.textTer }]}>
+        <Text style={{ color: theme.textSec }}>$</Text>
+        {value || placeholder}
+      </Text>
+    </Pressable>
   );
 }
 
-function ProgressBar({ pct, color, trackColor, height }: { pct: number; color: string; trackColor: string; height: number }) {
+function DateField({
+  label,
+  value,
+  onChange,
+  onClear,
+  theme,
+  placeholderLabel,
+  last,
+}: {
+  label: string;
+  value: string;
+  onChange: (ymd: string) => void;
+  onClear?: () => void;
+  theme: Theme;
+  placeholderLabel?: string;
+  last?: boolean;
+}) {
+  const selected = parseGoalDate(value);
+  const darkScheme = theme.dark ? 'dark' : 'light';
   return (
-    <View style={{ height, borderRadius: height / 2, backgroundColor: trackColor, overflow: 'hidden' }}>
-      <View style={{ height: '100%', width: `${clampPct(pct)}%`, borderRadius: height / 2, backgroundColor: color }} />
+    <View
+      style={[
+        styles.fieldRow,
+        !last && { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth },
+      ]}
+    >
+      <Text style={[TYPE.body, { color: theme.textSec }]}>{label}</Text>
+      {selected ? (
+        <View style={styles.dateFieldValue}>
+          <Host matchContents ignoreSafeArea="all">
+            <DatePicker
+              selection={selected}
+              onDateChange={d => onChange(ymdFromDate(d))}
+              displayedComponents={['date']}
+              modifiers={[
+                datePickerStyle('compact'),
+                tint(theme.accent.dot),
+                environment({ key: 'colorScheme', value: darkScheme }),
+              ]}
+            />
+          </Host>
+          {onClear ? (
+            <Pressable onPress={onClear} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Clear ${label}`}>
+              <Icon name="close" size={11} color={theme.textTer} stroke={2} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => onChange(ymdFromDate(new Date()))}
+          accessibilityRole="button"
+          style={styles.dateFieldSet}
+        >
+          <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>
+            {placeholderLabel ?? 'Set date'}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -929,117 +1831,112 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hero: {
-    minHeight: 430,
-    paddingTop: SPACE.md,
-    paddingBottom: SPACE.xl,
-    marginBottom: SPACE.lg,
+  summaryCard: {
+    paddingBottom: SPACE.sm,
   },
-  heroTopRow: {
-    minHeight: 36,
+  summaryTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: SPACE.md,
   },
-  statusPill: {
-    minHeight: 32,
+  summaryStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.xs,
     borderRadius: RADIUS.full,
-    borderWidth: 1,
-    paddingHorizontal: SPACE.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.sm,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  heroMain: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: SPACE.lg,
-  },
-  heroIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroAmountBlock: {
-    alignItems: 'center',
-    marginTop: SPACE.lg,
-  },
-  heroStats: {
-    flexDirection: 'row',
-    gap: SPACE.sm,
-    marginTop: SPACE.lg,
-  },
-  heroStat: {
-    flex: 1,
-    borderRadius: RADIUS.field,
-    paddingVertical: SPACE.md,
     paddingHorizontal: SPACE.sm,
-    alignItems: 'center',
-    backgroundColor: 'rgba(8,6,20,0.32)',
-    borderWidth: 1,
-    borderColor: 'rgba(235,239,242,0.16)',
+    paddingVertical: SPACE.xs,
   },
-  heroAction: {
-    alignSelf: 'center',
-    minHeight: 42,
-    marginTop: SPACE.lg,
-    borderRadius: RADIUS.full,
-    borderWidth: 1,
-    paddingHorizontal: SPACE.lg,
+  summaryStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  summaryStatRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    marginTop: SPACE.lg,
     gap: SPACE.sm,
   },
-  totalHeader: {
+  summaryStat: {
+    flex: 1,
+    gap: SPACE.xs,
+  },
+  archivedHeader: {
+    marginTop: SPACE.lg,
+    marginBottom: SPACE.sm,
+    paddingHorizontal: SPACE.xs,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  summaryAmountRow: {
+  // GoalCard
+  cardTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: SPACE.xs,
+    alignItems: 'center',
+    gap: SPACE.sm,
     marginBottom: SPACE.md,
   },
-  goalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.md,
-    paddingHorizontal: LAYOUT.cardPadX,
-    paddingVertical: SPACE.md,
-  },
-  goalTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.sm,
-  },
-  smallStatus: {
-    borderRadius: RADIUS.full,
-    paddingHorizontal: SPACE.sm,
-    paddingVertical: 3,
-  },
-  goalIcon: {
+  cardIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  goalAmounts: {
-    alignItems: 'flex-end',
+  cardBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: SPACE.sm,
+    paddingVertical: 4,
+  },
+  cardBadgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  cardBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACE.sm,
+  },
+  cardAmountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  // Timeline
+  timelineWrap: {
+    marginTop: SPACE.lg,
+    marginBottom: SPACE.sm,
+  },
+  timelineLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginTop: SPACE.xs,
+  },
+  // Detail sheet
+  deltaCallout: {
+    borderRadius: RADIUS.chip,
+    paddingHorizontal: SPACE.lg,
+    paddingVertical: SPACE.md,
+    marginTop: SPACE.md,
+  },
+  sheetStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: SPACE.xs,
+    marginTop: SPACE.xs,
   },
-  goalBarRow: {
-    marginTop: SPACE.sm,
+  sheetStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
+  // Shared sheet
   emptyWrap: {
     alignItems: 'center',
     paddingVertical: SPACE.xl,
@@ -1052,8 +1949,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  emptyActiveWrap: {
+    minHeight: 74,
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingVertical: SPACE.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.md,
+  },
+  emptyActiveButton: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: SPACE.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sheetContent: {
-    paddingHorizontal: LAYOUT.screenGutter,
+    paddingHorizontal: LAYOUT.cardPadX,
     paddingTop: SPACE.xxxl,
     paddingBottom: SPACE.xxxl,
   },
@@ -1073,12 +1986,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sheetModalContainer: {
+    zIndex: 900,
+    elevation: 900,
+  },
   detailStatGrid: {
     borderWidth: 1,
     borderRadius: RADIUS.field,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: SPACE.xl,
+    marginTop: SPACE.lg,
     overflow: 'hidden',
   },
   detailStat: {
@@ -1098,27 +2015,123 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   activityRow: {
-    minHeight: 54,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: SPACE.md,
     paddingHorizontal: SPACE.lg,
-    paddingVertical: SPACE.sm,
+    paddingVertical: LAYOUT.rowPadY,
   },
-  formCard: {
+  pickerCard: {
     borderRadius: RADIUS.field,
     overflow: 'hidden',
   },
-  fieldRow: {
-    minHeight: 54,
+  pickerRow: {
+    minHeight: 78,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACE.md,
     paddingHorizontal: SPACE.lg,
     paddingVertical: SPACE.md,
   },
+  pickerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.sm,
+  },
+  formCard: FIELD_CARD,
+  fieldRow: FIELD_ROW,
   fieldInput: {
     flex: 1,
     textAlign: 'right',
     padding: 0,
+  },
+  dateFieldValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.sm,
+  },
+  dateFieldSet: {
+    minHeight: 34,
+    justifyContent: 'center',
+  },
+  sheetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACE.xs,
+  },
+  moreBtn: {
+    width: EXIT_BTN_SIZE,
+    height: EXIT_BTN_SIZE,
+    borderRadius: EXIT_BTN_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalFormContent: {
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: 24,
+    paddingBottom: SPACE.lg,
+  },
+  goalFormHero: {
+    alignItems: 'center',
+    paddingTop: SPACE.xs,
+    paddingBottom: SPACE.lg,
+  },
+  goalFormCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalFormIconBadge: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  goalFormPreview: {
+    marginTop: SPACE.md,
+    gap: SPACE.sm,
+  },
+  goalTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  goalFormFooter: {
+    paddingHorizontal: LAYOUT.cardPadX,
+    paddingTop: SPACE.md,
+  },
+  numFieldWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    borderBottomWidth: 1,
+    paddingBottom: 1,
+  },
+  numFieldText: {
+    ...TYPE.subsectionTitle,
+  },
+  numFieldCaretSpacer: {
+    width: 3,
+  },
+  editCaret: {
+    width: 2,
+    height: 17,
+    borderRadius: 1,
+    marginLeft: 1,
   },
 });

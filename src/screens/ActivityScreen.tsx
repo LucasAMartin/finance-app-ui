@@ -200,6 +200,10 @@ function amountRangeInvalid(minDraft: string, maxDraft: string): boolean {
   return min !== undefined && max !== undefined && min > max;
 }
 
+function isGoalContributionTx(tx: Transaction): boolean {
+  return tx.meta?.kind === 'goal-contribution';
+}
+
 function endOfDay(d: Date): Date {
   const next = new Date(d);
   next.setHours(23, 59, 59, 999);
@@ -494,19 +498,20 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
   const reportedSkeletonTokenRef = useRef<number | undefined>(undefined);
   const [listInstanceKey, setListInstanceKey] = useState('activity-list-initial');
   const [navLoading, setNavLoading] = useState(false);
-  const navLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [navLoadToken, setNavLoadToken] = useState(0);
+  const navLoadingTokenRef = useRef<number | null>(null);
 
   const beginNavLoading = useCallback((token?: number) => {
-    if (navLoadingTimerRef.current) clearTimeout(navLoadingTimerRef.current);
     if (token !== undefined) {
       reportedSkeletonTokenRef.current = undefined;
       setListInstanceKey(`activity-list-${token}`);
+      navLoadingTokenRef.current = token;
+      setNavLoadToken(token);
+    } else {
+      navLoadingTokenRef.current = -1;
+      setNavLoadToken(token => token + 1);
     }
     setNavLoading(true);
-    navLoadingTimerRef.current = setTimeout(() => {
-      navLoadingTimerRef.current = null;
-      setNavLoading(false);
-    }, 210);
   }, []);
 
   const applyNavFilter = useCallback((filter: ActivityInitialFilter) => {
@@ -556,10 +561,6 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     applyNavFilter(initialFilter);
   }, [applyNavFilter, beginNavLoading, filterToken, initialFilter]);
 
-  useEffect(() => () => {
-    if (navLoadingTimerRef.current) clearTimeout(navLoadingTimerRef.current);
-  }, []);
-
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   // The text box stays bound to `query` for instant feedback; repo scans key off
@@ -598,21 +599,32 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     limit: ACTIVITY_PAGE_SIZE,
     sort: sortBy,
   }), [sortBy, transactionScope]);
+  const activityQueryKey = useMemo(() => JSON.stringify(activityQuery), [activityQuery]);
+  const latestActivityQueryKeyRef = useRef(activityQueryKey);
+  latestActivityQueryKeyRef.current = activityQueryKey;
 
   const loadFirstActivityPage = useCallback((showSkeleton = true) => {
+    const loadKey = activityQueryKey;
     if (showSkeleton) setLoading(true);
     setLoadingMore(false);
     try {
       const page = transactionsRepo.listPage(activityQuery);
+      if (loadKey !== latestActivityQueryKeyRef.current) return;
       setActivityRows(page.rows);
       setNextCursor(page.nextCursor);
       setActivitySummary(transactionsRepo.getSummary(transactionScope));
       setLoadError(false);
     } catch {
+      if (loadKey !== latestActivityQueryKeyRef.current) return;
       setLoadError(true);
     } finally {
-      if (showSkeleton) setLoading(false);
-      if (listFadePending.current) {
+      const currentLoad = loadKey === latestActivityQueryKeyRef.current;
+      if (showSkeleton && currentLoad) setLoading(false);
+      if (currentLoad && navLoadingTokenRef.current !== null) {
+        navLoadingTokenRef.current = null;
+        setNavLoading(false);
+      }
+      if (currentLoad && listFadePending.current) {
         listFadePending.current = false;
         Animated.timing(listOpacity, {
           toValue: 1,
@@ -622,11 +634,11 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
         }).start();
       }
     }
-  }, [activityQuery, transactionScope, transactionsRepo, listOpacity]);
+  }, [activityQuery, activityQueryKey, transactionScope, transactionsRepo, listOpacity]);
 
   useEffect(() => {
     loadFirstActivityPage(true);
-  }, [loadFirstActivityPage, repoVersion]);
+  }, [loadFirstActivityPage, repoVersion, navLoadToken]);
 
   const loadMoreActivity = useCallback(() => {
     if (loading || loadingMore || !nextCursor || selectedDay !== null) return;
@@ -718,6 +730,24 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
 
   const filterPillCount = (selectedDay !== null ? 1 : 0) + (dateFilter !== null ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0) + catFilter.length;
   const hasFilterPills = filterPillCount > 0;
+
+  // Safety net: removeFilter() dims listOpacity and relies on loadFirstActivityPage
+  // to restore it. That callback only re-runs when activityQuery changes — but
+  // selectedDay is not part of activityQuery, so clearing it (alone or via
+  // "Clear all") can leave the list stuck at 0.65 opacity. Restore whenever all
+  // pills are gone and a fade is still pending.
+  useEffect(() => {
+    if (!hasFilterPills && listFadePending.current) {
+      listFadePending.current = false;
+      Animated.timing(listOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [hasFilterPills, listOpacity]);
+
   const hasUnappliedInitialFilter = Boolean(initialFilter && filterToken !== undefined && filterToken !== appliedTokenRef.current);
   const showNavSkeleton = navLoading || hasUnappliedInitialFilter;
   useLayoutEffect(() => {
@@ -948,64 +978,63 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
                 >
                   {filterPillCount >= 2 && (
                     <Reanimated.View key="pill-clear-all" entering={FadeIn.duration(160)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                      <FilterPill dark={theme.dark} onPress={() => removeFilter(clearAllFilters)} accessibilityLabel="Clear all filters">
-                        <Text style={[S.filterPillText, S.filterPillClearAll, { color: theme.accent.dot }]}>Clear all</Text>
+                      <FilterPill dark={theme.dark} overlay={glassTintForTheme(theme.dark)} onPress={() => removeFilter(clearAllFilters)} accessibilityLabel="Clear all filters">
+                        <Text numberOfLines={1} style={[S.filterPillText, S.filterPillClearAll, { color: p.text }]}>Clear all</Text>
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {selectedDay !== null && (
                     <Reanimated.View key="pill-day" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
                       <FilterPill dark={theme.dark} onPress={() => removeFilter(() => setSelectedDay(null))} accessibilityLabel="Clear day selection">
-                        <Icon name="cal" size={10} color={p.textSec} stroke={1.7} />
-                        <Text style={[S.filterPillText, { color: p.text }]}>
+                        <Icon name="cal" size={10} color={p.text} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
                           {MONTHS[calViewMonth]} {selectedDay}
                         </Text>
-                        <Icon name="close" size={10} color={p.textSec} stroke={2} />
+                        <Icon name="close" size={10} color={p.text} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {dateFilter && typeof dateFilter === 'string' && (
                     <Reanimated.View key="pill-date" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
                       <FilterPill dark={theme.dark} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
-                        <Icon name="cal" size={10} color={theme.accent.dot} stroke={1.7} />
-                        <Text style={[S.filterPillText, { color: theme.accent.dot }]}>
-                          {DATE_PRESETS.find(p => p.id === dateFilter)?.label}
+                        <Icon name="cal" size={10} color={p.text} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
+                          {DATE_PRESETS.find(dp => dp.id === dateFilter)?.label}
                         </Text>
-                        <Icon name="close" size={10} color={theme.accent.dot} stroke={2} />
+                        <Icon name="close" size={10} color={p.text} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {dateFilter && typeof dateFilter !== 'string' && (
                     <Reanimated.View key="pill-date-range" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
                       <FilterPill dark={theme.dark} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
-                        <Icon name="cal" size={10} color={theme.accent.dot} stroke={1.7} />
-                        <Text style={[S.filterPillText, { color: theme.accent.dot }]}>
+                        <Icon name="cal" size={10} color={p.text} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
                           {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
                         </Text>
-                        <Icon name="close" size={10} color={theme.accent.dot} stroke={2} />
+                        <Icon name="close" size={10} color={p.text} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {amountFilterActive(amountFilter) && (
                     <Reanimated.View key="pill-amount" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
                       <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => removeFilter(() => setAmountFilter(null))} accessibilityLabel="Remove amount filter">
-                        <Icon name="wallet" size={10} color={theme.accent.ink} stroke={1.7} />
-                        <Text style={[S.filterPillText, { color: theme.accent.ink }]}>
+                        <Icon name="wallet" size={10} color={p.text} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
                           {amountFilterLabel(amountFilter)}
                         </Text>
-                        <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
+                        <Icon name="close" size={10} color={p.text} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {catFilter.map(catId => {
                     const cat = cats[catId];
-                    const groupColor = categoryGroupColor(catId, categories, theme.dark);
                     return (
                       <Reanimated.View key={catId} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                        <FilterPill dark={theme.dark} overlay={groupColor + '26'} onPress={() => removeFilter(() => setCatFilter(catFilter.filter(c => c !== catId)))} accessibilityLabel={`Remove ${cat?.label} filter`}>
-                          <Icon name={cat?.icon} size={11} color={groupColor} stroke={1.6} />
-                          <Text style={[S.filterPillText, { color: groupColor }]}>{cat?.label}</Text>
-                          <Icon name="close" size={10} color={groupColor} stroke={2} />
+                        <FilterPill dark={theme.dark} overlay={categoryGroupColor(catId, categories, theme.dark) + '26'} onPress={() => removeFilter(() => setCatFilter(catFilter.filter(c => c !== catId)))} accessibilityLabel={`Remove ${cat?.label} filter`}>
+                          <Icon name={cat?.icon} size={11} color={p.text} stroke={1.6} />
+                          <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>{cat?.label}</Text>
+                          <Icon name="close" size={10} color={p.text} stroke={2} />
                         </FilterPill>
                       </Reanimated.View>
                     );
@@ -2047,6 +2076,50 @@ function FilterSheet({
     </View>
   ), [sortIdx, theme.text, theme.accent.dot, setSortBy]);
 
+  const dateMenu = useMemo(() => {
+    const isCustom = customLabel !== null;
+    const activeLabel = isCustom
+      ? customLabel
+      : (dateFilter === null ? 'Any time' : DATE_PRESETS.find(p => p.id === dateFilter)?.label ?? 'Any time');
+    return (
+      <View style={FS.sortRow}>
+        <Text style={[FS.sortRowLabel, { color: theme.text }]}>Date</Text>
+        <Host ignoreSafeArea="all" style={{ width: 160, height: 28 }}>
+          <Menu
+            label={
+              <View style={[FS.menuTrigger, { width: 160, height: 28, justifyContent: 'flex-end' }]}>
+                <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]} numberOfLines={1}>
+                  {activeLabel}
+                </Text>
+                <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
+              </View>
+            }
+          >
+            <SwiftButton
+              systemImage={dateFilter === null && !isCustom ? 'checkmark' : undefined}
+              onPress={() => handleDatePickerChange(0)}
+              label="Any time"
+            />
+            {DATE_PRESETS.map((preset, i) => (
+              <SwiftButton
+                key={String(i)}
+                systemImage={typeof dateFilter === 'string' && dateFilter === preset.id ? 'checkmark' : undefined}
+                onPress={() => handleDatePickerChange(i + 1)}
+                label={preset.label}
+              />
+            ))}
+            {isCustom && (
+              <SwiftButton
+                systemImage="checkmark"
+                onPress={() => setDateFilter(null)}
+                label={customLabel!}
+              />
+            )}
+          </Menu>
+        </Host>
+      </View>
+    );
+  }, [customLabel, dateFilter, theme.text, theme.accent.dot, handleDatePickerChange, setDateFilter]);
 
   return (
     <BottomSheet
@@ -2072,98 +2145,38 @@ function FilterSheet({
 
           {/* ── Header ──────────────────────────────────────── */}
           <View style={[FS.header, { borderBottomColor: theme.sep }]}>
-            <View style={FS.headerLeft}>
-              <ScreenExitButton
-                variant="close"
-                onPress={close}
-                tint={theme.textSec}
-                fallbackBg={theme.chipBg}
-                accessibilityLabel="Done"
-              />
-            </View>
-            {activeCount > 0 && (
-              <TouchableOpacity
-                onPress={clearAll}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear all filters"
-              >
-                <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
-              </TouchableOpacity>
-            )}
+            <ScreenExitButton
+              variant="close"
+              onPress={close}
+              tint={theme.textSec}
+              fallbackBg={theme.chipBg}
+              accessibilityLabel="Done"
+            />
+            <Text style={[FS.title, { color: theme.text }]} pointerEvents="none">Filters</Text>
+            <TouchableOpacity
+              onPress={clearAll}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all filters"
+              disabled={activeCount === 0}
+              style={{ opacity: activeCount > 0 ? 1 : 0 }}
+            >
+              <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
+            </TouchableOpacity>
           </View>
 
           <BottomSheetScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: (activeAmountField ? 420 : Math.max(insets.bottom, 16)) + 20 }}
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 440 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* ── Sort by — control card ──────────────────────── */}
+            {/* ── Sort + Date — control card ──────────────────── */}
             <View style={[FS.controlsCard, { backgroundColor: theme.chipBg }]}>
               {sortMenu}
+              <View style={[FS.cardRowDivider, { backgroundColor: theme.sep }]} />
+              {dateMenu}
             </View>
-
-            {/* ── Date presets ────────────────────────────────── */}
-            <View style={FS.groupEyebrow}>
-              <View style={[FS.groupDot, { backgroundColor: theme.textTer }]} />
-              <Text style={[FS.groupEyebrowText, { color: theme.textSec }]}>Date</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={FS.dateChipRow}
-              keyboardShouldPersistTaps="handled"
-            >
-              <TouchableOpacity
-                onPress={() => handleDatePickerChange(0)}
-                style={[FS.dateChip, {
-                  backgroundColor: dateFilter === null ? theme.accent.fill : theme.chipBg,
-                  borderColor: dateFilter === null ? theme.accent.fill : theme.hairline,
-                }]}
-                accessibilityRole="button"
-                accessibilityLabel="Any time"
-                accessibilityState={{ selected: dateFilter === null }}
-              >
-                <Text style={[FS.dateChipText, { color: dateFilter === null ? theme.accent.ink : theme.textSec }]}>
-                  Any time
-                </Text>
-              </TouchableOpacity>
-              {DATE_PRESETS.map((preset, i) => {
-                const active = typeof dateFilter === 'string' && dateFilter === preset.id;
-                return (
-                  <TouchableOpacity
-                    key={preset.id}
-                    onPress={() => handleDatePickerChange(i + 1)}
-                    style={[FS.dateChip, {
-                      backgroundColor: active ? theme.accent.fill : theme.chipBg,
-                      borderColor: active ? theme.accent.fill : theme.hairline,
-                    }]}
-                    accessibilityRole="button"
-                    accessibilityLabel={preset.label}
-                    accessibilityState={{ selected: active }}
-                  >
-                    <Text style={[FS.dateChipText, { color: active ? theme.accent.ink : theme.textSec }]}>
-                      {preset.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-              {customLabel && (
-                <TouchableOpacity
-                  onPress={() => setDateFilter(null)}
-                  style={[FS.dateChip, FS.dateChipCustom, {
-                    backgroundColor: theme.accent.fill,
-                    borderColor: theme.accent.fill,
-                  }]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Custom range: ${customLabel}. Tap to clear.`}
-                >
-                  <Text style={[FS.dateChipText, { color: theme.accent.ink }]}>{customLabel}</Text>
-                  <Icon name="close" size={10} color={theme.accent.ink} stroke={2} />
-                </TouchableOpacity>
-              )}
-            </ScrollView>
 
             {/* ── Amount range ────────────────────────────────── */}
             <View style={[FS.groupEyebrow, { gap: 0, justifyContent: 'space-between' }]}>
@@ -2220,8 +2233,8 @@ function FilterSheet({
                       No {g.label.toLowerCase()} transactions yet
                     </Text>
                   ) : (
-                    <View style={FS.catGrid}>
-                      {g.cats.map(catId => {
+                    <View style={[FS.catGroupCard, { backgroundColor: theme.chipBg }]}>
+                      {g.cats.map((catId, i) => {
                         const c      = cats[catId];
                         const active = localCatFilter.includes(catId);
                         return (
@@ -2230,32 +2243,19 @@ function FilterSheet({
                             onPress={() => toggleCatFilter(catId)}
                             activeOpacity={0.75}
                             style={[
-                              FS.catChip,
-                              {
-                                backgroundColor: active ? groupColor : theme.chipBg,
-                                borderColor: active ? groupColor : theme.hairline,
-                              },
+                              FS.catRow,
+                              i < g.cats.length - 1 && { borderBottomColor: active ? groupColor + '30' : theme.sep, borderBottomWidth: StyleSheet.hairlineWidth },
+                              active && { backgroundColor: groupColor + '20' },
                             ]}
                             accessibilityRole="button"
                             accessibilityState={{ selected: active }}
                             accessibilityLabel={c.label}
                           >
-                            <View style={[
-                              FS.catChipIcon,
-                              { backgroundColor: active ? GLASS_TINT_ACTIVE : groupColor + '24' },
-                            ]}>
-                              <Icon name={c.icon} size={12} color={active ? ON_GROUP_ICON : groupColor} stroke={1.6} />
+                            <View style={[FS.catRowIcon, { backgroundColor: groupColor + (active ? '40' : '24') }]}>
+                              <Icon name={c.icon} size={16} color={groupColor} stroke={1.6} />
                             </View>
-                            <Text
-                              numberOfLines={1}
-                              style={[
-                                FS.catChipName,
-                                { color: active ? ON_GROUP_ICON : theme.text },
-                              ]}
-                            >
-                              {c.label}
-                            </Text>
-                            {active && <Icon name="check" size={12} color={ON_GROUP_ICON} stroke={2} />}
+                            <Text style={[FS.catRowLabel, { color: theme.text }]}>{c.label}</Text>
+                            {active && <Icon name="check" size={16} color={groupColor} stroke={2} />}
                           </TouchableOpacity>
                         );
                       })}
@@ -2271,6 +2271,7 @@ function FilterSheet({
             onKey={handleAmountKey}
             onDone={() => setActiveAmountField(null)}
             zIndex={80}
+            passthrough
           />
         </View>
       )}
@@ -2460,8 +2461,11 @@ const TxRow = React.memo(function TxRow({
   const cat        = cats[tx.cat];
   const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
   const isIncome   = tx.type === 'income';
+  const isGoalContribution = isGoalContributionTx(tx);
   const incomeColor = theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light;
-  const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
+  const baseMeta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
+  const meta = isGoalContribution ? `Goal contribution · ${baseMeta}` : baseMeta;
+  const title = isGoalContribution ? (cat?.label ? `${cat.label} contribution` : tx.merchant) : tx.merchant;
 
   return (
     <Pressable
@@ -2469,23 +2473,24 @@ const TxRow = React.memo(function TxRow({
       onPress={onPress}
       style={({ pressed }) => [S.txRow, { borderBottomWidth: last ? 0 : 1, borderBottomColor: p.hairline, opacity: pressed ? 0.6 : 1 }]}
       accessibilityRole="button"
-      accessibilityLabel={`${tx.merchant}, ${meta}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
+      accessibilityLabel={`${title}, ${meta}, ${isIncome ? '+' : '−'}$${tx.amount.toFixed(2)}`}
       accessibilityActions={onDelete ? [{ name: 'delete', label: 'Delete transaction' }] : undefined}
       onAccessibilityAction={onDelete ? (e) => { if (e.nativeEvent.actionName === 'delete') onDelete(); } : undefined}
     >
       <MerchantMark
-        merchant={tx.merchant}
-        catIcon={cat?.icon}
+        merchant={title}
+        catIcon={isGoalContribution ? 'target' : cat?.icon}
         color={groupColor}
-        logoEnabled={transactionUsesMerchantLogo(tx)}
+        logoEnabled={!isGoalContribution && transactionUsesMerchantLogo(tx)}
         size={32}
       />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={S.nameRow}>
           <Text style={[S.txName, { color: p.text, flexShrink: 1 }]} numberOfLines={1}>
-            {tx.merchant}
+            {title}
           </Text>
           {tx.recurring && <Icon name="repeat" size={11} color={p.textTer} stroke={1.7} />}
+          {isGoalContribution && <Icon name="target" size={11} color={groupColor} stroke={1.7} />}
         </View>
         <Text style={[S.txMeta, { color: p.textSec }]}>{meta} · {tx.time}</Text>
       </View>
@@ -2740,6 +2745,8 @@ const S = StyleSheet.create({
   },
   filterPillText: {
     ...TYPE.caption,
+    flexShrink: 1,
+    maxWidth: 150,
   },
   filterPillClearAll: {
     ...TYPE.captionEm,
@@ -2958,6 +2965,10 @@ const FS = StyleSheet.create({
   },
   title: {
     ...TYPE.pageTitle,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    textAlign: 'center',
   },
   clearLink: {
     ...TYPE.bodySm,
@@ -3025,28 +3036,9 @@ const FS = StyleSheet.create({
     marginTop: SPACE.sm,
   },
 
-  // Date preset chips
-  dateChipRow: {
-    flexDirection: 'row',
-    gap: SPACE.sm,
-    paddingHorizontal: LAYOUT.cardPadX,
-    paddingBottom: SPACE.sm,
-  },
-  dateChip: {
-    height: 34,
-    paddingHorizontal: SPACE.md,
-    borderRadius: RADIUS.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  dateChipCustom: {
-    flexDirection: 'row',
-    gap: SPACE.xs,
-  },
-  dateChipText: {
-    ...TYPE.captionEm,
+  cardRowDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: LAYOUT.screenGutter,
   },
 
   // Category section
@@ -3054,8 +3046,8 @@ const FS = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: LAYOUT.cardPadX,
-    paddingTop: SPACE.xxl,
-    paddingBottom: 10, // off-grid optical gap before category chips
+    paddingTop: SPACE.lg,
+    paddingBottom: SPACE.sm,
     gap: SPACE.sm,
   },
   groupDot: {
@@ -3066,34 +3058,30 @@ const FS = StyleSheet.create({
   groupEyebrowText: {
     ...TYPE.labelLg,
   },
-  catGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACE.sm,
-    paddingHorizontal: LAYOUT.cardPadX,
+  catGroupCard: {
+    marginHorizontal: LAYOUT.cardPadX,
+    borderRadius: RADIUS.card,
+    overflow: 'hidden',
   },
-  catChip: {
-    flexShrink: 0,
-    minHeight: 42,
-    borderRadius: RADIUS.chip,
-    borderWidth: StyleSheet.hairlineWidth,
+  catRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACE.sm,
-    paddingHorizontal: SPACE.md,
-    paddingVertical: SPACE.sm,
+    paddingHorizontal: LAYOUT.screenGutter,
+    paddingVertical: LAYOUT.rowPadY,
+    gap: SPACE.md,
+    minHeight: 52,
   },
-  catChipIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12, // width/2 — circle
+  catRowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  catChipName: {
+  catRowLabel: {
+    ...TYPE.body,
     flex: 1,
-    ...TYPE.bodySmEm,
   },
   groupEmpty: {
     paddingHorizontal: LAYOUT.cardPadX, paddingVertical: LAYOUT.rowPadY,

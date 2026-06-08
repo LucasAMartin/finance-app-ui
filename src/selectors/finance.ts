@@ -67,7 +67,12 @@ export function monthlyIncome(incomes: Income[], monthKey = currentMonthKey()): 
     switch (income.cadence) {
       case 'weekly': return sum + Math.round(income.amount * 52 / 12);
       case 'biweekly': return sum + Math.round(income.amount * 26 / 12);
+      case 'semimonthly': return sum + income.amount * 2;
       case 'annual': return sum + Math.round(income.amount / 12);
+      case 'custom': {
+        const perYear = Number(income.meta?.perYear) || 12;
+        return sum + Math.round(income.amount * perYear / 12);
+      }
       default: return sum + income.amount;
     }
   }, 0);

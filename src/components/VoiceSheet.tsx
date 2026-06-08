@@ -929,7 +929,7 @@ const S = StyleSheet.create({
     marginBottom: 12,
   },
   categoryPanel: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     overflow: 'hidden',
   },
