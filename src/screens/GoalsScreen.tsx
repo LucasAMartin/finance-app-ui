@@ -11,10 +11,40 @@ import {
   Pressable,
   TextInput,
   Keyboard,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Button as SwiftButton, DatePicker, Host, Menu } from '@expo/ui/swift-ui';
-import { datePickerStyle, environment, tint } from '@expo/ui/swift-ui/modifiers';
+import {
+  Button as SwiftButton,
+  DatePicker,
+  GlassEffectContainer,
+  HStack,
+  Host,
+  Image as SwiftImage,
+  Menu,
+  ProgressView,
+  Spacer,
+  Text as SwiftText,
+  VStack,
+} from '@expo/ui/swift-ui';
+import {
+  background,
+  accessibilityLabel as swiftAccessibilityLabel,
+  datePickerStyle,
+  environment,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  lineLimit,
+  padding,
+  progressViewStyle,
+  shapes,
+  tint,
+  truncationMode,
+} from '@expo/ui/swift-ui/modifiers';
+import type { SFSymbol } from 'sf-symbols-typescript';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomSheet, {
   BottomSheetBackdrop,
@@ -29,8 +59,8 @@ import { CAUTION_AMBER, GROUP_COLORS, ON_GROUP_ICON, OVER_DOT, Theme, cautionTex
 import { useTheme } from '../ThemeProvider';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { makeP, makeScrim, deriveFloor } from '../wallpaperPalette';
-import { SectionCard } from '../components/SectionCard';
 import { SheetPrimaryButton, ProgressBar, Money, FIELD_CARD, FIELD_ROW } from '../components/shared';
+import { GlassCard } from '../components/GlassCard';
 import { MerchantMark } from '../components/MerchantMark';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { applyKeypadKey } from '../components/NumericKeypad';
@@ -70,13 +100,14 @@ import {
   type GoalContribution,
 } from '../selectors/goals';
 
-const ICON_SF_SYMBOL: Record<string, string> = {
+const ICON_SF_SYMBOL: Record<string, SFSymbol> = {
   cart: 'cart', fork: 'fork.knife', car: 'car', bag: 'bag', doc: 'doc',
   film: 'film', home: 'house', wallet: 'wallet.pass', receipt: 'receipt',
   cards: 'creditcard', repeat: 'repeat', tag: 'tag', sparkle: 'sparkles',
   cup: 'cup.and.saucer', cal: 'calendar', note: 'note.text', chart: 'chart.bar',
   profile: 'person', bell: 'bell', sun: 'sun.max', moon: 'moon',
 };
+const GOAL_FALLBACK_SYMBOL: SFSymbol = 'target';
 
 const fmtAmt = (n: number) => n % 1 !== 0 ? n.toFixed(2) : n.toLocaleString();
 const formatGoalDraft = (draft: string): string => {
@@ -411,25 +442,17 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
                     <EmptyActiveGoals theme={theme} p={p} onAdd={() => setFormGoalOpen(true)} />
                   )}
                   {goals.map(goal => (
-                    <Pressable
+                    <GoalCardShell
                       key={goal.id}
+                      goal={goal}
+                      p={p}
+                      tint={teal}
+                      caution={caution}
+                      dark={theme.dark}
                       onPress={() => setDetailGoalId(goal.id)}
-                      accessibilityRole="button"
+                      style={{ marginBottom: SPACE.md }}
                       accessibilityLabel={`Open ${goal.label} goal`}
-                      style={({ pressed }) => [
-                        { marginBottom: SPACE.md },
-                        pressed && { opacity: 0.72 },
-                      ]}
-                    >
-                      <SectionCard dark={theme.dark}>
-                        <GoalCard
-                          goal={goal}
-                          p={p}
-                          tint={teal}
-                          caution={caution}
-                        />
-                      </SectionCard>
-                    </Pressable>
+                    />
                   ))}
                   {archivedGoals.length > 0 && (
                     <>
@@ -440,24 +463,18 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
                         </Text>
                       </View>
                       {archivedGoals.map(goal => (
-                        <Pressable
+                        <GoalCardShell
                           key={goal.id}
+                          goal={goal}
+                          p={p}
+                          tint={teal}
+                          caution={caution}
+                          dark={theme.dark}
                           onPress={() => setDetailGoalId(goal.id)}
-                          accessibilityRole="button"
+                          style={{ marginBottom: SPACE.md }}
+                          dimmed
                           accessibilityLabel={`Open archived ${goal.label} goal`}
-                          style={({ pressed }) => [
-                            { marginBottom: SPACE.md, opacity: pressed ? 0.56 : 0.78 },
-                          ]}
-                        >
-                          <SectionCard dark={theme.dark}>
-                            <GoalCard
-                              goal={goal}
-                              p={p}
-                              tint={teal}
-                              caution={caution}
-                            />
-                          </SectionCard>
-                        </Pressable>
+                        />
                       ))}
                     </>
                   )}
@@ -518,6 +535,250 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
         </BottomSheetModalProvider>
       </View>
     </Animated.View>
+  );
+}
+
+function GoalCardShell({
+  goal,
+  p,
+  tint,
+  caution,
+  dark,
+  onPress,
+  style,
+  dimmed = false,
+  accessibilityLabel,
+}: {
+  goal: Goal;
+  p: ReturnType<typeof makeP>;
+  tint: string;
+  caution: string;
+  dark: boolean;
+  onPress: () => void;
+  style?: StyleProp<ViewStyle>;
+  dimmed?: boolean;
+  accessibilityLabel: string;
+}) {
+  if (SUPPORTS_GLASS) {
+    return (
+      <NativeGoalCard
+        goal={goal}
+        p={p}
+        tint={tint}
+        caution={caution}
+        dark={dark}
+        onPress={onPress}
+        style={style}
+        accessibilityLabel={accessibilityLabel}
+      />
+    );
+  }
+
+  return (
+    <GlassCard
+      dark={dark}
+      onPress={onPress}
+      style={dimmed ? [style, { opacity: 0.78 }] : style}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <GoalCard goal={goal} p={p} tint={tint} caution={caution} />
+    </GlassCard>
+  );
+}
+
+function NativeGoalCard({
+  goal,
+  p,
+  tint: goalTint,
+  caution,
+  dark,
+  onPress,
+  style,
+  accessibilityLabel,
+}: {
+  goal: Goal;
+  p: ReturnType<typeof makeP>;
+  tint: string;
+  caution: string;
+  dark: boolean;
+  onPress: () => void;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel: string;
+}) {
+  const pct = goalProgressPct(goal);
+  const remaining = goalRemaining(goal);
+  const status = statusFor(goal);
+  const statusColor =
+    status.tone === 'caution' ? caution : status.tone === 'good' ? goalTint : p.textTer;
+
+  const monthly = goal.monthlyContribution;
+  let footerLine: string | null = null;
+  let footerLineColor = p.textSec;
+
+  if (goal.status === 'archived') {
+    footerLine = goal.archivedAt
+      ? `Archived ${contributionDateLabel(goal.archivedAt)}`
+      : 'Archived';
+    footerLineColor = p.textTer;
+  } else if (remaining > 0) {
+    if (monthly && monthly > 0) {
+      footerLine = goal.deadline
+        ? `${money0(monthly)}/mo · ${deadlineLabel(goal.deadline)}`
+        : `${money0(monthly)}/mo`;
+    } else if (goal.deadline) {
+      footerLine = `Target ${deadlineLabel(goal.deadline)}`;
+      footerLineColor = p.textTer;
+    } else {
+      footerLine = 'Add a target date and monthly amount';
+      footerLineColor = p.textTer;
+    }
+  }
+
+  const hostStyle: StyleProp<ViewStyle> = [{ width: '100%' }, style];
+  const symbol = ICON_SF_SYMBOL[goal.icon] ?? GOAL_FALLBACK_SYMBOL;
+  const glassTint = dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const iconWash = `${goalTint}28`;
+  const badgeWash = `${statusColor}22`;
+  const progress = pct / 100;
+
+  return (
+    <Host
+      matchContents={{ vertical: true }}
+      ignoreSafeArea="all"
+      colorScheme={dark ? 'dark' : 'light'}
+      style={hostStyle}
+    >
+      <GlassEffectContainer>
+        <SwiftButton
+          onPress={onPress}
+          modifiers={[
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+            swiftAccessibilityLabel(accessibilityLabel),
+          ]}
+        >
+          <VStack
+            alignment="leading"
+            spacing={SPACE.md}
+            modifiers={[
+              padding({
+                leading: LAYOUT.cardPadX,
+                trailing: LAYOUT.cardPadX,
+                top: LAYOUT.cardPadTop,
+                bottom: LAYOUT.cardPadBottom,
+              }),
+              frame({ minHeight: 126, maxWidth: 10000, alignment: 'leading' }),
+            ]}
+          >
+            <HStack alignment="center" spacing={SPACE.sm}>
+              <SwiftImage
+                systemName={symbol}
+                size={16}
+                color={goalTint}
+                modifiers={[
+                  frame({ width: 36, height: 36 }),
+                  background(iconWash, shapes.circle()),
+                ]}
+              />
+              <SwiftText
+                modifiers={[
+                  font({ size: 16, weight: 'regular' }),
+                  foregroundStyle(p.text),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                  frame({ maxWidth: 10000, alignment: 'leading' }),
+                ]}
+              >
+                {goal.label}
+              </SwiftText>
+              <Spacer minLength={SPACE.xs} />
+              <HStack
+                alignment="center"
+                spacing={5}
+                modifiers={[
+                  padding({ leading: SPACE.sm, trailing: SPACE.sm, top: 4, bottom: 4 }),
+                  background(badgeWash, shapes.capsule()),
+                ]}
+              >
+                <SwiftText modifiers={[font({ size: 9 }), foregroundStyle(statusColor)]}>●</SwiftText>
+                <SwiftText
+                  modifiers={[
+                    font({ size: 12, weight: 'semibold' }),
+                    foregroundStyle(statusColor),
+                    lineLimit(1),
+                  ]}
+                >
+                  {status.label}
+                </SwiftText>
+              </HStack>
+            </HStack>
+
+            <HStack alignment="center" spacing={SPACE.sm}>
+              <ProgressView
+                value={progress}
+                modifiers={[
+                  progressViewStyle('linear'),
+                  tint(goalTint),
+                  frame({ maxWidth: 10000 }),
+                ]}
+              />
+              <SwiftText
+                modifiers={[
+                  font({ size: 12, weight: 'semibold' }),
+                  foregroundStyle(p.textSec),
+                  frame({ width: 38, alignment: 'trailing' }),
+                ]}
+              >
+                {pct}%
+              </SwiftText>
+            </HStack>
+
+            <HStack alignment="center" spacing={SPACE.sm}>
+              <SwiftText
+                modifiers={[
+                  font({ size: 14, weight: 'semibold' }),
+                  foregroundStyle(p.text),
+                  lineLimit(1),
+                ]}
+              >
+                {money0(goal.saved)}
+                <SwiftText modifiers={[font({ size: 14 }), foregroundStyle(p.textSec)]}>
+                  {' '}of {money0(goal.target)}
+                </SwiftText>
+              </SwiftText>
+              <Spacer minLength={SPACE.sm} />
+              <SwiftText
+                modifiers={[
+                  font({ size: 14 }),
+                  foregroundStyle(p.textSec),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                ]}
+              >
+                {remaining > 0 ? `${money0(remaining)} to go` : 'Complete'}
+              </SwiftText>
+            </HStack>
+
+            {footerLine ? (
+              <SwiftText
+                modifiers={[
+                  font({ size: 12 }),
+                  foregroundStyle(footerLineColor),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                ]}
+              >
+                {footerLine}
+              </SwiftText>
+            ) : null}
+          </VStack>
+        </SwiftButton>
+      </GlassEffectContainer>
+    </Host>
   );
 }
 
@@ -673,7 +934,7 @@ function EmptyGoals({
   onAdd: () => void;
 }) {
   return (
-    <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.lg }}>
+    <GlassCard dark={theme.dark} style={{ marginBottom: SPACE.lg }}>
       <View style={styles.emptyWrap}>
         <View style={[styles.emptyIcon, { backgroundColor: tint }]}>
           <Icon name="target" size={22} color={ON_GROUP_ICON} stroke={1.6} />
@@ -695,7 +956,7 @@ function EmptyGoals({
           style={{ marginTop: SPACE.lg }}
         />
       </View>
-    </SectionCard>
+    </GlassCard>
   );
 }
 
@@ -718,8 +979,23 @@ function GoalSummary({
   tint: string;
   caution: string;
 }) {
+  if (SUPPORTS_GLASS) {
+    return (
+      <NativeGoalSummary
+        dark={theme.dark}
+        p={p}
+        activeCount={activeCount}
+        savedTotal={savedTotal}
+        monthlyPlan={monthlyPlan}
+        behindCount={behindCount}
+        tint={tint}
+        caution={caution}
+      />
+    );
+  }
+
   return (
-    <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.md }}>
+    <GlassCard dark={theme.dark} style={{ marginBottom: SPACE.md }}>
       <View style={styles.summaryCard}>
         <View style={styles.summaryTopRow}>
           <View>
@@ -741,7 +1017,151 @@ function GoalSummary({
           <SummaryStat label="Attention" value={String(behindCount)} color={behindCount > 0 ? caution : p.text} labelColor={p.textTer} />
         </View>
       </View>
-    </SectionCard>
+    </GlassCard>
+  );
+}
+
+function NativeGoalSummary({
+  dark,
+  p,
+  activeCount,
+  savedTotal,
+  monthlyPlan,
+  behindCount,
+  tint: goalTint,
+  caution,
+}: {
+  dark: boolean;
+  p: ReturnType<typeof makeP>;
+  activeCount: number;
+  savedTotal: number;
+  monthlyPlan: number;
+  behindCount: number;
+  tint: string;
+  caution: string;
+}) {
+  const statusColor = behindCount > 0 ? caution : goalTint;
+  const statusLabel = behindCount > 0 ? `${behindCount} behind` : 'On track';
+  const glassTint = dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+
+  return (
+    <Host
+      matchContents={{ vertical: true }}
+      ignoreSafeArea="all"
+      colorScheme={dark ? 'dark' : 'light'}
+      style={{ width: '100%', marginBottom: SPACE.md }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={SPACE.lg}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <HStack alignment="center" spacing={SPACE.md}>
+            <VStack alignment="leading" spacing={SPACE.xs}>
+              <SwiftText
+                modifiers={[
+                  font({ size: 12, weight: 'semibold' }),
+                  foregroundStyle(p.textTer),
+                ]}
+              >
+                GOAL PLAN
+              </SwiftText>
+              <SwiftText
+                modifiers={[
+                  font({ size: 22, weight: 'semibold' }),
+                  foregroundStyle(p.text),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                ]}
+              >
+                {activeCount} active {activeCount === 1 ? 'goal' : 'goals'}
+              </SwiftText>
+            </VStack>
+            <Spacer minLength={SPACE.sm} />
+            <HStack
+              alignment="center"
+              spacing={5}
+              modifiers={[
+                padding({ leading: SPACE.sm, trailing: SPACE.sm, top: 5, bottom: 5 }),
+                background(`${statusColor}1F`, shapes.capsule()),
+              ]}
+            >
+              <SwiftText modifiers={[font({ size: 9 }), foregroundStyle(statusColor)]}>●</SwiftText>
+              <SwiftText
+                modifiers={[
+                  font({ size: 12, weight: 'semibold' }),
+                  foregroundStyle(statusColor),
+                  lineLimit(1),
+                ]}
+              >
+                {statusLabel}
+              </SwiftText>
+            </HStack>
+          </HStack>
+
+          <HStack alignment="center" spacing={SPACE.lg}>
+            <NativeSummaryStat label="Saved" value={money0(savedTotal)} valueColor={p.text} labelColor={p.textTer} />
+            <NativeSummaryStat label="Monthly plan" value={money0(monthlyPlan)} valueColor={p.text} labelColor={p.textTer} />
+            <NativeSummaryStat label="Attention" value={String(behindCount)} valueColor={behindCount > 0 ? caution : p.text} labelColor={p.textTer} />
+          </HStack>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeSummaryStat({
+  label,
+  value,
+  valueColor,
+  labelColor,
+}: {
+  label: string;
+  value: string;
+  valueColor: string;
+  labelColor: string;
+}) {
+  return (
+    <VStack
+      alignment="leading"
+      spacing={SPACE.xs}
+      modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+    >
+      <SwiftText
+        modifiers={[
+          font({ size: 12 }),
+          foregroundStyle(labelColor),
+          lineLimit(1),
+          truncationMode('tail'),
+        ]}
+      >
+        {label}
+      </SwiftText>
+      <SwiftText
+        modifiers={[
+          font({ size: 16, weight: 'semibold' }),
+          foregroundStyle(valueColor),
+          lineLimit(1),
+          truncationMode('tail'),
+        ]}
+      >
+        {value}
+      </SwiftText>
+    </VStack>
   );
 }
 
@@ -774,7 +1194,7 @@ function EmptyActiveGoals({
   onAdd: () => void;
 }) {
   return (
-    <SectionCard dark={theme.dark} style={{ marginBottom: SPACE.md }}>
+    <GlassCard dark={theme.dark} style={{ marginBottom: SPACE.md }}>
       <View style={styles.emptyActiveWrap}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[TYPE.body, { color: p.text }]}>No active goals</Text>
@@ -791,7 +1211,7 @@ function EmptyActiveGoals({
           <Text style={[TYPE.captionEm, { color: p.text }]}>Add</Text>
         </Pressable>
       </View>
-    </SectionCard>
+    </GlassCard>
   );
 }
 

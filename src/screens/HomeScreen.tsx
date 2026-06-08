@@ -13,7 +13,40 @@ import {
   Easing,
 } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
-import { Host, Menu, Button as SwiftButton } from '@expo/ui/swift-ui';
+import {
+  Button as SwiftButton,
+  GlassEffectContainer,
+  HStack,
+  Host,
+  Image as SwiftImage,
+  Menu,
+  ProgressView,
+  Rectangle,
+  RoundedRectangle,
+  Spacer,
+  SwipeActions,
+  Text as SwiftText,
+  VStack,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityHint as swiftAccessibilityHint,
+  accessibilityLabel as swiftAccessibilityLabel,
+  Animation,
+  animation,
+  background,
+  clipped,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  lineLimit,
+  opacity,
+  padding,
+  progressViewStyle,
+  shapes,
+  tint,
+  truncationMode,
+} from '@expo/ui/swift-ui/modifiers';
 import { Swipeable, TouchableOpacity as GHTouchableOpacity } from 'react-native-gesture-handler';
 import { useTheme } from '../ThemeProvider';
 import { BlurView } from 'expo-blur';
@@ -29,7 +62,7 @@ import { Skeleton } from '../components/Skeleton';
 import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import { appendMemberLabel } from '../repositories/memberLabels';
-import type { Bill, Category, LedgerMember, Transaction, TransactionCursor } from '../repositories/types';
+import type { Bill, Category, LedgerMember, SpendGroup, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
@@ -52,6 +85,29 @@ const HOME_ACTIVITY_LIMIT = 8;
 const HOME_MONTH_PAGE_SIZE = 200;
 const HERO_MORPH_CLOSE_RETURN_DELAY = 130;
 type HeroAction = 'voice' | 'manual' | 'income';
+
+const CATEGORY_SF_SYMBOL: Record<string, SFSymbol> = {
+  cart: 'cart',
+  fork: 'fork.knife',
+  car: 'car',
+  bag: 'bag',
+  doc: 'doc',
+  film: 'film',
+  home: 'house',
+  wallet: 'wallet.pass',
+  receipt: 'receipt',
+  cards: 'creditcard',
+  repeat: 'repeat',
+  tag: 'tag',
+  sparkle: 'sparkles',
+  cup: 'cup.and.saucer',
+  cal: 'calendar',
+  note: 'note.text',
+  chart: 'chart.bar',
+  profile: 'person',
+  bell: 'bell',
+};
+const UPCOMING_FALLBACK_SYMBOL: SFSymbol = 'calendar';
 
 function quickActionColors(theme: Theme, p: P) {
   const labelFg = p.text;
@@ -295,6 +351,47 @@ const QuickAction = React.forwardRef<View, {
 const fmtAmount = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+interface NativeUpcomingBillItem {
+  id: string;
+  name: string;
+  dueDate: string;
+  daysText: string;
+  daysColor: string;
+  amountText: string;
+  symbol: SFSymbol;
+  iconColor: string;
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  onOpen: () => void;
+  onPaid?: () => void;
+}
+
+interface NativeHomeActivityItem {
+  id: string;
+  merchant: string;
+  meta: string;
+  time: string;
+  amountText: string;
+  symbol: SFSymbol;
+  iconColor: string;
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  onOpen: () => void;
+  onDelete?: () => void;
+}
+
+interface NativeHomeActivityGroup {
+  key: string;
+  label: string;
+  items: NativeHomeActivityItem[];
+}
+
+const NATIVE_SPEND_GROUP_CLOSED_HEIGHT = 94;
+const nativeSpendGroupDetailHeight = (group: SpendGroup) => {
+  if (group.key === 'wants') return 20 + group.subs.length * 52;
+  return 16 + group.subs.length * 44 + Math.max(0, group.subs.length - 1) * SPACE.md;
+};
+
 interface Props {
   theme: Theme;
   onViewActivity: (filter?: ActivityInitialFilter) => void;
@@ -455,6 +552,68 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
       }
     });
   }, [transactionsRepo, recurringRulesRepo, sessionRepo, showToast]);
+
+  const nativeUpcomingBills = useMemo<NativeUpcomingBillItem[]>(() => (
+    visibleUpcomingBills.map(bill => {
+      const amountText = `${bill.estimate ? '~' : ''}$${fmtAmount(bill.amount)}`;
+      const ruleId = bill.id.startsWith('bill-') ? bill.id.slice(5) : bill.id;
+      const rule = recurringRules.find(item => item.id === ruleId);
+      const canMarkPaid = !rule || sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId);
+      const daysColor = bill.daysUntil <= 7
+        ? OVER_DOT
+        : bill.daysUntil <= 14
+          ? cautionText(theme.dark)
+          : p.textSec;
+
+      return {
+        id: bill.id,
+        name: bill.name,
+        dueDate: bill.dueDate,
+        daysText: `in ${bill.daysUntil} days`,
+        daysColor,
+        amountText,
+        symbol: CATEGORY_SF_SYMBOL[bill.icon] ?? UPCOMING_FALLBACK_SYMBOL,
+        iconColor: categoryGroupColor(bill.cat, categories, theme.dark),
+        accessibilityLabel: `${bill.name}, due ${bill.dueDate}, in ${bill.daysUntil} days, ${amountText}`,
+        accessibilityHint: canMarkPaid ? 'Swipe left to mark paid' : undefined,
+        onOpen: () => onOpenBill(bill),
+        onPaid: canMarkPaid ? () => markBillPaid(bill) : undefined,
+      };
+    })
+  ), [categories, markBillPaid, onOpenBill, p.textSec, recurringRules, sessionRepo, theme.dark, visibleUpcomingBills]);
+
+  const nativeHomeActivityGroups = useMemo<NativeHomeActivityGroup[]>(() => (
+    homeActivityGroups.map(group => ({
+      key: group.key,
+      label: group.label,
+      items: group.txs.map(tx => {
+        const cat = cats[tx.cat];
+        const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, ledgerMembers, tx.createdByUserId);
+        const canDelete = transactionsRepo.canEdit(tx);
+        return {
+          id: tx.id,
+          merchant: tx.merchant,
+          meta,
+          time: tx.time,
+          amountText: `$${fmtAmount(tx.amount)}`,
+          symbol: CATEGORY_SF_SYMBOL[cat?.icon ?? ''] ?? UPCOMING_FALLBACK_SYMBOL,
+          iconColor: categoryGroupColor(tx.cat, categories, theme.dark),
+          accessibilityLabel: `${tx.merchant}, ${meta}, ${tx.time}, $${fmtAmount(tx.amount)}`,
+          accessibilityHint: canDelete ? 'Swipe left to delete' : undefined,
+          onOpen: () => {
+            onPrepareTx?.(tx);
+            onOpenTx(tx);
+          },
+          onDelete: canDelete
+            ? () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                onDeleteTx(tx);
+              }
+            : undefined,
+        };
+      }),
+    }))
+  ), [cats, categories, homeActivityGroups, ledgerMembers, onDeleteTx, onOpenTx, onPrepareTx, theme.dark, transactionsRepo]);
 
   const handleEditTheme = () => {
     onOpenTheme();
@@ -765,30 +924,48 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           <View style={styles.sectionStack}>
 
             {/* Spending */}
-            <SectionCard dark={theme.dark}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Spending</Text>
-              </View>
-              {loading ? (
-                <CategorySkeleton dark={theme.dark} />
-              ) : (
-                <HomeSpendGroups theme={theme} groups={visibleSpendGroups} income={income} compact onMedia={theme.dark} />
-              )}
-            </SectionCard>
+            {SUPPORTS_GLASS ? (
+              <NativeSpendingSection
+                theme={theme}
+                p={p}
+                loading={loading}
+                groups={visibleSpendGroups}
+                income={income}
+              />
+            ) : (
+              <SectionCard dark={theme.dark}>
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Spending</Text>
+                </View>
+                {loading ? (
+                  <CategorySkeleton dark={theme.dark} />
+                ) : (
+                  <HomeSpendGroups theme={theme} groups={visibleSpendGroups} income={income} compact onMedia={theme.dark} />
+                )}
+              </SectionCard>
+            )}
 
             {/* Upcoming */}
-            <SectionCard dark={theme.dark}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Upcoming</Text>
-              </View>
-              {loading ? (
-                <BillsSkeleton dark={theme.dark} />
-              ) : (
-                visibleUpcomingBills.length === 0 ? (
-                  <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
-                    No recurring bills tracked. Mark an expense as repeating to add one.
-                  </Text>
-                ) : visibleUpcomingBills.map((b, i) => {
+            {SUPPORTS_GLASS ? (
+              <NativeUpcomingSection
+                dark={theme.dark}
+                p={p}
+                loading={loading}
+                bills={nativeUpcomingBills}
+              />
+            ) : (
+              <SectionCard dark={theme.dark}>
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Upcoming</Text>
+                </View>
+                {loading ? (
+                  <BillsSkeleton dark={theme.dark} />
+                ) : (
+                  visibleUpcomingBills.length === 0 ? (
+                    <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
+                      No recurring bills tracked. Mark an expense as repeating to add one.
+                    </Text>
+                  ) : visibleUpcomingBills.map((b, i) => {
 	                  const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
 	                  const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
 	                  const billIconColor = categoryGroupColor(b.cat, categories, theme.dark);
@@ -799,17 +976,17 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
 	                    <SwipeBillRow
 	                      key={b.id}
 	                      onPaid={canMarkPaid ? () => markBillPaid(b) : undefined}
-                      onOpen={handleSwipeOpen}
-                      onClose={handleSwipeClose}
-                    >
-                      <TouchableOpacity
-                        onPress={() => onOpenBill(b)}
-                        activeOpacity={0.6}
-                        delayPressIn={0}
-                        style={[
-                          styles.billRow,
-                          { borderBottomWidth: i < visibleUpcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
-                        ]}
+                        onOpen={handleSwipeOpen}
+                        onClose={handleSwipeClose}
+                      >
+                        <TouchableOpacity
+                          onPress={() => onOpenBill(b)}
+                          activeOpacity={0.6}
+                          delayPressIn={0}
+                          style={[
+                            styles.billRow,
+                            { borderBottomWidth: i < visibleUpcomingBills.length - 1 ? 1 : 0, borderBottomColor: p.hairline },
+                          ]}
 	                        accessible
 	                        accessibilityLabel={a11y}
 	                        accessibilityHint={canMarkPaid ? 'Swipe right to mark paid' : undefined}
@@ -817,76 +994,1048 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
 	                        onAccessibilityAction={canMarkPaid ? (e) => {
 	                          if (e.nativeEvent.actionName === 'paid') markBillPaid(b);
 	                        } : undefined}
-                      >
-                        <MerchantMark
-                          merchant={b.merchant}
-                          catIcon={b.icon}
-                          color={billIconColor}
-                          size={36}
-                          iconSize={16}
-                        />
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={[styles.rowTitle, { color: p.text }]}>{b.name}</Text>
-                          <Text style={[styles.rowSub, { color: p.textSec }]}>
-                            {b.dueDate}
-                            {'  ·  '}
-                            <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : p.textSec }}>
-                              in {b.daysUntil} days
+                        >
+                          <MerchantMark
+                            merchant={b.merchant}
+                            catIcon={b.icon}
+                            color={billIconColor}
+                            size={36}
+                            iconSize={16}
+                          />
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[styles.rowTitle, { color: p.text }]}>{b.name}</Text>
+                            <Text style={[styles.rowSub, { color: p.textSec }]}>
+                              {b.dueDate}
+                              {'  ·  '}
+                              <Text style={{ color: b.daysUntil <= 7 ? OVER_DOT : b.daysUntil <= 14 ? cautionText(theme.dark) : p.textSec }}>
+                                in {b.daysUntil} days
+                              </Text>
                             </Text>
-                          </Text>
-                        </View>
-                        <Money value={b.amount} theme={theme} color={p.text} prefix={b.estimate ? '~$' : '$'} />
-                      </TouchableOpacity>
-                    </SwipeBillRow>
-                  );
-                })
-              )}
-            </SectionCard>
+                          </View>
+                          <Money value={b.amount} theme={theme} color={p.text} prefix={b.estimate ? '~$' : '$'} />
+                        </TouchableOpacity>
+                      </SwipeBillRow>
+                    );
+                  })
+                )}
+              </SectionCard>
+            )}
 
             {/* Activity */}
-            <SectionCard dark={theme.dark}>
-              <View style={styles.sectionHead}>
-                <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Activity</Text>
-                <TouchableOpacity onPress={openSelectedMonthActivity} activeOpacity={0.6} delayPressIn={0}>
-                  <Text style={[styles.ledgerAction, { color: theme.accent.dot }]}>See all</Text>
-                </TouchableOpacity>
-              </View>
-              {loading ? (
-                <ActivitySkeleton dark={theme.dark} />
-              ) : homeActivityGroups.length === 0 ? (
-                <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
-                  No expenses logged yet. Tap + below to add one by voice or text.
-                </Text>
-              ) : (
-                homeActivityGroups.map(group => (
-                    <View key={group.key} style={{ marginBottom: 16 }}>
-                      <Text style={[styles.dayLabel, { color: p.textTer }]}>
-                        {group.label}
-                      </Text>
-                      {group.txs.map((tx, i, arr) => (
-                        <SwipeTxRow
-                          key={tx.id}
-                          onDelete={transactionsRepo.canEdit(tx) ? () => onDeleteTx(tx) : undefined}
-                          onOpen={handleSwipeOpen}
-                          onClose={handleSwipeClose}
-                        >
-                          <TxRow tx={tx}
-                            onPress={() => onOpenTx(tx)}
-                            onPrepare={onPrepareTx ? () => onPrepareTx(tx) : undefined}
+            {SUPPORTS_GLASS ? (
+              <NativeHomeActivitySection
+                dark={theme.dark}
+                p={p}
+                accent={theme.accent.dot}
+                loading={loading}
+                groups={nativeHomeActivityGroups}
+                onSeeAll={openSelectedMonthActivity}
+              />
+            ) : (
+              <SectionCard dark={theme.dark}>
+                <View style={styles.sectionHead}>
+                  <Text style={[styles.ledgerLabel, { color: p.text }]} accessibilityRole="header">Activity</Text>
+                  <TouchableOpacity onPress={openSelectedMonthActivity} activeOpacity={0.6} delayPressIn={0}>
+                    <Text style={[styles.ledgerAction, { color: theme.accent.dot }]}>See all</Text>
+                  </TouchableOpacity>
+                </View>
+                {loading ? (
+                  <ActivitySkeleton dark={theme.dark} />
+                ) : homeActivityGroups.length === 0 ? (
+                  <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
+                    No expenses logged yet. Tap + below to add one by voice or text.
+                  </Text>
+                ) : (
+                  homeActivityGroups.map(group => (
+                      <View key={group.key} style={{ marginBottom: 16 }}>
+                        <Text style={[styles.dayLabel, { color: p.textTer }]}>
+                          {group.label}
+                        </Text>
+                        {group.txs.map((tx, i, arr) => (
+                          <SwipeTxRow
+                            key={tx.id}
                             onDelete={transactionsRepo.canEdit(tx) ? () => onDeleteTx(tx) : undefined}
-                            last={i === arr.length - 1}
-                            dark={theme.dark} p={p} cats={cats} categories={categories} members={ledgerMembers} />
-                        </SwipeTxRow>
-                      ))}
-                    </View>
-                  ))
-              )}
-            </SectionCard>
+                            onOpen={handleSwipeOpen}
+                            onClose={handleSwipeClose}
+                          >
+                            <TxRow tx={tx}
+                              onPress={() => onOpenTx(tx)}
+                              onPrepare={onPrepareTx ? () => onPrepareTx(tx) : undefined}
+                              onDelete={transactionsRepo.canEdit(tx) ? () => onDeleteTx(tx) : undefined}
+                              last={i === arr.length - 1}
+                              dark={theme.dark} p={p} cats={cats} categories={categories} members={ledgerMembers} />
+                          </SwipeTxRow>
+                        ))}
+                      </View>
+                    ))
+                )}
+              </SectionCard>
+            )}
 
           </View>
         </Animated.ScrollView>
 
     </View>
+  );
+}
+
+function NativeSpendingSection({
+  theme,
+  p,
+  loading,
+  groups,
+  income,
+}: {
+  theme: Theme;
+  p: P;
+  loading: boolean;
+  groups: SpendGroup[];
+  income: number;
+}) {
+  const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const sectionChromeHeight = LAYOUT.cardPadTop + 17 + SPACE.md + LAYOUT.cardPadBottom;
+  const groupHeight = (group: SpendGroup) => {
+    if (!openKeys[group.key]) return NATIVE_SPEND_GROUP_CLOSED_HEIGHT;
+    return NATIVE_SPEND_GROUP_CLOSED_HEIGHT + nativeSpendGroupDetailHeight(group);
+  };
+  const sectionHeight = loading
+    ? 430
+    : sectionChromeHeight + groups.reduce((sum, group) => sum + groupHeight(group), 0);
+  const heightAnim = useRef(new Animated.Value(sectionHeight)).current;
+
+  useEffect(() => {
+    Animated.timing(heightAnim, {
+      toValue: sectionHeight,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [heightAnim, sectionHeight]);
+
+  const toggleGroup = (key: string) => {
+    setOpenKeys(current => ({ ...current, [key]: !current[key] }));
+  };
+
+  return (
+    <Animated.View style={{ width: '100%', height: heightAnim, overflow: 'hidden' }}>
+      <Host
+        ignoreSafeArea="all"
+        colorScheme={theme.dark ? 'dark' : 'light'}
+        style={{ width: '100%', height: sectionHeight }}
+      >
+        <GlassEffectContainer>
+          <VStack
+            alignment="leading"
+            spacing={0}
+            modifiers={[
+              padding({
+                leading: LAYOUT.cardPadX,
+                trailing: LAYOUT.cardPadX,
+                top: LAYOUT.cardPadTop,
+                bottom: LAYOUT.cardPadBottom,
+              }),
+              frame({ maxWidth: 10000, alignment: 'leading' }),
+              glassEffect({
+                glass: { variant: 'regular', interactive: true, tint: glassTint },
+                shape: 'roundedRectangle',
+                cornerRadius: RADIUS.card,
+              }),
+            ]}
+          >
+            <SwiftText
+              modifiers={[
+                font({ size: 14, weight: 'semibold' }),
+                foregroundStyle(p.text),
+              ]}
+            >
+              Spending
+            </SwiftText>
+
+            {loading ? (
+              <NativeSpendingSkeleton p={p} />
+            ) : (
+              <VStack
+                alignment="leading"
+                spacing={SPACE.xs}
+                modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+              >
+                {groups.map(group => (
+                  <NativeSpendGroupPanel
+                    key={group.key}
+                    theme={theme}
+                    p={p}
+                    group={group}
+                    income={income}
+                    open={!!openKeys[group.key]}
+                    onToggle={() => toggleGroup(group.key)}
+                  />
+                ))}
+              </VStack>
+            )}
+          </VStack>
+        </GlassEffectContainer>
+      </Host>
+    </Animated.View>
+  );
+}
+
+function NativeSpendGroupPanel({
+  theme,
+  p,
+  group,
+  income,
+  open,
+  onToggle,
+}: {
+  theme: Theme;
+  p: P;
+  group: SpendGroup;
+  income: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const color = theme.dark ? GROUP_COLORS[group.key].dark : GROUP_COLORS[group.key].vibrant;
+  const groupTotal = group.subs.reduce((sum, item) => sum + item.spent, 0);
+  const actualPct = income > 0 ? groupTotal / income : 0;
+  const fill = Math.min(group.targetPct > 0 ? actualPct / group.targetPct : 0, 1);
+  const isSavings = group.key === 'savings';
+  const onTrack = isSavings
+    ? actualPct >= group.targetPct * 0.9
+    : actualPct <= group.targetPct * 1.05;
+  const barColor = onTrack ? color : OVER_DOT;
+  const statusText = isSavings
+    ? onTrack ? 'On Track' : 'Below Target'
+    : onTrack ? 'On Track' : 'Over Budget';
+  const headerTint = theme.dark ? `${color}12` : `${color}26`;
+  const detailHeight = nativeSpendGroupDetailHeight(group);
+
+  return (
+    <VStack
+      alignment="leading"
+      spacing={0}
+      modifiers={[
+        background(headerTint, shapes.roundedRectangle({ cornerRadius: RADIUS.chip })),
+        frame({ maxWidth: 10000, alignment: 'leading' }),
+      ]}
+    >
+      <SwiftButton
+        onPress={onToggle}
+        modifiers={[
+          swiftAccessibilityLabel(`${group.label}, $${fmtAmount(groupTotal)}, ${statusText}`),
+          swiftAccessibilityHint(open ? 'Collapse spending group' : 'Expand spending group'),
+        ]}
+      >
+        <VStack
+          alignment="leading"
+          spacing={SPACE.sm}
+          modifiers={[
+            padding({ leading: SPACE.md, trailing: SPACE.md, top: SPACE.lg, bottom: SPACE.md }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+          ]}
+        >
+          <HStack alignment="center" spacing={SPACE.sm}>
+            <SwiftText modifiers={[font({ size: 10 }), foregroundStyle(color)]}>●</SwiftText>
+            <SwiftText
+              modifiers={[
+                font({ size: 15, weight: 'semibold' }),
+                foregroundStyle(p.text),
+                lineLimit(1),
+                truncationMode('tail'),
+              ]}
+            >
+              {group.label}
+            </SwiftText>
+            <Spacer minLength={SPACE.sm} />
+            <SwiftText
+              modifiers={[
+                font({ size: 18, weight: 'semibold' }),
+                foregroundStyle(p.text),
+                lineLimit(1),
+              ]}
+            >
+              ${fmtAmount(groupTotal)}
+            </SwiftText>
+            <SwiftImage
+              systemName={open ? 'chevron.up' : 'chevron.down'}
+              size={13}
+              color={color}
+              modifiers={[
+                opacity(open ? 1 : 0.78),
+                animation(Animation.easeOut({ duration: 0.18 }), open),
+              ]}
+            />
+          </HStack>
+
+          <ProgressView
+            value={fill}
+            modifiers={[
+              progressViewStyle('linear'),
+              tint(barColor),
+              frame({ maxWidth: 10000 }),
+            ]}
+          />
+
+          <HStack alignment="center" spacing={6}>
+            <SwiftText
+              modifiers={[
+                font({ size: 12, weight: 'semibold' }),
+                foregroundStyle(p.textTer),
+              ]}
+            >
+              {Math.round(actualPct * 100)}% of {Math.round(group.targetPct * 100)}% target
+            </SwiftText>
+            <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(p.textTer)]}>·</SwiftText>
+            <SwiftText
+              modifiers={[
+                font({ size: 12, weight: 'semibold' }),
+                foregroundStyle(onTrack ? color : OVER_DOT),
+              ]}
+            >
+              {statusText}
+            </SwiftText>
+          </HStack>
+        </VStack>
+      </SwiftButton>
+
+      <VStack
+        alignment="leading"
+        spacing={group.key === 'wants' ? 0 : SPACE.md}
+        modifiers={[
+          padding({ leading: SPACE.md, trailing: SPACE.md, bottom: SPACE.lg }),
+          frame({ height: open ? detailHeight : 0, maxWidth: 10000, alignment: 'topLeading' }),
+          opacity(open ? 1 : 0),
+          clipped(),
+          animation(Animation.easeOut({ duration: 0.24 }), open),
+        ]}
+      >
+        {group.key === 'wants' ? (
+          <NativeWantsRows group={group} color={color} p={p} />
+        ) : (
+          <NativeDetailSpendRows group={group} color={color} p={p} isSavings={isSavings} />
+        )}
+      </VStack>
+    </VStack>
+  );
+}
+
+function NativeDetailSpendRows({
+  group,
+  color,
+  p,
+  isSavings,
+}: {
+  group: SpendGroup;
+  color: string;
+  p: P;
+  isSavings: boolean;
+}) {
+  return (
+    <>
+      {group.subs.map(sub => {
+        const pct = sub.budget > 0 ? Math.min(sub.spent / sub.budget, 1) : 0;
+        const over = !isSavings && sub.spent > sub.budget;
+        const funded = sub.spent >= sub.budget;
+
+        return (
+          <HStack
+            key={sub.label}
+            alignment="center"
+            spacing={SPACE.md}
+            modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+          >
+            <SwiftImage
+              systemName={CATEGORY_SF_SYMBOL[sub.icon] ?? UPCOMING_FALLBACK_SYMBOL}
+              size={14}
+              color={color}
+              modifiers={[
+                frame({ width: 28, height: 28 }),
+                background(`${color}18`, shapes.roundedRectangle({ cornerRadius: 8 })),
+              ]}
+            />
+            <VStack alignment="leading" spacing={SPACE.xs} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+              <HStack alignment="center" spacing={SPACE.sm}>
+                <SwiftText
+                  modifiers={[
+                    font({ size: 14 }),
+                    foregroundStyle(p.text),
+                    lineLimit(1),
+                    truncationMode('tail'),
+                  ]}
+                >
+                  {sub.label}
+                </SwiftText>
+                <Spacer minLength={SPACE.sm} />
+                {funded && isSavings ? (
+                  <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(color)]}>✓</SwiftText>
+                ) : null}
+                <SwiftText
+                  modifiers={[
+                    font({ size: 12, weight: 'semibold' }),
+                    foregroundStyle(over ? OVER_DOT : p.text),
+                    lineLimit(1),
+                  ]}
+                >
+                  ${fmtAmount(sub.spent)}
+                </SwiftText>
+                {(!funded || over) ? (
+                  <SwiftText
+                    modifiers={[
+                      font({ size: 11 }),
+                      foregroundStyle(p.textTer),
+                      lineLimit(1),
+                    ]}
+                  >
+                    / ${fmtAmount(sub.budget)}
+                  </SwiftText>
+                ) : null}
+              </HStack>
+              <ProgressView
+                value={pct}
+                modifiers={[
+                  progressViewStyle('linear'),
+                  tint(over ? OVER_DOT : color),
+                  frame({ maxWidth: 10000 }),
+                ]}
+              />
+            </VStack>
+          </HStack>
+        );
+      })}
+    </>
+  );
+}
+
+function NativeWantsRows({
+  group,
+  color,
+  p,
+}: {
+  group: SpendGroup;
+  color: string;
+  p: P;
+}) {
+  return (
+    <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+      {group.subs.map((sub, index) => (
+        <VStack key={sub.label} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+          <HStack
+            alignment="center"
+            spacing={SPACE.md}
+            modifiers={[
+              padding({ top: LAYOUT.rowPadY, bottom: LAYOUT.rowPadY }),
+              frame({ maxWidth: 10000, alignment: 'leading' }),
+            ]}
+          >
+            <SwiftImage
+              systemName={CATEGORY_SF_SYMBOL[sub.icon] ?? UPCOMING_FALLBACK_SYMBOL}
+              size={14}
+              color={color}
+              modifiers={[
+                frame({ width: 28, height: 28 }),
+                background(`${color}18`, shapes.roundedRectangle({ cornerRadius: 8 })),
+              ]}
+            />
+            <SwiftText
+              modifiers={[
+                font({ size: 14 }),
+                foregroundStyle(p.text),
+                lineLimit(1),
+                truncationMode('tail'),
+                frame({ maxWidth: 10000, alignment: 'leading' }),
+              ]}
+            >
+              {sub.label}
+            </SwiftText>
+            <Spacer minLength={SPACE.sm} />
+            <SwiftText
+              modifiers={[
+                font({ size: 12, weight: 'semibold' }),
+                foregroundStyle(p.text),
+                lineLimit(1),
+              ]}
+            >
+              ${fmtAmount(sub.spent)}
+            </SwiftText>
+          </HStack>
+          {index < group.subs.length - 1 ? (
+            <Rectangle
+              modifiers={[
+                frame({ height: 1, maxWidth: 10000 }),
+                foregroundStyle(p.hairline),
+              ]}
+            />
+          ) : null}
+        </VStack>
+      ))}
+    </VStack>
+  );
+}
+
+function NativeSpendingSkeleton({ p }: { p: P }) {
+  const block = (width: number, height: number, radius: number) => (
+    <RoundedRectangle
+      cornerRadius={radius}
+      modifiers={[
+        frame({ width, height }),
+        foregroundStyle(p.hairline),
+      ]}
+    />
+  );
+
+  return (
+    <VStack
+      alignment="leading"
+      spacing={SPACE.xs}
+      modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+    >
+      {[0, 1, 2].map(index => (
+        <VStack
+          key={index}
+          alignment="leading"
+          spacing={SPACE.sm}
+          modifiers={[
+            padding({ leading: SPACE.md, trailing: SPACE.md, top: SPACE.lg, bottom: SPACE.md }),
+            background(p.hairline, shapes.roundedRectangle({ cornerRadius: RADIUS.chip })),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+          ]}
+        >
+          <HStack alignment="center" spacing={SPACE.sm} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            {block(7, 7, RADIUS.bar)}
+            {block(index === 1 ? 72 : 56, 14, 4)}
+            <Spacer />
+            {block(84, 18, 5)}
+          </HStack>
+          {block(220, 8, 4)}
+          {block(156, 12, 4)}
+        </VStack>
+      ))}
+    </VStack>
+  );
+}
+
+function NativeUpcomingSection({
+  dark,
+  p,
+  loading,
+  bills,
+}: {
+  dark: boolean;
+  p: P;
+  loading: boolean;
+  bills: NativeUpcomingBillItem[];
+}) {
+  const glassTint = dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const rowHeight = 64;
+  const sectionChromeHeight = LAYOUT.cardPadTop + 17 + SPACE.xs + LAYOUT.cardPadBottom;
+  const sectionHeight = loading
+    ? sectionChromeHeight + rowHeight * 3 + 2
+    : bills.length === 0
+      ? 116
+      : sectionChromeHeight + rowHeight * bills.length + Math.max(0, bills.length - 1);
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: sectionHeight }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={0}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <HStack
+            alignment="center"
+            modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+          >
+            <SwiftText
+              modifiers={[
+                font({ size: 14, weight: 'semibold' }),
+                foregroundStyle(p.text),
+              ]}
+            >
+              Upcoming
+            </SwiftText>
+            <Spacer />
+          </HStack>
+
+          {loading ? (
+            <NativeUpcomingSkeleton p={p} />
+          ) : bills.length === 0 ? (
+            <SwiftText
+              modifiers={[
+                padding({ top: SPACE.md }),
+                font({ size: 14 }),
+                foregroundStyle(p.textTer),
+                lineLimit(2),
+              ]}
+            >
+              No recurring bills tracked. Mark an expense as repeating to add one.
+            </SwiftText>
+          ) : (
+            <VStack
+              alignment="leading"
+              spacing={0}
+              modifiers={[padding({ top: SPACE.xs }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+            >
+              {bills.map((bill, index) => (
+                <NativeUpcomingRow
+                  key={bill.id}
+                  bill={bill}
+                  p={p}
+                  last={index === bills.length - 1}
+                />
+              ))}
+            </VStack>
+          )}
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeUpcomingRow({
+  bill,
+  p,
+  last,
+}: {
+  bill: NativeUpcomingBillItem;
+  p: P;
+  last: boolean;
+}) {
+  const row = (
+    <SwiftButton
+      onPress={bill.onOpen}
+      modifiers={[
+        swiftAccessibilityLabel(bill.accessibilityLabel),
+        ...(bill.accessibilityHint ? [swiftAccessibilityHint(bill.accessibilityHint)] : []),
+      ]}
+    >
+      <VStack
+        alignment="leading"
+        spacing={0}
+        modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+      >
+        <HStack
+          alignment="center"
+          spacing={SPACE.md}
+          modifiers={[
+            padding({ top: 14, bottom: 14 }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+          ]}
+        >
+          <SwiftImage
+            systemName={bill.symbol}
+            size={16}
+            color={bill.iconColor}
+            modifiers={[
+              frame({ width: 36, height: 36 }),
+              background(`${bill.iconColor}24`, shapes.circle()),
+            ]}
+          />
+          <VStack
+            alignment="leading"
+            spacing={4}
+            modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+          >
+            <SwiftText
+              modifiers={[
+                font({ size: 15, weight: 'semibold' }),
+                foregroundStyle(p.text),
+                lineLimit(1),
+                truncationMode('tail'),
+              ]}
+            >
+              {bill.name}
+            </SwiftText>
+            <HStack alignment="center" spacing={6}>
+              <SwiftText
+                modifiers={[
+                  font({ size: 12 }),
+                  foregroundStyle(p.textSec),
+                  lineLimit(1),
+                ]}
+              >
+                {bill.dueDate}
+              </SwiftText>
+              <SwiftText modifiers={[font({ size: 12 }), foregroundStyle(p.textSec)]}>·</SwiftText>
+              <SwiftText
+                modifiers={[
+                  font({ size: 12 }),
+                  foregroundStyle(bill.daysColor),
+                  lineLimit(1),
+                ]}
+              >
+                {bill.daysText}
+              </SwiftText>
+            </HStack>
+          </VStack>
+          <Spacer minLength={SPACE.sm} />
+          <SwiftText
+            modifiers={[
+              font({ size: 15, weight: 'semibold' }),
+              foregroundStyle(p.text),
+              lineLimit(1),
+            ]}
+          >
+            {bill.amountText}
+          </SwiftText>
+        </HStack>
+
+        {!last && (
+          <Rectangle
+            modifiers={[
+              frame({ height: 1, maxWidth: 10000 }),
+              foregroundStyle(p.hairline),
+            ]}
+          />
+        )}
+      </VStack>
+    </SwiftButton>
+  );
+
+  if (!bill.onPaid) return row;
+
+  return (
+    <SwipeActions>
+      {row}
+      <SwipeActions.Actions edge="trailing" allowsFullSwipe>
+        <SwiftButton
+          label="Paid"
+          systemImage="checkmark"
+          onPress={bill.onPaid}
+          modifiers={[tint(HERO_AVAIL)]}
+        />
+      </SwipeActions.Actions>
+    </SwipeActions>
+  );
+}
+
+function NativeUpcomingSkeleton({ p }: { p: P }) {
+  const block = (width: number, height: number, radius: number) => (
+    <RoundedRectangle
+      cornerRadius={radius}
+      modifiers={[
+        frame({ width, height }),
+        foregroundStyle(p.hairline),
+      ]}
+    />
+  );
+
+  return (
+    <VStack
+      alignment="leading"
+      spacing={0}
+      modifiers={[padding({ top: SPACE.xs }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+    >
+      {[0, 1, 2].map(index => (
+        <VStack key={index} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+          <HStack
+            alignment="center"
+            spacing={SPACE.md}
+            modifiers={[padding({ top: 14, bottom: 14 }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+          >
+            {block(36, 36, 18)}
+            <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+              {block(index === 1 ? 116 : 92, 13, 4)}
+              {block(index === 2 ? 72 : 96, 11, 4)}
+            </VStack>
+            <Spacer />
+            {block(62, 14, 4)}
+          </HStack>
+          {index < 2 && (
+            <Rectangle
+              modifiers={[
+                frame({ height: 1, maxWidth: 10000 }),
+                foregroundStyle(p.hairline),
+              ]}
+            />
+          )}
+        </VStack>
+      ))}
+    </VStack>
+  );
+}
+
+function NativeHomeActivitySection({
+  dark,
+  p,
+  accent,
+  loading,
+  groups,
+  onSeeAll,
+}: {
+  dark: boolean;
+  p: P;
+  accent: string;
+  loading: boolean;
+  groups: NativeHomeActivityGroup[];
+  onSeeAll: () => void;
+}) {
+  const glassTint = dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const itemCount = groups.reduce((sum, group) => sum + group.items.length, 0);
+  const sectionChromeHeight = LAYOUT.cardPadTop + 18 + SPACE.md + LAYOUT.cardPadBottom;
+  const groupLabelHeight = 27;
+  const rowHeight = 64;
+  const sectionHeight = loading
+    ? 332
+    : itemCount === 0
+      ? 116
+      : sectionChromeHeight
+        + groups.length * groupLabelHeight
+        + itemCount * rowHeight
+        + Math.max(0, groups.length - 1) * SPACE.md;
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: sectionHeight }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={0}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            <SwiftText
+              modifiers={[
+                font({ size: 14, weight: 'semibold' }),
+                foregroundStyle(p.text),
+              ]}
+            >
+              Activity
+            </SwiftText>
+            <Spacer />
+            <SwiftButton
+              label="See all"
+              onPress={onSeeAll}
+              modifiers={[tint(accent)]}
+            />
+          </HStack>
+
+          {loading ? (
+            <NativeHomeActivitySkeleton p={p} />
+          ) : itemCount === 0 ? (
+            <SwiftText
+              modifiers={[
+                padding({ top: SPACE.md }),
+                font({ size: 14 }),
+                foregroundStyle(p.textTer),
+                lineLimit(2),
+              ]}
+            >
+              No expenses logged yet. Tap + below to add one by voice or text.
+            </SwiftText>
+          ) : (
+            <VStack
+              alignment="leading"
+              spacing={SPACE.md}
+              modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+            >
+              {groups.map(group => (
+                <VStack key={group.key} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                  <SwiftText
+                    modifiers={[
+                      font({ size: 12, weight: 'semibold' }),
+                      foregroundStyle(p.textTer),
+                      padding({ bottom: SPACE.sm }),
+                    ]}
+                  >
+                    {group.label}
+                  </SwiftText>
+                  {group.items.map((item, index) => (
+                    <NativeHomeActivityRow
+                      key={item.id}
+                      item={item}
+                      p={p}
+                      last={index === group.items.length - 1}
+                    />
+                  ))}
+                </VStack>
+              ))}
+            </VStack>
+          )}
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeHomeActivityRow({
+  item,
+  p,
+  last,
+}: {
+  item: NativeHomeActivityItem;
+  p: P;
+  last: boolean;
+}) {
+  const row = (
+    <SwiftButton
+      onPress={item.onOpen}
+      modifiers={[
+        swiftAccessibilityLabel(item.accessibilityLabel),
+        ...(item.accessibilityHint ? [swiftAccessibilityHint(item.accessibilityHint)] : []),
+      ]}
+    >
+      <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        <HStack
+          alignment="center"
+          spacing={SPACE.md}
+          modifiers={[
+            padding({ top: 14, bottom: 14 }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+          ]}
+        >
+          <SwiftImage
+            systemName={item.symbol}
+            size={15}
+            color={item.iconColor}
+            modifiers={[
+              frame({ width: 32, height: 32 }),
+              background(`${item.iconColor}24`, shapes.circle()),
+            ]}
+          />
+          <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            <SwiftText
+              modifiers={[
+                font({ size: 15, weight: 'semibold' }),
+                foregroundStyle(p.text),
+                lineLimit(1),
+                truncationMode('tail'),
+              ]}
+            >
+              {item.merchant}
+            </SwiftText>
+            <SwiftText
+              modifiers={[
+                font({ size: 12 }),
+                foregroundStyle(p.textSec),
+                lineLimit(1),
+                truncationMode('tail'),
+              ]}
+            >
+              {item.meta} · {item.time}
+            </SwiftText>
+          </VStack>
+          <Spacer minLength={SPACE.sm} />
+          <SwiftText
+            modifiers={[
+              font({ size: 15, weight: 'semibold' }),
+              foregroundStyle(p.text),
+              lineLimit(1),
+            ]}
+          >
+            {item.amountText}
+          </SwiftText>
+        </HStack>
+        {!last ? (
+          <Rectangle
+            modifiers={[
+              frame({ height: 1, maxWidth: 10000 }),
+              foregroundStyle(p.hairline),
+            ]}
+          />
+        ) : null}
+      </VStack>
+    </SwiftButton>
+  );
+
+  if (!item.onDelete) return row;
+
+  return (
+    <SwipeActions>
+      {row}
+      <SwipeActions.Actions edge="trailing" allowsFullSwipe>
+        <SwiftButton
+          label="Delete"
+          systemImage="trash"
+          role="destructive"
+          onPress={item.onDelete}
+          modifiers={[tint(OVER_DOT)]}
+        />
+      </SwipeActions.Actions>
+    </SwipeActions>
+  );
+}
+
+function NativeHomeActivitySkeleton({ p }: { p: P }) {
+  const block = (width: number, height: number, radius: number) => (
+    <RoundedRectangle
+      cornerRadius={radius}
+      modifiers={[
+        frame({ width, height }),
+        foregroundStyle(p.hairline),
+      ]}
+    />
+  );
+
+  return (
+    <VStack alignment="leading" spacing={SPACE.md} modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}>
+      {[2, 3].map((count, groupIndex) => (
+        <VStack key={groupIndex} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+          {block(70, 11, 4)}
+          {Array.from({ length: count }).map((_, index) => (
+            <VStack key={index} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+              <HStack
+                alignment="center"
+                spacing={SPACE.md}
+                modifiers={[
+                  padding({ top: 14, bottom: 14 }),
+                  frame({ maxWidth: 10000, alignment: 'leading' }),
+                ]}
+              >
+                {block(32, 32, 16)}
+                <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                  {block(index === 0 ? 108 : 86, 13, 4)}
+                  {block(index === 1 ? 76 : 112, 11, 4)}
+                </VStack>
+                <Spacer />
+                {block(62, 14, 4)}
+              </HStack>
+              {index < count - 1 ? (
+                <Rectangle
+                  modifiers={[
+                    frame({ height: 1, maxWidth: 10000 }),
+                    foregroundStyle(p.hairline),
+                  ]}
+                />
+              ) : null}
+            </VStack>
+          ))}
+        </VStack>
+      ))}
+    </VStack>
   );
 }
 
