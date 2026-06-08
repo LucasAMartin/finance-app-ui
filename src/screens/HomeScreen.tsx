@@ -70,7 +70,8 @@ import { GlassCircleButton, GlassCircleIcon, SUPPORTS_GLASS } from '../component
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { MerchantMark } from '../components/MerchantMark';
-import { transactionUsesMerchantLogo } from '../merchantLogos';
+import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
+import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { useAppFeedback } from '../AppFeedbackProvider';
@@ -374,6 +375,8 @@ interface NativeHomeActivityItem {
   amountText: string;
   symbol: SFSymbol;
   iconColor: string;
+  logoUrl?: string;
+  logoBgColor?: string | null;
   accessibilityLabel: string;
   accessibilityHint?: string;
   onOpen: () => void;
@@ -495,6 +498,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
     });
     return groups;
   }, [selectedIsCurrentMonth, transactions]);
+  const homeActivityLogoTxs = useMemo(
+    () => homeActivityGroups.flatMap(group => group.txs),
+    [homeActivityGroups],
+  );
+  const merchantLogos = useMerchantLogoMap(homeActivityLogoTxs, SUPPORTS_GLASS);
 
   const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets, categories, selectedMonthKey), [transactions, budgets, categories, selectedMonthKey]);
   const income = useMemo(() => monthlyIncome(incomes, selectedMonthKey), [incomes, selectedMonthKey]);
@@ -590,6 +598,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
         const cat = cats[tx.cat];
         const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, ledgerMembers, tx.createdByUserId);
         const canDelete = transactionsRepo.canEdit(tx);
+        const logo = transactionUsesMerchantLogo(tx) ? merchantLogos.get(merchantLogoKey(tx.merchant)) : undefined;
         return {
           id: tx.id,
           merchant: tx.merchant,
@@ -598,6 +607,8 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           amountText: `$${fmtAmount(tx.amount)}`,
           symbol: CATEGORY_SF_SYMBOL[cat?.icon ?? ''] ?? UPCOMING_FALLBACK_SYMBOL,
           iconColor: categoryGroupColor(tx.cat, categories, theme.dark),
+          logoUrl: logo?.logoUrl,
+          logoBgColor: logo?.bgColor,
           accessibilityLabel: `${tx.merchant}, ${meta}, ${tx.time}, $${fmtAmount(tx.amount)}`,
           accessibilityHint: canDelete ? 'Swipe left to delete' : undefined,
           onOpen: () => {
@@ -613,7 +624,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
         };
       }),
     }))
-  ), [cats, categories, homeActivityGroups, ledgerMembers, onDeleteTx, onOpenTx, onPrepareTx, theme.dark, transactionsRepo]);
+  ), [cats, categories, homeActivityGroups, ledgerMembers, merchantLogos, onDeleteTx, onOpenTx, onPrepareTx, theme.dark, transactionsRepo]);
 
   const handleEditTheme = () => {
     onOpenTheme();
@@ -1917,14 +1928,13 @@ function NativeHomeActivityRow({
             frame({ maxWidth: 10000, alignment: 'leading' }),
           ]}
         >
-          <SwiftImage
-            systemName={item.symbol}
-            size={15}
-            color={item.iconColor}
-            modifiers={[
-              frame({ width: 32, height: 32 }),
-              background(`${item.iconColor}24`, shapes.circle()),
-            ]}
+          <NativeMerchantMark
+            logoUrl={item.logoUrl}
+            logoBgColor={item.logoBgColor}
+            fallbackSystemName={item.symbol}
+            fallbackColor={item.iconColor}
+            fallbackBackgroundColor={`${item.iconColor}24`}
+            size={32}
           />
           <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
             <SwiftText

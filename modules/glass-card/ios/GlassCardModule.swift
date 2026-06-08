@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import ExpoUI
 
 public class GlassCardModule: Module {
   public func definition() -> ModuleDefinition {
@@ -18,5 +19,7 @@ public class GlassCardModule: Module {
 
       Events("onCardPress")
     }
+
+    ExpoUIView(NativeMerchantMarkView.self)
   }
 }

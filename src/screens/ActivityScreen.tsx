@@ -38,9 +38,42 @@ import {
   type CalendarMonthEnhanced,
   type CalendarTheme,
 } from '@marceloterreiro/flash-calendar';
-import { Button as SwiftButton, ContentUnavailableView, GlassEffectContainer, Host, Menu, Picker, RNHostView, Text as SwiftText } from '@expo/ui/swift-ui';
-import { buttonStyle, environment, glassEffect, pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
+import {
+  Button as SwiftButton,
+  ContentUnavailableView,
+  GlassEffectContainer,
+  Host,
+  HStack,
+  Image as SwiftImage,
+  Menu,
+  Picker,
+  Rectangle,
+  RNHostView,
+  Spacer,
+  SwipeActions,
+  Text as SwiftText,
+  VStack,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityHint as swiftAccessibilityHint,
+  accessibilityLabel as swiftAccessibilityLabel,
+  background,
+  buttonStyle,
+  environment,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  lineLimit,
+  padding,
+  pickerStyle,
+  shapes,
+  tag,
+  tint,
+  truncationMode,
+} from '@expo/ui/swift-ui/modifiers';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { SFSymbol } from 'sf-symbols-typescript';
 import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import { appendMemberLabel, memberDisplayName } from '../repositories/memberLabels';
@@ -64,7 +97,8 @@ import { Icon } from '../components/Icon';
 import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 import { SearchFilterBar } from '../components/SearchFilterBar';
 import { MerchantMark } from '../components/MerchantMark';
-import { transactionUsesMerchantLogo } from '../merchantLogos';
+import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
+import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
 import { Money } from '../components/shared';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
@@ -82,6 +116,49 @@ import { useTheme } from '../ThemeProvider';
 import type { WallpaperP } from '../wallpaperPalette';
 
 const GLASS_TINT_ACTIVE = 'rgba(255,255,255,0.18)';
+const NATIVE_ACTIVITY_ROW_HEIGHT = 64;
+const NATIVE_ACTIVITY_HEADER_HEIGHT = 27;
+const NATIVE_ACTIVITY_CARD_PAD_Y = LAYOUT.cardPadTop + LAYOUT.cardPadBottom;
+
+const ACTIVITY_SF_SYMBOL: Record<string, SFSymbol> = {
+  cart: 'cart',
+  fork: 'fork.knife',
+  car: 'car',
+  bag: 'bag',
+  doc: 'doc',
+  film: 'film',
+  home: 'house',
+  wallet: 'wallet.pass',
+  receipt: 'receipt',
+  cards: 'creditcard',
+  repeat: 'repeat',
+  tag: 'tag',
+  sparkle: 'sparkles',
+  cup: 'cup.and.saucer',
+  cal: 'calendar',
+  note: 'note.text',
+  chart: 'chart.bar',
+  target: 'target',
+};
+const ACTIVITY_FALLBACK_SYMBOL: SFSymbol = 'circle.grid.2x2';
+
+interface NativeActivityTxItem {
+  id: string;
+  title: string;
+  meta: string;
+  amountText: string;
+  amountColor: string;
+  symbol: SFSymbol;
+  iconColor: string;
+  logoUrl?: string;
+  logoBgColor?: string | null;
+  recurring: boolean;
+  goalContribution: boolean;
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  onOpen: () => void;
+  onDelete?: () => void;
+}
 
 type DateFilterPreset = 'today' | 'yesterday' | 'this-week' | 'this-month';
 type DateFilter = DateFilterPreset | { from: Date; to: Date } | null;
@@ -671,6 +748,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     });
     return g;
   }, [activityRows, pendingUndo?.tx.id, externalPendingDeleteId]);
+  const merchantLogos = useMerchantLogoMap(activityRows, SUPPORTS_GLASS);
 
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
   const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
@@ -762,26 +840,44 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
   );
 
   const renderActivityDay = useCallback((day: string) => (
-    <SectionCard dark={theme.dark} style={S.dayGroupCard}>
-      <DayGroup
+    SUPPORTS_GLASS ? (
+      <NativeActivityDayGroup
         day={day}
         group={grouped[day]}
         theme={theme}
         cats={cats}
         categories={categories}
         members={ledgerMembers}
+        merchantLogos={merchantLogos}
         p={p}
         onPress={handleOpenTx}
         onPrepare={handlePrepareTx}
         onDelete={handleDeleteTx}
         canEditTx={(tx) => transactionsRepo.canEdit(tx)}
-        onSwipeOpen={handleSwipeOpen}
-        onSwipeClose={handleSwipeClose}
-        scrollRef={scrollViewRef}
         avgDaySpend={avgDaySpend}
-        style={{ marginBottom: 0 }}
       />
-    </SectionCard>
+    ) : (
+      <SectionCard dark={theme.dark} style={S.dayGroupCard}>
+        <DayGroup
+          day={day}
+          group={grouped[day]}
+          theme={theme}
+          cats={cats}
+          categories={categories}
+          members={ledgerMembers}
+          p={p}
+          onPress={handleOpenTx}
+          onPrepare={handlePrepareTx}
+          onDelete={handleDeleteTx}
+          canEditTx={(tx) => transactionsRepo.canEdit(tx)}
+          onSwipeOpen={handleSwipeOpen}
+          onSwipeClose={handleSwipeClose}
+          scrollRef={scrollViewRef}
+          avgDaySpend={avgDaySpend}
+          style={{ marginBottom: 0 }}
+        />
+      </SectionCard>
+    )
   ), [
     avgDaySpend,
     categories,
@@ -793,6 +889,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     handleSwipeClose,
     handleSwipeOpen,
     ledgerMembers,
+    merchantLogos,
     p,
     theme,
     transactionsRepo,
@@ -2389,6 +2486,263 @@ const DayGroup = React.memo(function DayGroup({
     </View>
   );
 });
+
+const NativeActivityDayGroup = React.memo(function NativeActivityDayGroup({
+  day,
+  group,
+  theme,
+  cats,
+  categories,
+  members,
+  merchantLogos,
+  p,
+  onPress,
+  onPrepare,
+  onDelete,
+  canEditTx,
+  avgDaySpend,
+}: {
+  day: string;
+  group: { txs: Transaction[]; total: number };
+  theme: Theme;
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  categories: Category[];
+  members: LedgerMember[];
+  merchantLogos: Map<string, { logoUrl?: string; bgColor?: string | null }>;
+  p: WallpaperP;
+  onPress: (tx: Transaction) => void;
+  onPrepare?: (tx: Transaction) => void;
+  onDelete: (tx: Transaction) => void;
+  canEditTx: (tx: Transaction) => boolean;
+  avgDaySpend: number;
+}) {
+  const txs = group?.txs ?? [];
+  const expenseCount = txs.filter(t => t.type !== 'income').length;
+  const spendTotal = txs.filter(t => t.type !== 'income').reduce((sum, tx) => sum + tx.amount, 0);
+  const isHeavyDay = avgDaySpend > 0 && spendTotal > avgDaySpend * 2;
+  const isAboveAvg = avgDaySpend > 0 && spendTotal > avgDaySpend;
+  const dayTotalColor = isHeavyDay ? cautionText(theme.dark) : isAboveAvg ? p.text : p.textSec;
+  const label =
+    txs[0]?.when === 'today' ? 'Today'
+    : txs[0]?.when === 'yesterday' ? 'Yesterday'
+    : day;
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const hostHeight = NATIVE_ACTIVITY_CARD_PAD_Y + NATIVE_ACTIVITY_HEADER_HEIGHT + txs.length * NATIVE_ACTIVITY_ROW_HEIGHT;
+  const incomeColor = theme.dark ? GROUP_COLORS.savings.dark : GROUP_COLORS.savings.light;
+
+  const items = txs.map<NativeActivityTxItem>(tx => {
+    const cat = cats[tx.cat];
+    const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
+    const isIncome = tx.type === 'income';
+    const isGoalContribution = isGoalContributionTx(tx);
+    const baseMeta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
+    const meta = isGoalContribution ? `Goal contribution · ${baseMeta}` : baseMeta;
+    const title = isGoalContribution ? (cat?.label ? `${cat.label} contribution` : tx.merchant) : tx.merchant;
+    const canDelete = canEditTx(tx);
+    const logo = !isGoalContribution && transactionUsesMerchantLogo(tx)
+      ? merchantLogos.get(merchantLogoKey(tx.merchant))
+      : undefined;
+    return {
+      id: tx.id,
+      title,
+      meta,
+      amountText: `${isIncome ? '+' : '-'}$${tx.amount.toFixed(2)}`,
+      amountColor: isIncome ? incomeColor : p.textSec,
+      symbol: ACTIVITY_SF_SYMBOL[isGoalContribution ? 'target' : cat?.icon ?? ''] ?? ACTIVITY_FALLBACK_SYMBOL,
+      iconColor: groupColor,
+      logoUrl: logo?.logoUrl,
+      logoBgColor: logo?.bgColor,
+      recurring: !!tx.recurring,
+      goalContribution: isGoalContribution,
+      accessibilityLabel: `${title}, ${meta}, ${isIncome ? '+' : '-'}$${tx.amount.toFixed(2)}`,
+      accessibilityHint: canDelete ? 'Swipe left to delete' : undefined,
+      onOpen: () => {
+        onPrepare?.(tx);
+        onPress(tx);
+      },
+      onDelete: canDelete
+        ? () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            onDelete(tx);
+          }
+        : undefined,
+    };
+  });
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: hostHeight, marginBottom: SPACE.lg }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={0}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <HStack
+            alignment="center"
+            spacing={SPACE.md}
+            modifiers={[
+              padding({ bottom: SPACE.sm }),
+              frame({ height: NATIVE_ACTIVITY_HEADER_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
+            ]}
+          >
+            <SwiftText
+              modifiers={[
+                font({ size: 12, weight: 'semibold' }),
+                foregroundStyle(p.text),
+              ]}
+            >
+              {label}
+            </SwiftText>
+            <Spacer />
+            {expenseCount > 1 ? (
+              <SwiftText
+                modifiers={[
+                  font({ size: 14, weight: 'semibold' }),
+                  foregroundStyle(dayTotalColor),
+                  lineLimit(1),
+                ]}
+              >
+                ${spendTotal.toFixed(2)} total
+              </SwiftText>
+            ) : null}
+          </HStack>
+
+          <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            {items.map((item, index) => (
+              <NativeActivityTxRow
+                key={item.id}
+                item={item}
+                p={p}
+                last={index === items.length - 1}
+              />
+            ))}
+          </VStack>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+});
+
+function NativeActivityTxRow({
+  item,
+  p,
+  last,
+}: {
+  item: NativeActivityTxItem;
+  p: WallpaperP;
+  last: boolean;
+}) {
+  const row = (
+    <SwiftButton
+      onPress={item.onOpen}
+      modifiers={[
+        swiftAccessibilityLabel(item.accessibilityLabel),
+        ...(item.accessibilityHint ? [swiftAccessibilityHint(item.accessibilityHint)] : []),
+      ]}
+    >
+      <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        <HStack
+          alignment="center"
+          spacing={SPACE.md}
+          modifiers={[
+            frame({ height: NATIVE_ACTIVITY_ROW_HEIGHT - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' }),
+          ]}
+        >
+          <NativeMerchantMark
+            logoUrl={item.logoUrl}
+            logoBgColor={item.logoBgColor}
+            fallbackSystemName={item.symbol}
+            fallbackColor={item.iconColor}
+            fallbackBackgroundColor={`${item.iconColor}24`}
+            size={32}
+          />
+          <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            <HStack alignment="center" spacing={SPACE.xs}>
+              <SwiftText
+                modifiers={[
+                  font({ size: 15 }),
+                  foregroundStyle(p.text),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                ]}
+              >
+                {item.title}
+              </SwiftText>
+              {item.recurring ? (
+                <SwiftImage systemName="repeat" size={11} color={p.textTer} />
+              ) : null}
+              {item.goalContribution ? (
+                <SwiftImage systemName="target" size={11} color={item.iconColor} />
+              ) : null}
+            </HStack>
+            <SwiftText
+              modifiers={[
+                font({ size: 12 }),
+                foregroundStyle(p.textSec),
+                lineLimit(1),
+                truncationMode('tail'),
+              ]}
+            >
+              {item.meta}
+            </SwiftText>
+          </VStack>
+          <Spacer minLength={SPACE.sm} />
+          <SwiftText
+            modifiers={[
+              font({ size: 13, weight: 'medium' }),
+              foregroundStyle(item.amountColor),
+              lineLimit(1),
+            ]}
+          >
+            {item.amountText}
+          </SwiftText>
+        </HStack>
+        {!last ? (
+          <Rectangle
+            modifiers={[
+              frame({ height: 1, maxWidth: 10000 }),
+              foregroundStyle(p.hairline),
+            ]}
+          />
+        ) : null}
+      </VStack>
+    </SwiftButton>
+  );
+
+  if (!item.onDelete) return row;
+
+  return (
+    <SwipeActions>
+      {row}
+      <SwipeActions.Actions edge="trailing" allowsFullSwipe>
+        <SwiftButton
+          label="Delete"
+          systemImage="trash"
+          role="destructive"
+          onPress={item.onDelete}
+          modifiers={[tint(OVER_DOT)]}
+        />
+      </SwipeActions.Actions>
+    </SwipeActions>
+  );
+}
 
 // ─── SwipeRow ────────────────────────────────────────────────────────────────
 

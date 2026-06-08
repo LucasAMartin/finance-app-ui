@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { useRepositories, useRepositoryItem } from './repositories/RepositoryProvider';
+import { useEffect, useMemo } from 'react';
+import { useRepositories, useRepositoryItem, useRepositoryList } from './repositories/RepositoryProvider';
 import type { MerchantLogo, MerchantLogosRepo, Transaction } from './repositories/types';
 import {
   ERROR_RETRY_MS,
@@ -123,6 +123,57 @@ export function useMerchantLogo(merchant: string, enabled = true): MerchantLogo 
 
   if (canLookup && entry?.status === 'resolved' && isSafeLogoUrl(entry.logoUrl) && !isExpired(entry)) return entry;
   return undefined;
+}
+
+export function useMerchantLogoMap(transactions: Transaction[], enabled = true): Map<string, MerchantLogo> {
+  const { merchantLogosRepo } = useRepositories();
+  const entries = useRepositoryList(merchantLogosRepo);
+
+  const entriesByKey = useMemo(() => {
+    const next = new Map<string, MerchantLogo>();
+    entries.forEach(entry => next.set(entry.merchantKey, entry));
+    return next;
+  }, [entries]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const seen = new Set<string>();
+    transactions.forEach(tx => {
+      if (!transactionUsesMerchantLogo(tx)) return;
+      const key = merchantLogoKey(tx.merchant);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+
+      const entry = entriesByKey.get(key);
+      if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
+        merchantLogosRepo.create({
+          id: key,
+          merchantKey: key,
+          displayName: tx.merchant.trim(),
+          status: 'error',
+          source: entry.source ?? RESOLVED_SOURCE,
+          lastCheckedAt: new Date().toISOString(),
+          retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
+          failureCount: entry.failureCount + 1,
+          meta: { error: 'unsafe_logo_url_rejected' },
+        });
+        return;
+      }
+
+      resolveAndCacheMerchantLogo(tx.merchant, merchantLogosRepo, entry).catch(() => {});
+    });
+  }, [enabled, entriesByKey, merchantLogosRepo, transactions]);
+
+  return useMemo(() => {
+    const next = new Map<string, MerchantLogo>();
+    entries.forEach(entry => {
+      if (entry.status === 'resolved' && isSafeLogoUrl(entry.logoUrl) && !isExpired(entry)) {
+        next.set(entry.merchantKey, entry);
+      }
+    });
+    return next;
+  }, [entries]);
 }
 
 export function useInvalidateMerchantLogo() {
