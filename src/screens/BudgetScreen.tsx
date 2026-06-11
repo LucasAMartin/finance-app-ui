@@ -18,7 +18,7 @@ import {
   Easing,
 } from 'react-native';
 
-const { height: SCREEN_H } = Dimensions.get('window');
+const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 'react-native-gesture-handler';
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
@@ -40,7 +40,7 @@ import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
-import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
+import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA, ONMEDIA_BORDER_LIGHT, WallpaperP as P } from '../wallpaperPalette';
 import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUtils';
 import { memberDisplayName } from '../repositories/memberLabels';
@@ -57,15 +57,39 @@ import {
 import {
   Button as SwiftButton,
   DatePicker,
+  GlassEffectContainer,
+  HStack,
   Menu,
   Host,
+  Image as SwiftImage,
+  ProgressView,
+  Rectangle,
+  Spacer,
+  SwipeActions,
+  Text as SwiftText,
+  VStack,
 } from '@expo/ui/swift-ui';
 import {
+  accessibilityHint as swiftAccessibilityHint,
+  accessibilityLabel as swiftAccessibilityLabel,
+  background,
+  clipped,
   datePickerStyle,
-  tint,
   environment,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  lineLimit,
+  opacity,
+  padding,
+  progressViewStyle,
+  shapes,
+  tint,
+  truncationMode,
 } from '@expo/ui/swift-ui/modifiers';
 import { useTheme } from '../ThemeProvider';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
 interface Props {
   theme: Theme;
@@ -118,7 +142,7 @@ const initBudgets = (groups: SpendGroup[], bills: Bill[], categories: Category[]
   return out;
 };
 
-const ICON_SF_SYMBOL: Record<string, string> = {
+const ICON_SF_SYMBOL: Record<string, SFSymbol> = {
   cart:    'cart',
   fork:    'fork.knife',
   car:     'car',
@@ -141,6 +165,13 @@ const ICON_SF_SYMBOL: Record<string, string> = {
   sun:     'sun.max',
   moon:    'moon',
 };
+const BUDGET_FALLBACK_SYMBOL: SFSymbol = 'tag';
+const NATIVE_BUDGET_ALLOCATION_HEIGHT = 72;
+const NATIVE_BUDGET_ALLOCATION_BAR_W = SCREEN_W - LAYOUT.screenGutter * 2 - LAYOUT.cardPadX * 2;
+const NATIVE_BUDGET_GROUP_ROW_HEIGHT = 62;
+const NATIVE_BUDGET_GROUP_HEADER_HEIGHT = 82;
+const NATIVE_BUDGET_GROUP_RECURRING_HEIGHT = 34;
+const NATIVE_BUDGET_GROUP_ADD_HEIGHT = 48;
 
 const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   needs: { label: 'Needs', icon: 'home' },
@@ -205,6 +236,24 @@ const parseAmountDraft = (text: string): number | null => {
   if (!/^\d*\.?\d{0,2}$/.test(clean) || clean === '' || clean === '.') return null;
   const v = Number(clean);
   return Number.isFinite(v) && v >= 0 ? v : null;
+};
+
+const amountToBudgetDraft = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  return value % 1 === 0 ? String(Math.round(value)) : String(Number(value.toFixed(2)));
+};
+
+const applyBudgetKeypadKey = (value: string, key: KeypadKey): string => {
+  const digits = (value.split('.')[0] || '').replace(/\D/g, '').replace(/^0+/, '') || '0';
+  if (key === 'back') return digits.length <= 1 ? '' : digits.slice(0, -1);
+  if (key === '00') {
+    if (digits === '0') return '0';
+    const next = `${digits}00`;
+    return next.length > 6 ? value : next;
+  }
+  if (digits === '0' && key === '0') return '0';
+  const next = digits === '0' ? key : `${digits}${key}`;
+  return next.length > 6 ? value : next;
 };
 
 function RotatingChevron({ open, color }: { open: boolean; color: string }) {
@@ -402,6 +451,500 @@ function CollapsingRow({ removing, children }: { removing: boolean; children: Re
   );
 }
 
+type NativeBudgetRowItem = {
+  id: string;
+  kind: 'category' | 'custom' | 'bill';
+  label: string;
+  meta?: string;
+  icon: SFSymbol;
+  color: string;
+  amount: number;
+  editable: boolean;
+  active: boolean;
+  draft: string;
+  goal?: {
+    pct: number;
+    status: string;
+    statusColor: string;
+    remaining: number;
+  };
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  onOpen?: () => void;
+  onEditAmount: () => void;
+  onDelete?: () => void;
+};
+
+function NativeBudgetAllocationCard({
+  theme,
+  p,
+  needsFrac,
+  wantsFrac,
+  savingsFrac,
+  needsPct,
+  wantsPct,
+  savingsPct,
+  needsCol,
+  wantsCol,
+  savingsCol,
+}: {
+  theme: Theme;
+  p: P;
+  needsFrac: number;
+  wantsFrac: number;
+  savingsFrac: number;
+  needsPct: number;
+  wantsPct: number;
+  savingsPct: number;
+  needsCol: string;
+  wantsCol: string;
+  savingsCol: string;
+}) {
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const needsW = Math.max(0, Math.min(NATIVE_BUDGET_ALLOCATION_BAR_W, NATIVE_BUDGET_ALLOCATION_BAR_W * needsFrac));
+  const wantsW = Math.max(0, Math.min(NATIVE_BUDGET_ALLOCATION_BAR_W - needsW, NATIVE_BUDGET_ALLOCATION_BAR_W * wantsFrac));
+  const savingsW = Math.max(0, Math.min(NATIVE_BUDGET_ALLOCATION_BAR_W - needsW - wantsW, NATIVE_BUDGET_ALLOCATION_BAR_W * savingsFrac));
+  const legendItems = [
+    { key: 'Needs', color: needsCol, pct: needsPct, pctColor: needsPct > 50 ? OVER_DOT : p.text },
+    { key: 'Wants', color: wantsCol, pct: wantsPct, pctColor: wantsPct > 30 ? OVER_DOT : p.text },
+    { key: 'Savings', color: savingsCol, pct: savingsPct, pctColor: savingsPct >= 20 ? savingsCol : p.text },
+  ];
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: NATIVE_BUDGET_ALLOCATION_HEIGHT }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={SPACE.md}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <VStack
+            alignment="leading"
+            spacing={0}
+            modifiers={[
+              frame({ width: NATIVE_BUDGET_ALLOCATION_BAR_W, height: 7, alignment: 'leading' }),
+              background(p.trackBg, shapes.roundedRectangle({ cornerRadius: 4 })),
+              clipped(),
+            ]}
+          >
+            <HStack alignment="center" spacing={0} modifiers={[frame({ width: NATIVE_BUDGET_ALLOCATION_BAR_W, height: 7, alignment: 'leading' })]}>
+              {needsW > 0 ? <Rectangle modifiers={[frame({ width: needsW, height: 7 }), foregroundStyle(needsCol)]} /> : null}
+              {wantsW > 0 ? <Rectangle modifiers={[frame({ width: wantsW, height: 7 }), foregroundStyle(wantsCol)]} /> : null}
+              {savingsW > 0 ? <Rectangle modifiers={[frame({ width: savingsW, height: 7 }), foregroundStyle(savingsCol)]} /> : null}
+            </HStack>
+          </VStack>
+
+          <HStack
+            alignment="center"
+            spacing={0}
+            modifiers={[frame({ width: NATIVE_BUDGET_ALLOCATION_BAR_W, alignment: 'leading' })]}
+          >
+            <NativeBudgetAllocationLegendItem item={legendItems[0]} p={p} />
+            <Spacer />
+            <NativeBudgetAllocationLegendItem item={legendItems[1]} p={p} />
+            <Spacer />
+            <NativeBudgetAllocationLegendItem item={legendItems[2]} p={p} />
+          </HStack>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeBudgetAllocationLegendItem({
+  item,
+  p,
+}: {
+  item: { key: string; color: string; pct: number; pctColor: string };
+  p: P;
+}) {
+  return (
+    <HStack alignment="center" spacing={SPACE.xs}>
+      <SwiftText modifiers={[font({ size: 10 }), foregroundStyle(item.color)]}>●</SwiftText>
+      <SwiftText modifiers={[font({ size: 10, weight: 'medium' }), foregroundStyle(p.textSec), lineLimit(1)]}>
+        {item.key}
+      </SwiftText>
+      <SwiftText modifiers={[font({ size: 13, weight: 'semibold' }), foregroundStyle(item.pctColor), lineLimit(1)]}>
+        {item.pct}%
+      </SwiftText>
+    </HStack>
+  );
+}
+
+function NativeBudgetGroupCard({
+  theme,
+  p,
+  label,
+  color,
+  icon,
+  total,
+  target,
+  targetPct,
+  delta,
+  isOverTarget,
+  open,
+  rows,
+  onToggle,
+  onAddCategory,
+}: {
+  theme: Theme;
+  p: P;
+  label: string;
+  color: string;
+  icon: SFSymbol;
+  total: number;
+  target: number;
+  targetPct: number;
+  delta: number;
+  isOverTarget: boolean;
+  open: boolean;
+  rows: NativeBudgetRowItem[];
+  onToggle: () => void;
+  onAddCategory: () => void;
+}) {
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const progress = target > 0 ? Math.min(total / target, 1) : 0;
+  const statusColor = isOverTarget ? OVER_DOT : p.textSec;
+  const recurringDividerCount = open && rows.some(row => row.kind === 'bill') ? 1 : 0;
+  const detailsHeight = open
+    ? rows.length * NATIVE_BUDGET_GROUP_ROW_HEIGHT + recurringDividerCount * NATIVE_BUDGET_GROUP_RECURRING_HEIGHT
+    : 0;
+  const hostHeight =
+    LAYOUT.cardPadTop +
+    NATIVE_BUDGET_GROUP_HEADER_HEIGHT +
+    detailsHeight +
+    NATIVE_BUDGET_GROUP_ADD_HEIGHT +
+    LAYOUT.cardPadBottom;
+  let sawBill = false;
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: hostHeight }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={0}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <SwiftButton
+            onPress={onToggle}
+            modifiers={[
+              swiftAccessibilityLabel(`${open ? 'Collapse' : 'Expand'} ${label} budget group`),
+              swiftAccessibilityHint(`${label} target is ${fmtPct(targetPct)}`),
+            ]}
+          >
+            <VStack
+              alignment="leading"
+              spacing={SPACE.sm}
+              modifiers={[
+                frame({ height: NATIVE_BUDGET_GROUP_HEADER_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
+              ]}
+            >
+              <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                <SwiftImage
+                  systemName={icon}
+                  size={15}
+                  color={color}
+                  modifiers={[
+                    frame({ width: 34, height: 34 }),
+                    background(`${color}22`, shapes.roundedRectangle({ cornerRadius: 17 })),
+                  ]}
+                />
+                <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                  <SwiftText modifiers={[font({ size: 16, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+                    {label}
+                  </SwiftText>
+                  <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(statusColor), lineLimit(1)]}>
+                    {isOverTarget ? `$${fmtMoney(delta)} over target` : `$${fmtMoney(target)} target · ${fmtPct(targetPct)}`}
+                  </SwiftText>
+                </VStack>
+                <SwiftText modifiers={[font({ size: 18, weight: 'semibold' }), foregroundStyle(color), lineLimit(1)]}>
+                  ${fmtMoney(total)}
+                </SwiftText>
+                <SwiftImage
+                  systemName={open ? 'chevron.up' : 'chevron.down'}
+                  size={12}
+                  color={p.textTer}
+                />
+              </HStack>
+              <ProgressView
+                value={progress}
+                modifiers={[
+                  progressViewStyle('linear'),
+                  tint(isOverTarget ? OVER_DOT : color),
+                  frame({ maxWidth: 10000 }),
+                ]}
+              />
+            </VStack>
+          </SwiftButton>
+
+          <VStack
+            alignment="leading"
+            spacing={0}
+            modifiers={[
+              frame({ height: detailsHeight, maxWidth: 10000, alignment: 'topLeading' }),
+              clipped(),
+            ]}
+          >
+            {rows.map((row, index) => {
+              const showRecurringDivider = row.kind === 'bill' && !sawBill;
+              if (row.kind === 'bill') sawBill = true;
+              const last = index === rows.length - 1;
+              return (
+                <VStack key={row.id} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                  {showRecurringDivider ? (
+                    <HStack
+                      alignment="center"
+                      spacing={SPACE.sm}
+                      modifiers={[frame({ height: NATIVE_BUDGET_GROUP_RECURRING_HEIGHT, maxWidth: 10000, alignment: 'leading' })]}
+                    >
+                      <SwiftImage systemName="repeat" size={11} color={p.textTer} />
+                      <SwiftText modifiers={[font({ size: 11, weight: 'semibold' }), foregroundStyle(p.textTer)]}>
+                        Recurring
+                      </SwiftText>
+                    </HStack>
+                  ) : null}
+                  <NativeBudgetRow
+                    item={row}
+                    p={p}
+                    last={last}
+                  />
+                </VStack>
+              );
+            })}
+          </VStack>
+
+          <Rectangle
+            modifiers={[
+              frame({ height: open && rows.length > 0 ? 1 : 0, maxWidth: 10000 }),
+              foregroundStyle(p.hairline),
+              opacity(open && rows.length > 0 ? 1 : 0),
+            ]}
+          />
+          <SwiftButton
+            onPress={onAddCategory}
+            modifiers={[swiftAccessibilityLabel(`Add category to ${label}`), tint(color)]}
+          >
+            <HStack
+              alignment="center"
+              spacing={SPACE.sm}
+              modifiers={[
+                frame({ height: NATIVE_BUDGET_GROUP_ADD_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
+              ]}
+            >
+              <SwiftImage systemName="plus" size={13} color={color} />
+              <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(color)]}>
+                Add category
+              </SwiftText>
+            </HStack>
+          </SwiftButton>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeBudgetRow({
+  item,
+  p,
+  last,
+}: {
+  item: NativeBudgetRowItem;
+  p: P;
+  last: boolean;
+}) {
+  const labelContent = (
+    <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+      <SwiftImage
+        systemName={item.icon}
+        size={14}
+        color={item.color}
+        modifiers={[
+          frame({ width: 32, height: 32 }),
+          background(`${item.color}24`, shapes.roundedRectangle({ cornerRadius: 16 })),
+        ]}
+      />
+      <VStack alignment="leading" spacing={3} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        <SwiftText
+          modifiers={[
+            font({ size: 14, weight: 'medium' }),
+            foregroundStyle(p.text),
+            lineLimit(1),
+            truncationMode('tail'),
+          ]}
+        >
+          {item.label}
+        </SwiftText>
+        {item.goal ? (
+          <HStack alignment="center" spacing={SPACE.xs} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            <ProgressView
+              value={Math.min(item.goal.pct / 100, 1)}
+              modifiers={[
+                progressViewStyle('linear'),
+                tint(item.color),
+                frame({ width: 54 }),
+              ]}
+            />
+            <SwiftText modifiers={[font({ size: 11 }), foregroundStyle(item.goal.statusColor), lineLimit(1)]}>
+              {item.goal.status}
+            </SwiftText>
+            <SwiftText modifiers={[font({ size: 11 }), foregroundStyle(p.textTer), lineLimit(1)]}>
+              · ${fmtMoney(item.goal.remaining)} to go
+            </SwiftText>
+          </HStack>
+        ) : item.meta ? (
+          <SwiftText
+            modifiers={[
+              font({ size: 12 }),
+              foregroundStyle(p.textSec),
+              lineLimit(1),
+              truncationMode('tail'),
+            ]}
+          >
+            {item.meta}
+          </SwiftText>
+        ) : null}
+      </VStack>
+    </HStack>
+  );
+  const rowLabel = item.onOpen ? (
+    <SwiftButton
+      onPress={item.onOpen}
+      modifiers={[
+        frame({ maxWidth: 10000, alignment: 'leading' }),
+        swiftAccessibilityLabel(item.accessibilityLabel),
+        ...(item.accessibilityHint ? [swiftAccessibilityHint(item.accessibilityHint)] : []),
+      ]}
+    >
+      {labelContent}
+    </SwiftButton>
+  ) : (
+    <HStack
+      alignment="center"
+      spacing={SPACE.md}
+      modifiers={[
+        frame({ maxWidth: 10000, alignment: 'leading' }),
+        opacity(0.9),
+      ]}
+    >
+      {labelContent}
+    </HStack>
+  );
+
+  const row = (
+    <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+      <HStack
+        alignment="center"
+        spacing={SPACE.md}
+        modifiers={[
+          frame({ height: NATIVE_BUDGET_GROUP_ROW_HEIGHT - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' }),
+        ]}
+      >
+        {rowLabel}
+        <NativeBudgetAmountButton item={item} p={p} />
+      </HStack>
+      {!last ? (
+        <Rectangle
+          modifiers={[
+            frame({ height: 1, maxWidth: 10000 }),
+            foregroundStyle(p.hairline),
+          ]}
+        />
+      ) : null}
+    </VStack>
+  );
+
+  if (!item.onDelete) return row;
+
+  return (
+    <SwipeActions>
+      {row}
+      <SwipeActions.Actions edge="trailing" allowsFullSwipe>
+        <SwiftButton
+          label="Delete"
+          systemImage="trash"
+          role="destructive"
+          onPress={item.onDelete}
+          modifiers={[tint(OVER_DOT)]}
+        />
+      </SwipeActions.Actions>
+    </SwipeActions>
+  );
+}
+
+function NativeBudgetAmountButton({ item, p }: { item: NativeBudgetRowItem; p: P }) {
+  const amountText = item.active
+    ? `$${formatDraft(item.draft)}`
+    : `$${fmtAmt(item.amount)}`;
+  const amountColor = item.active ? item.color : p.textSec;
+  const content = (
+    <VStack alignment="trailing" spacing={3} modifiers={[opacity(item.editable ? 1 : 0.58)]}>
+      <SwiftText
+        modifiers={[
+          font({ size: 15, weight: 'semibold' }),
+          foregroundStyle(amountColor),
+          lineLimit(1),
+        ]}
+      >
+        {amountText}
+      </SwiftText>
+      <Rectangle
+        modifiers={[
+          frame({ width: 54, height: 1 }),
+          foregroundStyle(item.editable ? (item.active ? item.color : p.hairline) : 'rgba(0,0,0,0)'),
+        ]}
+      />
+    </VStack>
+  );
+
+  if (!item.editable) return content;
+
+  return (
+    <SwiftButton
+      onPress={item.onEditAmount}
+      modifiers={[
+        swiftAccessibilityLabel(`Edit ${item.label} budget`),
+        tint(item.color),
+      ]}
+    >
+      {content}
+    </SwiftButton>
+  );
+}
+
 // Allocation bar segments
 function AllocationBar({ needsFrac, wantsFrac, savingsFrac, trackBg, needsCol, wantsCol, savingsCol, height = 8, accessibilityLabel, tickFracs }: {
   needsFrac: number; wantsFrac: number; savingsFrac: number;
@@ -593,19 +1136,15 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
 
   // ── Scroll-driven sticky pin ──────────────────────────────────
-  // When the allocation card meets the header it's replaced by a full-bleed
-  // pinned bar. The geometry snaps (no per-frame width/radius animation) so fast
-  // flings stay smooth; a one-shot, fully-native opacity + rise gives it a clean
-  // settle so the swap reads as intentional rather than abrupt.
+  // The allocation card stays in the scroll layout, then translates by the
+  // scrolled-past distance once it reaches the top of the scroll viewport.
   const sectionStackYRef = useRef(0);
   const allocCardYRef = useRef(0);
-  const allocCardHRef = useRef(0);
-  const [headerH, setHeaderH] = useState(0);
-  // The pinned overlay only intercepts touches once it's actually pinned;
-  // before that it's invisible and must let the hero region stay tappable.
-  const [pinned, setPinned] = useState(false);
-  const pinnedRef = useRef(false);
-  const pinAnim = useRef(new Animated.Value(0)).current;
+  const [allocStickyY, setAllocStickyY] = useState(0);
+  const updateAllocStickyY = useCallback(() => {
+    const next = sectionStackYRef.current + allocCardYRef.current;
+    setAllocStickyY(prev => Math.abs(prev - next) < 0.5 ? prev : next);
+  }, []);
 
   // Native-driven scroll position for the wallpaper parallax. handleScroll still
   // runs as the JS listener to drive the (layout-dependent) pin state.
@@ -617,34 +1156,20 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
+  const allocationStickyTranslateY = allocStickyY > 0
+    ? scrollY.interpolate({
+        inputRange: [0, allocStickyY, allocStickyY + 1],
+        outputRange: [0, 0, 1],
+        extrapolate: 'extend',
+      })
+    : 0;
 
   // Latest content offset, mirrored for the keypad's scroll-into-view math.
   const scrollOffsetRef = useRef(0);
   const handleScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
     const y = e.nativeEvent.contentOffset.y;
     scrollOffsetRef.current = y;
-    const cardAbsY = sectionStackYRef.current + allocCardYRef.current;
-    // 4px hysteresis so the pin doesn't jitter when you hover right on the line.
-    const isPinned = pinnedRef.current ? y > cardAbsY - 4 : y > cardAbsY + 4;
-    if (isPinned !== pinnedRef.current) {
-      pinnedRef.current = isPinned;
-      setPinned(isPinned);
-    }
   }, []);
-
-  useEffect(() => {
-    // One-shot, fully native (opacity + transform) — no layout work per frame.
-    Animated.timing(pinAnim, {
-      toValue: pinned ? 1 : 0,
-      duration: pinned ? 220 : 150,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [pinned, pinAnim]);
-
-  const stickyOpacity    = pinAnim;
-  const stickyTranslateY = pinAnim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] });
-  const allocCardOpacity = pinAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
 
   // ── Budget state ──────────────────────────────────────────────
   const [income, setIncome] = useState(initialIncome);
@@ -667,6 +1192,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   // The live draft lives in an external store (not state) so keypresses repaint
   // only the active field, not this whole screen — see DraftContext / LiveDraftText.
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [nativeDraft, setNativeDraft] = useState('');
   const draftStore = useRef<{ value: string; subs: Set<() => void> }>({ value: '', subs: new Set() }).current;
   const subscribeDraft = useCallback((cb: () => void) => {
     draftStore.subs.add(cb);
@@ -913,7 +1439,9 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     // don't blink between rows.
     if (editingKey && editingKey !== key) flushEditDraft(editingKey, draftStore.value);
     editingKeyRef.current = key;
-    setDraft(value > 0 ? String(value) : '');
+    const initialDraft = amountToBudgetDraft(value);
+    setDraft(initialDraft);
+    if (SUPPORTS_GLASS) setNativeDraft(initialDraft);
     setEditingKey(key);
     if (!wasOpen) slideKeypad(true);
   };
@@ -921,7 +1449,9 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   // A keypress mutates the live draft only — no screen-level state changes, so
   // only LiveDraftText repaints.
   const handleKeypadKey = useCallback((k: KeypadKey) => {
-    setDraft(applyKeypadKey(draftStore.value, k));
+    const next = applyBudgetKeypadKey(draftStore.value, k);
+    setDraft(next);
+    if (SUPPORTS_GLASS) setNativeDraft(next);
   }, [setDraft, draftStore]);
 
   // Lift the tapped row above the keypad if the pad would cover it.
@@ -943,6 +1473,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     flushEditDraft(editingKeyRef.current, draftStore.value);
     editingKeyRef.current = null;
     setEditingKey(null);
+    if (SUPPORTS_GLASS) setNativeDraft('');
   };
 
   // A tap anywhere in the content closes the keypad — but a tap on another amount
@@ -1332,8 +1863,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
   // Inline in allocationBarBody — legendItems removed after distillation.
 
-  // Shared allocation-card body — rendered identically by both the in-scroll
-  // card and the pinned overlay so the hand-off is a seamless swap, not a fade.
+  // Shared allocation-card body — reused by the RN fallback path. The iOS 26
+  // path renders an equivalent native Liquid Glass bar.
   // Only the bar + legend animates — the income button lives in its own card below.
   const allocationBarBody = useMemo(() => {
     // One compliance signal per group: pct colored by on-track vs over/short.
@@ -1369,6 +1900,27 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const billSheetRef = useRef<BillSheetHandle>(null);
 
   const stickyBorderColor = theme.dark ? MEDIA.hairline : ONMEDIA_BORDER_LIGHT;
+  const renderAllocationCard = () => (
+    SUPPORTS_GLASS ? (
+      <NativeBudgetAllocationCard
+        theme={theme}
+        p={p}
+        needsFrac={needsFrac}
+        wantsFrac={wantsFrac}
+        savingsFrac={savingsFrac}
+        needsPct={_needsPct}
+        wantsPct={_wantsPct}
+        savingsPct={_savingsPct}
+        needsCol={needsCol}
+        wantsCol={wantsCol}
+        savingsCol={savingsCol}
+      />
+    ) : (
+      <SectionCard dark={theme.dark}>
+        {allocationBarBody}
+      </SectionCard>
+    )
+  );
 
   return (
     <DraftContext.Provider value={draftContextValue}>
@@ -1421,7 +1973,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
           {/* Header */}
           <View
             style={[styles.header, { paddingTop: insets.top + 8 }]}
-            onLayout={e => setHeaderH(e.nativeEvent.layout.height)}
           >
             {SUPPORTS_GLASS ? (
               <GlassCircleButton
@@ -1446,30 +1997,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
             <ThemeToggle />
           </View>
 
-          {/* Pinned copy — same body as the in-scroll card; takes over at the pin
-              line and grows edge-to-edge. pointerEvents gated so the hero stays
-              tappable while this is still invisible above it. */}
-          <Animated.View
-            pointerEvents={pinned ? 'auto' : 'none'}
-            style={{
-              position: 'absolute',
-              top: headerH,
-              left: 0, right: 0,
-              zIndex: 5,
-              opacity: stickyOpacity,
-              transform: [{ translateY: stickyTranslateY }],
-            }}
-          >
-            <BlurView
-              intensity={theme.dark ? 70 : 100}
-              tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-            >
-              <View style={[styles.stickyCardInner, { borderColor: stickyBorderColor }]}>
-                {allocationBarBody}
-              </View>
-            </BlurView>
-          </Animated.View>
-
           {/* Scrollable content */}
           <AnimatedGHScrollView
             ref={scrollViewRef}
@@ -1487,7 +2014,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
             <View
               style={styles.sectionStack}
-              onLayout={e => { sectionStackYRef.current = e.nativeEvent.layout.y; }}
+              onLayout={e => {
+                sectionStackYRef.current = e.nativeEvent.layout.y;
+                updateAllocStickyY();
+              }}
             >
               {/* Budget hero — open on the wallpaper, rhymes with Home */}
               <View
@@ -1496,7 +2026,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 {isPastMonth && (
                   <View style={[styles.pastMonthBanner, { backgroundColor: 'rgba(8,6,20,0.32)', borderColor: pWallpaper.hairline }]}>
                     <Text style={[TYPE.caption, { color: pWallpaper.textSec }]} numberOfLines={1}>
-                      Viewing {monthLabel(selectedMonth)} — editing historical data
+                      Viewing {monthLabel(selectedMonth)}, editing historical data
                     </Text>
                   </View>
                 )}
@@ -1541,20 +2071,20 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                     </Menu>
                   </Host>
                 </View>
-
               </View>
 
-              {/* Allocation bar card — animated sticky */}
+              {/* Allocation bar card — pins at the top once scrolled past */}
               <Animated.View
                 onLayout={e => {
                   allocCardYRef.current = e.nativeEvent.layout.y;
-                  allocCardHRef.current = e.nativeEvent.layout.height;
+                  updateAllocStickyY();
                 }}
-                style={{ opacity: allocCardOpacity }}
+                style={[
+                  styles.allocationStickyCard,
+                  { transform: [{ translateY: allocationStickyTranslateY }] },
+                ]}
               >
-                <SectionCard dark={theme.dark}>
-                  {allocationBarBody}
-                </SectionCard>
+                {renderAllocationCard()}
               </Animated.View>
 
               {/* Copy-from-previous-month prompt — shown when current month has no budgets */}
@@ -1595,6 +2125,125 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 const groupBills = (billsByGroup[g.key] ?? []).filter(b => !removedBills.has(b.id));
                 const hasRecurringSection = groupBills.length > 0;
                 const isCollapsed = collapsedGroups.has(g.key);
+                const beginAddCategory = () => {
+                  setAddingForGroup(g.key);
+                  setCategoryGroupDraft(g.key as GroupKey);
+                  setCategoryLabelDraft('');
+                  setCategoryIconDraft('tag');
+                  setCategoryGoalTarget('');
+                  setCategoryGoalSaved('');
+                  setCategoryBudgetDraft('');
+                  setCategoryGoalDeadline('');
+                  setCategoryNotes('');
+                  setDuplicateNameError(false);
+                  setCategoryFormError('');
+                };
+
+                if (SUPPORTS_GLASS) {
+                  const nativeRows: NativeBudgetRowItem[] = [
+                    ...visibleOrigSubs.map(sub => {
+                      const rowKey = bKey(g.key, sub.label);
+                      const subCat = categories.find(c => c.id === sub.cat);
+                      const subGoal = subCat ? goalFromCategory(subCat) : null;
+                      const subGoalPct = subGoal ? goalProgressPct(subGoal) : 0;
+                      const subGoalStatus = subGoal ? statusFor(subGoal) : null;
+                      const subGoalStatusColor = subGoalStatus?.tone === 'caution'
+                        ? (theme.dark ? cautionText(true) : OVER_DOT)
+                        : subGoalStatus?.tone === 'good'
+                          ? groupColor
+                          : p.textTer;
+                      const subBudget = budgets[rowKey] ?? sub.budget;
+                      const canEditRow = canEditBudgetKey(rowKey) && canEditCategoryId(sub.cat);
+                      return {
+                        id: sub.cat,
+                        kind: 'category' as const,
+                        label: sub.label,
+                        icon: ICON_SF_SYMBOL[sub.icon] ?? BUDGET_FALLBACK_SYMBOL,
+                        color: groupColor,
+                        amount: subBudget,
+                        editable: canEditRow,
+                        active: editingKey === rowKey,
+                        draft: editingKey === rowKey ? nativeDraft : '',
+                        goal: subGoal
+                          ? {
+                              pct: subGoalPct,
+                              status: subGoalStatus?.label ?? 'Goal',
+                              statusColor: subGoalStatusColor,
+                              remaining: goalRemaining(subGoal),
+                            }
+                          : undefined,
+                        accessibilityLabel: `Edit ${sub.label} category`,
+                        accessibilityHint: canEditRow ? 'Swipe left to delete' : undefined,
+                        onOpen: () => openCategoryEditor(sub.cat),
+                        onEditAmount: () => startAmountEdit(rowKey, subBudget),
+                        onDelete: canEditRow ? () => handleRemoveSub(g.key, sub) : undefined,
+                      };
+                    }),
+                    ...customs.map(sub => {
+                      const rowKey = bKey(g.key, sub.label);
+                      const customCat = categories.find(c => c.group === (g.key as GroupKey) && c.label.toLowerCase() === sub.label.toLowerCase());
+                      const spendSub = visibleSpendGroups.find(group => group.key === g.key)?.subs.find(item => item.label.toLowerCase() === sub.label.toLowerCase());
+                      const subBudget = budgets[rowKey] ?? spendSub?.budget ?? 0;
+                      const canEditRow = canEditBudgetKey(rowKey) && (!customCat || canEditCategoryId(customCat.id));
+                      return {
+                        id: `custom-${g.key}-${sub.label}`,
+                        kind: 'custom' as const,
+                        label: sub.label,
+                        icon: ICON_SF_SYMBOL[customCat?.icon ?? 'tag'] ?? BUDGET_FALLBACK_SYMBOL,
+                        color: groupColor,
+                        amount: subBudget,
+                        editable: canEditRow,
+                        active: editingKey === rowKey,
+                        draft: editingKey === rowKey ? nativeDraft : '',
+                        accessibilityLabel: `Edit ${sub.label} category`,
+                        accessibilityHint: canEditRow ? 'Swipe left to delete' : undefined,
+                        onOpen: customCat ? () => openCategoryEditor(customCat.id) : undefined,
+                        onEditAmount: () => startAmountEdit(rowKey, subBudget),
+                        onDelete: canEditRow ? () => handleRemoveSub(g.key, { cat: slugify(sub.label), label: sub.label }) : undefined,
+                      };
+                    }),
+                    ...groupBills.map(bill => {
+                      const rowKey = billKey(g.key, bill.id);
+                      const canEditRow = canEditBudgetKey(rowKey);
+                      return {
+                        id: bill.id,
+                        kind: 'bill' as const,
+                        label: bill.name,
+                        meta: bill.dueDate,
+                        icon: ICON_SF_SYMBOL[bill.icon] ?? ICON_SF_SYMBOL.repeat ?? BUDGET_FALLBACK_SYMBOL,
+                        color: categoryGroupColor(bill.cat, categories, theme.dark),
+                        amount: budgets[rowKey] ?? bill.fullAmount,
+                        editable: canEditRow,
+                        active: editingKey === rowKey,
+                        draft: editingKey === rowKey ? nativeDraft : '',
+                        accessibilityLabel: `Edit ${bill.name}`,
+                        accessibilityHint: canEditRow ? 'Swipe left to delete' : undefined,
+                        onOpen: () => billSheetRef.current?.open(bill),
+                        onEditAmount: () => startAmountEdit(rowKey, budgets[rowKey] ?? bill.fullAmount),
+                        onDelete: canEditRow ? () => handleRemoveBill(bill) : undefined,
+                      };
+                    }),
+                  ];
+                  return (
+                    <NativeBudgetGroupCard
+                      key={g.key}
+                      theme={theme}
+                      p={p}
+                      label={g.label}
+                      color={groupColor}
+                      icon={ICON_SF_SYMBOL[GROUP_META[g.key as GroupKey]?.icon ?? 'tag'] ?? BUDGET_FALLBACK_SYMBOL}
+                      total={groupTotal}
+                      target={groupTarget}
+                      targetPct={g.targetPct}
+                      delta={groupDelta}
+                      isOverTarget={g.key === 'savings' ? false : groupIsOver}
+                      open={!isCollapsed}
+                      rows={nativeRows}
+                      onToggle={() => toggleGroupCollapsed(g.key)}
+                      onAddCategory={beginAddCategory}
+                    />
+                  );
+                }
 
 	                return (
 	                  <SectionCard key={g.key} dark={theme.dark}>
@@ -1792,19 +2441,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                    </Collapsible>
 
                     <TouchableOpacity
-                      onPress={() => {
-                        setAddingForGroup(g.key);
-                        setCategoryGroupDraft(g.key as GroupKey);
-                        setCategoryLabelDraft('');
-                        setCategoryIconDraft('tag');
-                        setCategoryGoalTarget('');
-                        setCategoryGoalSaved('');
-                        setCategoryBudgetDraft('');
-                        setCategoryGoalDeadline('');
-                        setCategoryNotes('');
-                        setDuplicateNameError(false);
-                        setCategoryFormError('');
-                      }}
+                      onPress={beginAddCategory}
                       activeOpacity={0.7}
                       style={[styles.addCatBtn, { borderTopWidth: !isCollapsed && (visibleOrigSubs.length + customs.length + groupBills.length) > 0 ? 1 : 0, borderTopColor: p.hairline }]}
                     >
@@ -2523,12 +3160,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerTitleText: { ...TYPE.pageTitle, textAlign: 'center' },
-  stickyCardInner: {
-    borderBottomWidth: 1,
-    paddingHorizontal: LAYOUT.cardPadX,
-    paddingTop: LAYOUT.cardPadTop,
-    paddingBottom: SPACE.lg,
-  },
   hero: {
     paddingHorizontal: SPACE.xs,
     paddingTop: SPACE.sm,
@@ -2595,6 +3226,10 @@ const styles = StyleSheet.create({
     paddingTop: SPACE.md,
     paddingBottom: 0,
     gap: SPACE.lg,
+  },
+  allocationStickyCard: {
+    zIndex: 5,
+    elevation: 5,
   },
   cardHead: {
     flexDirection: 'row',

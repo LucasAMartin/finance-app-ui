@@ -52,3 +52,4 @@ This is an Expo React Native app (TypeScript, React 19, Expo SDK 54). Navigation
 - Category colors come from `catPastel(cat, dark)` for chart segments or `catGroupColor(cat, dark)` for group-level coloring. Both live in `src/theme.ts`.
 - The app targets iOS first (voice recognition uses Apple's Speech framework). Android and web are secondary.
 - There is no state management library. Local `useState` and props threading are used throughout.
+- For iOS 26+ native Liquid Glass work, read `docs/native-glass-playbook.md` before changing `GlassCard`, Expo UI SwiftUI hosts, Home/Activity native containers, or native merchant marks.

@@ -11,6 +11,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  LayoutAnimation,
 } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
 import {
@@ -390,10 +391,17 @@ interface NativeHomeActivityGroup {
 }
 
 const NATIVE_SPEND_GROUP_CLOSED_HEIGHT = 94;
+const NATIVE_DETAIL_ROW_HEIGHT = 32;
+const NATIVE_NEEDS_SAVINGS_DETAIL_BOTTOM = 20;
+const NATIVE_WANTS_ROW_HEIGHT = 52;
+const NATIVE_WANTS_SEPARATOR_HEIGHT = 1;
 const nativeSpendGroupDetailHeight = (group: SpendGroup) => {
-  if (group.key === 'wants') return 20 + group.subs.length * 52;
-  return 16 + group.subs.length * 44 + Math.max(0, group.subs.length - 1) * SPACE.md;
+  if (group.key === 'wants') {
+    return SPACE.xs + group.subs.length * NATIVE_WANTS_ROW_HEIGHT + Math.max(0, group.subs.length - 1) * NATIVE_WANTS_SEPARATOR_HEIGHT;
+  }
+  return NATIVE_NEEDS_SAVINGS_DETAIL_BOTTOM + group.subs.length * NATIVE_DETAIL_ROW_HEIGHT + Math.max(0, group.subs.length - 1) * SPACE.md;
 };
+const SPEND_GROUP_ANIMATION_MS = 220;
 
 interface Props {
   theme: Theme;
@@ -1103,91 +1111,90 @@ function NativeSpendingSection({
   groups: SpendGroup[];
   income: number;
 }) {
+  // Keep this deliberately simple: one open-state map, one host height derived
+  // from it, and one matching native detail-height animation.
   const [openKeys, setOpenKeys] = useState<Record<string, boolean>>({});
   const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
   const sectionChromeHeight = LAYOUT.cardPadTop + 17 + SPACE.md + LAYOUT.cardPadBottom;
-  const groupHeight = (group: SpendGroup) => {
-    if (!openKeys[group.key]) return NATIVE_SPEND_GROUP_CLOSED_HEIGHT;
-    return NATIVE_SPEND_GROUP_CLOSED_HEIGHT + nativeSpendGroupDetailHeight(group);
-  };
-  const sectionHeight = loading
-    ? 430
-    : sectionChromeHeight + groups.reduce((sum, group) => sum + groupHeight(group), 0);
-  const heightAnim = useRef(new Animated.Value(sectionHeight)).current;
-
-  useEffect(() => {
-    Animated.timing(heightAnim, {
-      toValue: sectionHeight,
-      duration: 280,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [heightAnim, sectionHeight]);
+  const groupsHeight = (keys: Record<string, boolean>) =>
+    groups.reduce(
+      (sum, group) =>
+        sum +
+        (keys[group.key]
+          ? NATIVE_SPEND_GROUP_CLOSED_HEIGHT + nativeSpendGroupDetailHeight(group)
+          : NATIVE_SPEND_GROUP_CLOSED_HEIGHT),
+      0,
+    );
+  const sectionHeight = loading ? 430 : sectionChromeHeight + groupsHeight(openKeys);
 
   const toggleGroup = (key: string) => {
+    LayoutAnimation.configureNext({
+      duration: SPEND_GROUP_ANIMATION_MS,
+      update: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+      },
+    });
     setOpenKeys(current => ({ ...current, [key]: !current[key] }));
   };
 
   return (
-    <Animated.View style={{ width: '100%', height: heightAnim, overflow: 'hidden' }}>
-      <Host
-        ignoreSafeArea="all"
-        colorScheme={theme.dark ? 'dark' : 'light'}
-        style={{ width: '100%', height: sectionHeight }}
-      >
-        <GlassEffectContainer>
-          <VStack
-            alignment="leading"
-            spacing={0}
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: sectionHeight }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={0}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <SwiftText
             modifiers={[
-              padding({
-                leading: LAYOUT.cardPadX,
-                trailing: LAYOUT.cardPadX,
-                top: LAYOUT.cardPadTop,
-                bottom: LAYOUT.cardPadBottom,
-              }),
-              frame({ maxWidth: 10000, alignment: 'leading' }),
-              glassEffect({
-                glass: { variant: 'regular', interactive: true, tint: glassTint },
-                shape: 'roundedRectangle',
-                cornerRadius: RADIUS.card,
-              }),
+              font({ size: 14, weight: 'semibold' }),
+              foregroundStyle(p.text),
             ]}
           >
-            <SwiftText
-              modifiers={[
-                font({ size: 14, weight: 'semibold' }),
-                foregroundStyle(p.text),
-              ]}
-            >
-              Spending
-            </SwiftText>
+            Spending
+          </SwiftText>
 
-            {loading ? (
-              <NativeSpendingSkeleton p={p} />
-            ) : (
-              <VStack
-                alignment="leading"
-                spacing={SPACE.xs}
-                modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}
-              >
-                {groups.map(group => (
-                  <NativeSpendGroupPanel
-                    key={group.key}
-                    theme={theme}
-                    p={p}
-                    group={group}
-                    income={income}
-                    open={!!openKeys[group.key]}
-                    onToggle={() => toggleGroup(group.key)}
-                  />
-                ))}
-              </VStack>
-            )}
-          </VStack>
-        </GlassEffectContainer>
-      </Host>
-    </Animated.View>
+          {loading ? (
+            <NativeSpendingSkeleton p={p} />
+          ) : (
+            <VStack
+              alignment="leading"
+              spacing={SPACE.xs}
+              modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}
+            >
+              {groups.map(group => (
+                <NativeSpendGroupPanel
+                  key={group.key}
+                  theme={theme}
+                  p={p}
+                  group={group}
+                  income={income}
+                  open={!!openKeys[group.key]}
+                  onToggle={() => toggleGroup(group.key)}
+                />
+              ))}
+            </VStack>
+          )}
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
   );
 }
 
@@ -1271,10 +1278,7 @@ function NativeSpendGroupPanel({
               systemName={open ? 'chevron.up' : 'chevron.down'}
               size={13}
               color={color}
-              modifiers={[
-                opacity(open ? 1 : 0.78),
-                animation(Animation.easeOut({ duration: 0.18 }), open),
-              ]}
+              modifiers={[opacity(open ? 1 : 0.78)]}
             />
           </HStack>
 
@@ -1313,11 +1317,10 @@ function NativeSpendGroupPanel({
         alignment="leading"
         spacing={group.key === 'wants' ? 0 : SPACE.md}
         modifiers={[
-          padding({ leading: SPACE.md, trailing: SPACE.md, bottom: SPACE.lg }),
+          padding({ leading: SPACE.md, trailing: SPACE.md, bottom: SPACE.xs }),
           frame({ height: open ? detailHeight : 0, maxWidth: 10000, alignment: 'topLeading' }),
-          opacity(open ? 1 : 0),
           clipped(),
-          animation(Animation.easeOut({ duration: 0.24 }), open),
+          opacity(1),
         ]}
       >
         {group.key === 'wants' ? (
@@ -1353,7 +1356,7 @@ function NativeDetailSpendRows({
             key={sub.label}
             alignment="center"
             spacing={SPACE.md}
-            modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+            modifiers={[frame({ height: NATIVE_DETAIL_ROW_HEIGHT, maxWidth: 10000, alignment: 'leading' })]}
           >
             <SwiftImage
               systemName={CATEGORY_SF_SYMBOL[sub.icon] ?? UPCOMING_FALLBACK_SYMBOL}
