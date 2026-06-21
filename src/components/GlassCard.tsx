@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { SUPPORTS_GLASS } from './GlassButton';
 import { SectionCard } from './SectionCard';
 import NativeGlassCard from '../../modules/glass-card/src/GlassCardView';
@@ -45,16 +45,19 @@ export function GlassCard({
 }: GlassCardProps) {
   if (SUPPORTS_GLASS) {
     return (
-      <NativeGlassCard
-        cornerRadius={cornerRadius}
-        pressable={!!onPress}
-        onCardPress={onPress}
-        style={style}
-        accessibilityRole={accessibilityRole as any}
-        accessibilityLabel={accessibilityLabel}
-      >
-        <View style={[CARD_PAD, contentStyle]}>{children}</View>
-      </NativeGlassCard>
+      <View style={style}>
+        <NativeGlassCard
+          cornerRadius={cornerRadius}
+          pressable={!!onPress}
+          onCardPress={onPress}
+          style={StyleSheet.absoluteFill}
+          accessibilityRole={accessibilityRole as any}
+          accessibilityLabel={accessibilityLabel}
+        />
+        <View pointerEvents={onPress ? 'none' : 'auto'} style={[CARD_PAD, contentStyle]}>
+          {children}
+        </View>
+      </View>
     );
   }
 

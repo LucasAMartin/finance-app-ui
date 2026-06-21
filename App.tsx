@@ -3,6 +3,7 @@ import {
   View,
   Alert,
   Animated,
+  AppState,
   StyleSheet,
   StatusBar,
   Dimensions,
@@ -33,6 +34,7 @@ import { ActivityScreen, type ActivityHandle } from './src/screens/ActivityScree
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
 import { NotificationSettingsScreen } from './src/screens/NotificationSettingsScreen';
 import { SharingSettingsScreen } from './src/screens/SharingSettingsScreen';
 import { GoalsScreen } from './src/screens/GoalsScreen';
@@ -51,6 +53,7 @@ import {
   zoneNameForLedger,
 } from './src/sync/syncActiveLedger';
 import CloudKitSyncModule from './modules/cloudkit-sync/src/CloudKitSyncModule';
+import type { NativeCloudKitAcceptedShare } from './src/sync/nativeCloudKitAdapter';
 import type { AppSession, Bill, Ledger, LedgerMember, Transaction } from './src/repositories/types';
 
 type Screen = 'home' | 'insights' | 'activity' | 'budget';
@@ -69,6 +72,33 @@ const MemoHomeScreen = React.memo(HomeScreen);
 const MemoInsightsScreen = React.memo(InsightsScreen);
 const MemoActivityScreen = React.memo(ActivityScreen);
 const MemoBudgetScreen = React.memo(BudgetScreen);
+
+function isAcceptedCloudKitShare(
+  share: NativeCloudKitAcceptedShare,
+): share is NativeCloudKitAcceptedShare & {
+  status: 'accepted';
+  ownerName: string;
+  zoneName: string;
+} {
+  return (
+    share.status === 'accepted' &&
+    typeof share.ownerName === 'string' &&
+    share.ownerName.length > 0 &&
+    typeof share.zoneName === 'string' &&
+    share.zoneName.length > 0
+  );
+}
+
+function cloudKitErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error.length > 0) return error;
+  return 'Unknown CloudKit error';
+}
+
+function cloudKitToast(prefix: string, error: unknown): string {
+  const message = cloudKitErrorMessage(error).replace(/\s+/g, ' ').trim();
+  return `${prefix}: ${message.slice(0, 110)}`;
+}
 
 const AnimatedScreen = React.memo(function AnimatedScreen({
   opacity,
@@ -125,9 +155,11 @@ export function DashboardApp() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
   const [sharingSettingsOpen, setSharingSettingsOpen] = useState(false);
   const [sharingInviteNoticeToken, setSharingInviteNoticeToken] = useState(0);
+  const [sharingInviteBusy, setSharingInviteBusy] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [goalContributeToken, setGoalContributeToken] = useState(0);
   const [pendingBudgetEditCategoryId, setPendingBudgetEditCategoryId] = useState<string | undefined>(undefined);
@@ -146,6 +178,11 @@ export function DashboardApp() {
   const [ledgers, setLedgers] = useState<Ledger[]>(() => sessionRepo.listLedgers());
   const cloudSyncInFlightRef = useRef<ReturnType<typeof syncActiveLedger> | null>(null);
   const cloudSyncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeLedger = ledgers.find(ledger => ledger.id === session.activeLedgerId);
+  const activeLedgerMeta = activeLedger?.meta ?? {};
+  const currentMember = ledgerMembers.find(member => member.userId === session.currentUserId);
+  const activeLedgerIsSharedParticipant = activeLedgerMeta.cloudDatabaseScope === 'shared';
+  const canInviteToActiveLedger = !activeLedgerIsSharedParticipant && currentMember?.role === 'owner';
 
   const refreshSessionState = useCallback(() => {
     const nextSession = sessionRepo.getSession();
@@ -205,16 +242,18 @@ export function DashboardApp() {
         return;
       }
       if (!hasPendingActiveLedgerChanges()) return;
-      runCloudKitSync(false).catch(() => {
-        showToast('iCloud sync could not run');
+      runCloudKitSync(false).catch(error => {
+        console.warn('CloudKit background sync failed', error);
+        showToast(cloudKitToast('iCloud sync failed', error));
       });
     }, 900);
   }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
 
   useEffect(() => {
     if (!iCloudSyncEnabled) return;
-    runCloudKitSync(false).catch(() => {
-      showToast('iCloud sync could not run');
+    runCloudKitSync(false).catch(error => {
+      console.warn('CloudKit initial sync failed', error);
+      showToast(cloudKitToast('iCloud sync failed', error));
     });
   }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
 
@@ -352,6 +391,16 @@ export function DashboardApp() {
       await CloudKitSyncModule.resetZone(zoneName);
       resetActiveLedgerSyncState();
       devDataRepo.setSeedDataEnabled(true);
+      const resetAt = new Date().toISOString();
+      const resetId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const ledger = sessionRepo.listLedgers().find(item => item.id === session.activeLedgerId);
+      sessionRepo.updateLedger(session.activeLedgerId, {
+        meta: {
+          ...(ledger?.meta ?? {}),
+          cloudResetAt: resetAt,
+          cloudResetId: resetId,
+        },
+      });
       refreshSessionState();
       const result = await runCloudKitSync(true);
       if (result.status === 'paused') return;
@@ -390,21 +439,76 @@ export function DashboardApp() {
     sessionRepo.updateMember(member.id, { allowOthersToEditMyItems });
     showToast(allowOthersToEditMyItems ? 'Others can edit your items' : 'Only you can edit your items');
   }, [ledgerMembers, session.currentUserId, sessionRepo, showToast]);
+
+  const handleCurrentMemberProfileChange = useCallback((patch: { displayName?: string; profileImageDataUri?: string | null }) => {
+    const member = ledgerMembers.find(item => item.userId === session.currentUserId);
+    if (!member) return;
+    const nextMeta = { ...(member.meta ?? {}) };
+    if (patch.profileImageDataUri === null) {
+      delete nextMeta.profileImageDataUri;
+    } else if (patch.profileImageDataUri) {
+      nextMeta.profileImageDataUri = patch.profileImageDataUri;
+    }
+    sessionRepo.updateMember(member.id, {
+      ...(patch.displayName ? { displayName: patch.displayName } : {}),
+      meta: nextMeta,
+    });
+    showToast(patch.displayName ? 'Profile name updated' : patch.profileImageDataUri === null ? 'Profile photo removed' : 'Profile photo updated');
+  }, [ledgerMembers, session.currentUserId, sessionRepo, showToast]);
+
+  const bindActiveLedgerToICloudUser = useCallback(async (claimAsOwner: boolean) => {
+    const currentCloudUser = await CloudKitSyncModule.getCurrentUser();
+    if (!currentCloudUser.available) return currentCloudUser;
+    const existingCloudMember = ledgerMembers.find(member => member.userId === currentCloudUser.userId);
+    const currentLocalMember = ledgerMembers.find(member => member.userId === session.currentUserId);
+    const profileSource = existingCloudMember ?? currentLocalMember;
+    sessionRepo.bindCloudIdentity({
+      ledgerId: session.activeLedgerId,
+      userId: currentCloudUser.userId,
+      displayName: profileSource?.displayName ?? 'You',
+      role: claimAsOwner ? 'owner' : 'member',
+      allowOthersToEditMyItems: profileSource?.allowOthersToEditMyItems ?? true,
+      claimAsOwner,
+      meta: { ...(profileSource?.meta ?? {}), cloudKitUserId: currentCloudUser.userId },
+    });
+    sessionRepo.setCurrentUserId(currentCloudUser.userId);
+    refreshSessionState();
+    return currentCloudUser;
+  }, [ledgerMembers, refreshSessionState, session.activeLedgerId, session.currentUserId, sessionRepo]);
+
   const handleICloudSyncChange = useCallback((enabled: boolean) => {
     setMetaFlag('icloudSync', enabled);
     if (!enabled) {
       showToast('iCloud sync off');
       return;
     }
-    runCloudKitSync(true).then(result => {
-      if (result.status === 'paused') {
+    bindActiveLedgerToICloudUser(!activeLedgerIsSharedParticipant && currentMember?.role === 'owner')
+      .then(identity => {
+        if (!identity.available) {
+          setMetaFlag('icloudSync', false);
+          showToast(`iCloud sync paused: ${identity.reason}`);
+          return undefined;
+        }
+        return runCloudKitSync(true);
+      })
+      .then(result => {
+        if (result?.status === 'paused') {
+          setMetaFlag('icloudSync', false);
+        }
+      })
+      .catch(error => {
         setMetaFlag('icloudSync', false);
-      }
-    }).catch(() => {
-      setMetaFlag('icloudSync', false);
-      showToast('iCloud sync could not be enabled');
-    });
-  }, [runCloudKitSync, setMetaFlag, showToast]);
+        console.warn('CloudKit enable sync failed', error);
+        showToast(cloudKitToast('iCloud sync failed', error));
+      });
+  }, [
+    activeLedgerIsSharedParticipant,
+    bindActiveLedgerToICloudUser,
+    currentMember?.role,
+    runCloudKitSync,
+    setMetaFlag,
+    showToast,
+  ]);
 
   const handleManualCloudRefresh = useCallback(async () => {
     if (!iCloudSyncEnabled) {
@@ -414,10 +518,151 @@ export function DashboardApp() {
     try {
       const result = await runCloudKitSync(true);
       if (result.status === 'paused') return;
-    } catch {
-      showToast('iCloud refresh failed');
+    } catch (error) {
+      console.warn('CloudKit manual refresh failed', error);
+      showToast(cloudKitToast('iCloud refresh failed', error));
     }
   }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
+
+  const acceptedShareConsumeInFlightRef = useRef(false);
+  const consumeAcceptedCloudKitShares = useCallback(async () => {
+    if (acceptedShareConsumeInFlightRef.current) return;
+    if (!CloudKitSyncModule.consumeAcceptedShares) return;
+    acceptedShareConsumeInFlightRef.current = true;
+    try {
+      const shares = await CloudKitSyncModule.consumeAcceptedShares();
+      const accepted = shares.filter(isAcceptedCloudKitShare);
+      if (accepted.length === 0) return;
+      const currentCloudUser = await CloudKitSyncModule.getCurrentUser().catch(() => undefined);
+      const cloudUserId = currentCloudUser?.available ? currentCloudUser.userId : undefined;
+
+      accepted.forEach(share => {
+        const ledgerId = share.ledgerId ?? session.activeLedgerId;
+        const ledger = sessionRepo.listLedgers().find(item => item.id === ledgerId);
+        if (!ledger) return;
+        const acceptedAt = share.acceptedAt ?? new Date().toISOString();
+        sessionRepo.updateLedgerLocalMeta(ledgerId, {
+          ...(ledger.meta ?? {}),
+          cloudDatabaseScope: 'shared',
+          cloudOwnerName: share.ownerName,
+          cloudZoneName: share.zoneName,
+          cloudShareRecordName: share.shareRecordName,
+          cloudShareUrl: share.shareUrl,
+          cloudShareAcceptedAt: acceptedAt,
+          cloudParticipantPermission: share.participantPermission,
+        });
+        if (cloudUserId) {
+          sessionRepo.bindCloudIdentity({
+            ledgerId,
+            userId: cloudUserId,
+            displayName: 'You',
+            role: 'member',
+            allowOthersToEditMyItems: true,
+            claimAsOwner: false,
+            meta: {
+              cloudKitUserId: cloudUserId,
+              cloudShareAcceptedAt: acceptedAt,
+              cloudParticipantPermission: share.participantPermission,
+            },
+          });
+        }
+      });
+
+      if (cloudUserId) {
+        sessionRepo.setCurrentUserId(cloudUserId);
+      }
+      setMetaFlag('icloudSync', true);
+      refreshSessionState();
+      const result = await runCloudKitSync(true);
+      if (result.status === 'paused') return;
+      showToast('Shared ledger connected');
+    } catch {
+      showToast('Could not finish accepting iCloud share');
+    } finally {
+      acceptedShareConsumeInFlightRef.current = false;
+    }
+  }, [
+    refreshSessionState,
+    runCloudKitSync,
+    session.activeLedgerId,
+    sessionRepo,
+    setMetaFlag,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    consumeAcceptedCloudKitShares();
+    const retryTimers = [
+      setTimeout(consumeAcceptedCloudKitShares, 1200),
+      setTimeout(consumeAcceptedCloudKitShares, 3500),
+    ];
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        consumeAcceptedCloudKitShares();
+      }
+    });
+    return () => {
+      retryTimers.forEach(clearTimeout);
+      subscription.remove();
+    };
+  }, [consumeAcceptedCloudKitShares]);
+
+  const handlePresentLedgerShare = useCallback(async () => {
+    if (sharingInviteBusy) return;
+    if (!canInviteToActiveLedger) {
+      showToast(activeLedgerIsSharedParticipant ? 'This ledger is shared with you' : 'Only the ledger owner can invite');
+      return;
+    }
+    if (!CloudKitSyncModule.presentLedgerShare) {
+      showToast('iCloud sharing is unavailable in this build');
+      return;
+    }
+
+    const enabledBeforeInvite = iCloudSyncEnabled;
+    setSharingInviteBusy(true);
+    if (!enabledBeforeInvite) {
+      setMetaFlag('icloudSync', true);
+    }
+
+    try {
+      const identity = await bindActiveLedgerToICloudUser(true);
+      if (!identity.available) {
+        if (!enabledBeforeInvite) setMetaFlag('icloudSync', false);
+        showToast(`iCloud sync paused: ${identity.reason}`);
+        return;
+      }
+      const share = await CloudKitSyncModule.presentLedgerShare(session.activeLedgerId, activeLedger?.name);
+      if (share.shareUrl) {
+        const ledger = sessionRepo.listLedgers().find(item => item.id === session.activeLedgerId);
+        sessionRepo.updateLedgerLocalMeta(session.activeLedgerId, {
+          ...(ledger?.meta ?? {}),
+          cloudShareUrl: share.shareUrl,
+        });
+      }
+      runCloudKitSync(false).catch(error => {
+        console.warn('CloudKit post-share sync failed', error);
+        showToast(cloudKitToast('iCloud share opened, sync failed', error));
+      });
+    } catch (error) {
+      if (!enabledBeforeInvite) setMetaFlag('icloudSync', false);
+      console.warn('CloudKit sharing failed', error);
+      showToast(cloudKitToast('Could not open iCloud sharing', error));
+    } finally {
+      setSharingInviteBusy(false);
+    }
+  }, [
+    iCloudSyncEnabled,
+    activeLedger?.name,
+    activeLedgerIsSharedParticipant,
+    bindActiveLedgerToICloudUser,
+    canInviteToActiveLedger,
+    runCloudKitSync,
+    session.activeLedgerId,
+    sessionRepo,
+    setMetaFlag,
+    sharingInviteBusy,
+    showToast,
+  ]);
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -525,6 +770,10 @@ export function DashboardApp() {
   }, [closeDrawer, navigate]);
 
   const openTheme = useCallback(() => setThemeOpen(true), []);
+  const openProfile = useCallback(() => {
+    closeDrawer();
+    setProfileOpen(true);
+  }, [closeDrawer]);
   const openGoalContribution = useCallback(() => {
     setGoalsOpen(true);
     setGoalContributeToken(token => token + 1);
@@ -533,6 +782,7 @@ export function DashboardApp() {
   const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
   const openNotificationSettings = useCallback(() => setNotificationSettingsOpen(true), []);
   const closeNotificationSettings = useCallback(() => setNotificationSettingsOpen(false), []);
   const openSharingSettings = useCallback((intent?: 'overview' | 'members' | 'invite') => {
@@ -696,9 +946,10 @@ export function DashboardApp() {
             onClose={closeDrawer}
             sampleDataEnabled={sampleDataEnabled}
             onSampleDataEnabledChange={handleSampleDataEnabledChange}
-            activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
+            activeLedgerName={activeLedger?.name}
             currentUserId={session.currentUserId}
             ledgerMembers={ledgerMembers}
+            onOpenProfile={openProfile}
             onCurrentUserChange={handleCurrentUserChange}
             onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
           />
@@ -743,8 +994,18 @@ export function DashboardApp() {
           onOpenSharing={openSharingSettings}
           onICloudSyncChange={handleICloudSyncChange}
           onResetSyncedSampleData={confirmResetSyncedSampleData}
-          activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
+          activeLedgerName={activeLedger?.name}
           memberCount={ledgerMembers.length}
+        />
+
+        <ProfileScreen
+          theme={theme}
+          visible={profileOpen}
+          onClose={closeProfile}
+          member={currentMember}
+          iCloudSyncEnabled={iCloudSyncEnabled}
+          onProfileChange={handleCurrentMemberProfileChange}
+          onOpenSharing={() => openSharingSettings('overview')}
         />
 
         <NotificationSettingsScreen
@@ -757,10 +1018,15 @@ export function DashboardApp() {
           theme={theme}
           visible={sharingSettingsOpen}
           onClose={closeSharingSettings}
-          activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
+          activeLedgerName={activeLedger?.name}
+          cloudShared={activeLedgerIsSharedParticipant}
+          canInvite={canInviteToActiveLedger}
+          participantPermission={typeof activeLedgerMeta.cloudParticipantPermission === 'string' ? activeLedgerMeta.cloudParticipantPermission : undefined}
           currentUserId={session.currentUserId}
           ledgerMembers={ledgerMembers}
           inviteNoticeToken={sharingInviteNoticeToken}
+          inviteBusy={sharingInviteBusy}
+          onInviteSomeone={handlePresentLedgerShare}
           onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
         />
 

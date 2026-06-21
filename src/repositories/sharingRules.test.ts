@@ -89,6 +89,78 @@ test('creates inject active ledger, current user ownership, timestamps, and pend
   assert.match(tx.updatedAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
 });
 
+test('ensures a CloudKit participant member and uses it for new edits', () => {
+  const repos = createInMemoryRepositories();
+
+  const member = repos.sessionRepo.ensureMember({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-participant',
+    displayName: 'You',
+    role: 'member',
+    meta: { cloudKitUserId: 'icloud-participant' },
+  });
+  repos.sessionRepo.setCurrentUserId('icloud-participant');
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Participant Market',
+    cat: 'groceries',
+    amount: 12,
+    occurredAt: '2026-06-01T09:00:00.000Z',
+  });
+
+  assert.equal(member.syncStatus, 'pending');
+  assert.equal(member.userId, 'icloud-participant');
+  assert.equal(tx.createdByUserId, 'icloud-participant');
+  assert.equal(repos.sessionRepo.ensureMember({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-participant',
+  }).id, member.id);
+});
+
+test('binding owner to iCloud hides fake members and uses the iCloud account', () => {
+  const repos = createInMemoryRepositories();
+
+  const member = repos.sessionRepo.bindCloudIdentity({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-owner',
+    displayName: 'You',
+    claimAsOwner: true,
+  });
+  repos.sessionRepo.setCurrentUserId('icloud-owner');
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Cloud Market',
+    cat: 'groceries',
+    amount: 14,
+    occurredAt: '2026-06-01T09:00:00.000Z',
+  });
+
+  assert.equal(member.role, 'owner');
+  assert.deepEqual(repos.sessionRepo.listMembers().map(item => item.userId), ['icloud-owner']);
+  assert.equal(repos.sessionRepo.listLedgers()[0].ownerUserId, 'icloud-owner');
+  assert.equal(tx.createdByUserId, 'icloud-owner');
+});
+
+test('member profile edits persist display name and avatar metadata', () => {
+  const repos = createInMemoryRepositories();
+  const member = repos.sessionRepo.bindCloudIdentity({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-owner',
+    displayName: 'You',
+    claimAsOwner: true,
+  });
+  repos.sessionRepo.setCurrentUserId('icloud-owner');
+
+  const updated = repos.sessionRepo.updateMember(member.id, {
+    displayName: 'Lucas',
+    meta: {
+      ...(member.meta ?? {}),
+      profileImageDataUri: 'data:image/jpeg;base64,abc123',
+    },
+  });
+
+  assert.equal(updated?.displayName, 'Lucas');
+  assert.equal(updated?.meta?.profileImageDataUri, 'data:image/jpeg;base64,abc123');
+});
+
 test('active ledger queries and summaries do not leak rows from another ledger', () => {
   const repos = createInMemoryRepositories();
   repos.devDataRepo.setSeedDataEnabled(false);

@@ -2,28 +2,40 @@ import React from 'react';
 import {
   View,
   Text,
-  ScrollView,
   StyleSheet,
   Animated,
-  Switch,
-  Pressable,
   Alert,
 } from 'react-native';
 import Constants from 'expo-constants';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Host, Image } from '@expo/ui/swift-ui';
-import type { SFSymbol } from 'sf-symbols-typescript';
+import {
+  Button as SwiftButton,
+  Form as SwiftForm,
+  Host,
+  LabeledContent,
+  Picker,
+  Section as SwiftSection,
+  Text as SwiftText,
+  Toggle as SwiftToggle,
+} from '@expo/ui/swift-ui';
+import {
+  background,
+  foregroundStyle,
+  listStyle,
+  pickerStyle,
+  scrollContentBackground,
+  tag,
+  tint,
+} from '@expo/ui/swift-ui/modifiers';
 
-import { Theme, overText } from '../theme';
+import { Theme } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { getNotificationPrefs, notificationSummary } from '../notifications/preferences';
 import { CURRENCY_OPTIONS } from '../currency';
 import { ScreenExitButton } from '../components/GlassButton';
 import { TYPE } from '../typography';
-import { RADIUS } from '../radius';
 import { SPACE, LAYOUT } from '../spacing';
 
 interface Props {
@@ -40,20 +52,6 @@ interface Props {
   memberCount: number;
 }
 
-// Row kinds. `nav` pushes/opens something; `toggle` flips a persisted flag;
-// `action` fires a one-shot (export, sign out). `value` is the trailing summary.
-type Row =
-  | { kind: 'nav'; icon: SFSymbol; label: string; value?: string; onPress: () => void }
-  | { kind: 'currency'; icon: SFSymbol; label: string }
-  | { kind: 'toggle'; icon: SFSymbol; label: string; caption?: string; value: boolean; onValueChange: (v: boolean) => void }
-  | { kind: 'action'; icon: SFSymbol; label: string; destructive?: boolean; onPress: () => void }
-  | { kind: 'info'; icon: SFSymbol; label: string; value: string };
-
-interface Group {
-  title?: string;
-  rows: Row[];
-}
-
 export function SettingsScreen({
   theme,
   visible,
@@ -68,7 +66,7 @@ export function SettingsScreen({
   memberCount,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { dark, metaFlag, setMetaFlag, currency, currencyCode, setCurrencyCode } = useTheme();
+  const { dark, metaFlag, setMetaFlag, currencyCode, setCurrencyCode } = useTheme();
   const { settingsRepo } = useRepositories();
   const settings = useRepositoryList(settingsRepo)[0];
   const notifications = getNotificationPrefs(settings);
@@ -98,8 +96,6 @@ export function SettingsScreen({
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: () => comingSoon('Sign out') },
     ]);
-
-  const toggle = (key: string) => (v: boolean) => setMetaFlag(key, v);
 
   const handleAppLockChange = async (enabled: boolean) => {
     if (!enabled) {
@@ -141,71 +137,6 @@ export function SettingsScreen({
     }
   };
 
-  const groups: Group[] = [
-    {
-      rows: [
-        { kind: 'nav', icon: 'paintbrush', label: 'Appearance', value: dark ? 'Dark' : 'Light', onPress: onOpenAppearance },
-      ],
-    },
-    {
-      title: 'Notifications',
-      rows: [
-        {
-          kind: 'nav',
-          icon: 'bell',
-          label: 'Notifications',
-          value: notificationSummary(notifications),
-          onPress: onOpenNotifications,
-        },
-      ],
-    },
-    {
-      title: 'Privacy & Security',
-      rows: [
-        { kind: 'toggle', icon: 'faceid', label: 'Require Face ID', caption: 'Lock the app when it opens or returns from background', value: metaFlag('appLock'), onValueChange: handleAppLockChange },
-      ],
-    },
-    {
-      title: 'Preferences',
-      rows: [
-        { kind: 'currency', icon: 'dollarsign.circle', label: 'Currency' },
-        { kind: 'nav', icon: 'banknote', label: 'Monthly income', onPress: onOpenIncome },
-      ],
-    },
-    {
-      title: 'Data',
-      rows: [
-        { kind: 'toggle', icon: 'icloud', label: 'iCloud sync', value: metaFlag('icloudSync'), onValueChange: onICloudSyncChange },
-        { kind: 'action', icon: 'square.and.arrow.up', label: 'Export data', onPress: () => comingSoon('Export data') },
-        ...(__DEV__ && onResetSyncedSampleData
-          ? [{ kind: 'action' as const, icon: 'arrow.counterclockwise.icloud' as SFSymbol, label: 'Reset synced sample data', destructive: true, onPress: onResetSyncedSampleData }]
-          : []),
-      ],
-    },
-    {
-      title: 'Sharing',
-      rows: [
-        { kind: 'nav', icon: 'person.2', label: 'Shared ledger', value: profileName, onPress: () => onOpenSharing('overview') },
-        { kind: 'nav', icon: 'person.3', label: 'Members', value: String(memberCount), onPress: () => onOpenSharing('members') },
-        { kind: 'action', icon: 'person.badge.plus', label: 'Invite someone', onPress: () => onOpenSharing('invite') },
-      ],
-    },
-    {
-      title: 'About',
-      rows: [
-        { kind: 'nav', icon: 'questionmark.circle', label: 'Help & support', onPress: () => comingSoon('Help & support') },
-        { kind: 'nav', icon: 'hand.raised', label: 'Privacy policy', onPress: () => comingSoon('Privacy policy') },
-        { kind: 'nav', icon: 'doc.text', label: 'Terms of service', onPress: () => comingSoon('Terms of service') },
-        { kind: 'info', icon: 'info.circle', label: 'Version', value: version },
-      ],
-    },
-    {
-      rows: [
-        { kind: 'action', icon: 'rectangle.portrait.and.arrow.right', label: 'Sign out', destructive: true, onPress: handleSignOut },
-      ],
-    },
-  ];
-
   return (
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
@@ -227,152 +158,107 @@ export function SettingsScreen({
           <View style={[styles.headerDivider, { backgroundColor: theme.hairline }]} />
         </View>
 
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{
-            paddingTop: insets.top + 52 + SPACE.lg,
-            paddingBottom: insets.bottom + SPACE.xxxl,
-          }}
-          showsVerticalScrollIndicator={false}
-        >
-          {groups.map((group, gi) => (
-            <View key={gi} style={styles.group}>
-              {group.title && (
-                <Text style={[TYPE.labelLg, styles.groupTitle, { color: theme.textTer }]}>
-                  {group.title}
-                </Text>
-              )}
-              <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
-                {group.rows.map((row, ri) => (
-                  <SettingsRowView
-                    key={ri}
-                    theme={theme}
-                    dark={dark}
-                    currencyCode={currencyCode}
-                    currencyLabel={`${currency.symbol} ${currency.code}`}
-                    onCurrencyChange={setCurrencyCode}
-                    row={row}
-                    showSeparator={ri < group.rows.length - 1}
+        <View style={[styles.formWrap, { paddingTop: insets.top + 68 }]}>
+          <Host
+            style={styles.formHost}
+            colorScheme={theme.dark ? 'dark' : 'light'}
+            ignoreSafeArea="keyboard"
+          >
+            <SwiftForm
+              modifiers={[
+                listStyle('insetGrouped'),
+                scrollContentBackground('hidden'),
+                background(theme.bg),
+                tint(theme.accent.dot),
+              ]}
+            >
+              <SwiftSection>
+                <LabeledContent label="Appearance">
+                  <SwiftButton label={dark ? 'Dark' : 'Light'} onPress={onOpenAppearance} />
+                </LabeledContent>
+                <LabeledContent label="Notifications">
+                  <SwiftButton label={notificationSummary(notifications)} onPress={onOpenNotifications} />
+                </LabeledContent>
+              </SwiftSection>
+
+              <SwiftSection>
+                <SwiftToggle
+                  label="Require Face ID"
+                  systemImage="faceid"
+                  isOn={metaFlag('appLock')}
+                  onIsOnChange={handleAppLockChange}
+                />
+              </SwiftSection>
+
+              <SwiftSection>
+                <Picker
+                  label="Currency"
+                  systemImage="dollarsign.circle"
+                  selection={currencyCode}
+                  onSelectionChange={setCurrencyCode}
+                  modifiers={[pickerStyle('menu')]}
+                >
+                  {CURRENCY_OPTIONS.map(option => (
+                    <SwiftText key={option.code} modifiers={[tag(option.code)]}>
+                      {option.symbol} {option.code} · {option.name}
+                    </SwiftText>
+                  ))}
+                </Picker>
+                <SwiftButton label="Monthly Income" systemImage="banknote" onPress={onOpenIncome} />
+              </SwiftSection>
+
+              <SwiftSection>
+                <SwiftToggle
+                  label="iCloud Sync"
+                  systemImage="icloud"
+                  isOn={metaFlag('icloudSync')}
+                  onIsOnChange={onICloudSyncChange}
+                />
+                <SwiftButton label="Export Data" systemImage="square.and.arrow.up" onPress={() => comingSoon('Export data')} />
+                {__DEV__ && onResetSyncedSampleData && (
+                  <SwiftButton
+                    label="Reset Synced Sample Data"
+                    systemImage="arrow.counterclockwise.icloud"
+                    role="destructive"
+                    onPress={onResetSyncedSampleData}
                   />
-                ))}
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-    </Animated.View>
-  );
-}
+                )}
+              </SwiftSection>
 
-function SettingsRowView({
-  theme,
-  dark,
-  currencyCode,
-  currencyLabel,
-  onCurrencyChange,
-  row,
-  showSeparator,
-}: {
-  theme: Theme;
-  dark: boolean;
-  currencyCode: string;
-  currencyLabel: string;
-  onCurrencyChange: (code: string) => void;
-  row: Row;
-  showSeparator: boolean;
-}) {
-  const destructive = row.kind === 'action' && row.destructive;
-  const ember = overText(dark);
-  const tint = destructive ? ember : theme.text;
-  const isCurrency = row.kind === 'currency';
+              <SwiftSection>
+                <LabeledContent label="Shared Ledger">
+                  <SwiftButton label={profileName} onPress={() => onOpenSharing('overview')} />
+                </LabeledContent>
+                <LabeledContent label="Members">
+                  <SwiftButton label={String(memberCount)} onPress={() => onOpenSharing('members')} />
+                </LabeledContent>
+                <SwiftButton label="Invite Someone" systemImage="person.badge.plus" onPress={() => onOpenSharing('invite')} />
+              </SwiftSection>
 
-  const body = (
-    <View style={styles.row}>
-      <Host style={styles.iconHost} ignoreSafeArea="all">
-        <Image
-          systemName={row.icon}
-          size={19}
-          color={destructive ? ember : theme.textSec}
-        />
-      </Host>
-      <View style={styles.rowCopy}>
-        <Text style={[TYPE.body, { color: tint }]}>{row.label}</Text>
-        {row.kind === 'toggle' && row.caption && (
-          <Text style={[TYPE.caption, { color: theme.textTer, marginTop: 2 }]}>{row.caption}</Text>
-        )}
-      </View>
+              <SwiftSection>
+                <SwiftButton label="Help & Support" systemImage="questionmark.circle" onPress={() => comingSoon('Help & support')} />
+                <SwiftButton label="Privacy Policy" systemImage="hand.raised" onPress={() => comingSoon('Privacy policy')} />
+                <SwiftButton label="Terms of Service" systemImage="doc.text" onPress={() => comingSoon('Terms of service')} />
+                <LabeledContent label="Version">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+                    {version}
+                  </SwiftText>
+                </LabeledContent>
+              </SwiftSection>
 
-      {row.kind === 'toggle' ? (
-        <Switch
-          value={row.value}
-          onValueChange={row.onValueChange}
-          trackColor={{ false: theme.chipBg, true: theme.accent.fill }}
-          thumbColor={row.value ? theme.accent.ink : theme.surface}
-          ios_backgroundColor={theme.chipBg}
-          accessibilityLabel={row.label}
-        />
-      ) : row.kind === 'info' ? (
-        <Text style={[TYPE.bodySm, { color: theme.textTer }]}>{row.value}</Text>
-      ) : (
-        <View style={styles.rowTrailing}>
-          {isCurrency ? (
-            <Text style={[TYPE.bodySm, { color: theme.textTer }]} numberOfLines={1}>
-              {currencyLabel}
-            </Text>
-          ) : row.kind === 'nav' && row.value != null && (
-            <Text style={[TYPE.bodySm, { color: theme.textTer }]} numberOfLines={1}>
-              {row.value}
-            </Text>
-          )}
-          <Host style={styles.chevronHost} ignoreSafeArea="all">
-            <Image systemName="chevron.right" size={13} color={theme.textTer} />
+              <SwiftSection>
+                <SwiftButton
+                  label="Sign Out"
+                  systemImage="rectangle.portrait.and.arrow.right"
+                  role="destructive"
+                  onPress={handleSignOut}
+                />
+              </SwiftSection>
+            </SwiftForm>
           </Host>
         </View>
-      )}
-    </View>
-  );
-
-  const content = (
-    <>
-      {body}
-      {showSeparator && (
-        <View style={[styles.separator, { backgroundColor: theme.sep }]} />
-      )}
-    </>
-  );
-
-  if (row.kind === 'toggle' || row.kind === 'info') {
-    return <View>{content}</View>;
-  }
-  if (isCurrency) {
-    return (
-      <MenuView
-        shouldOpenOnLongPress={false}
-        themeVariant={theme.dark ? 'dark' : 'light'}
-        actions={CURRENCY_OPTIONS.map(option => ({
-          id: option.code,
-          title: `${option.symbol} ${option.code}`,
-          subtitle: option.name,
-          state: option.code === currencyCode ? 'on' as const : 'off' as const,
-        }))}
-        onPressAction={({ nativeEvent }) => {
-          onCurrencyChange(nativeEvent.event);
-        }}
-      >
-        {content}
-      </MenuView>
-    );
-  }
-  return (
-    <Pressable
-      onPress={row.onPress}
-      android_ripple={{ color: theme.chipBg }}
-      style={({ pressed }) => [pressed && { backgroundColor: theme.chipBg }]}
-      accessibilityRole="button"
-      accessibilityLabel={row.label}
-    >
-      {content}
-    </Pressable>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -404,55 +290,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: StyleSheet.hairlineWidth,
   },
-  group: {
-    marginBottom: SPACE.xxl,
-    // Pull the scroll content below the absolutely-positioned header.
-    paddingTop: 0,
-  },
-  groupTitle: {
-    marginLeft: LAYOUT.screenGutter + SPACE.xs,
-    marginBottom: SPACE.sm,
-  },
-  card: {
-    marginHorizontal: LAYOUT.screenGutter,
-    borderRadius: RADIUS.field,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.md,
-    minHeight: 50,
-    paddingVertical: 13,
-    paddingHorizontal: SPACE.lg,
-  },
-  rowCopy: {
+  formWrap: {
     flex: 1,
-    minWidth: 0,
   },
-  rowTrailing: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.xs,
-    flexShrink: 1,
-    maxWidth: '52%',
-    justifyContent: 'flex-end',
-  },
-  iconHost: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chevronHost: {
-    width: 12,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: SPACE.lg + 24 + SPACE.md,
+  formHost: {
+    flex: 1,
   },
 });

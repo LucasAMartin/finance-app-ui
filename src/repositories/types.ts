@@ -36,6 +36,20 @@ export interface LedgerMember extends SyncFields {
   role: LedgerMemberRole;
   status: LedgerMemberStatus;
   allowOthersToEditMyItems: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export interface EnsureLedgerMemberInput {
+  ledgerId: string;
+  userId: string;
+  displayName?: string;
+  role?: LedgerMemberRole;
+  allowOthersToEditMyItems?: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export interface BindCloudIdentityInput extends EnsureLedgerMemberInput {
+  claimAsOwner?: boolean;
 }
 
 export interface AppSession {
@@ -320,7 +334,10 @@ export interface SessionRepo {
   setCurrentUserId(userId: string): void;
   listLedgers(): Ledger[];
   updateLedger(id: string, patch: Partial<Omit<Ledger, 'id'>>): Ledger | undefined;
+  updateLedgerLocalMeta(id: string, meta: Record<string, unknown> | undefined): Ledger | undefined;
   listMembers(ledgerId?: string): LedgerMember[];
+  ensureMember(input: EnsureLedgerMemberInput): LedgerMember;
+  bindCloudIdentity(input: BindCloudIdentityInput): LedgerMember;
   updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>): LedgerMember | undefined;
   canEdit(createdByUserId?: string, ledgerId?: string): boolean;
   refresh?(): void;

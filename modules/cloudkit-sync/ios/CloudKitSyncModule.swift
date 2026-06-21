@@ -1,8 +1,10 @@
 import CloudKit
 import ExpoModulesCore
+import UIKit
 
 public class CloudKitSyncModule: Module {
   private let container = CKContainer.default()
+  private let sharingDelegate = CloudKitSharingControllerDelegate()
   private var database: CKDatabase { container.privateCloudDatabase }
   private let syncMetadataKeys: Set<String> = [
     "appSyncCreatedByUserId",
@@ -45,6 +47,22 @@ public class CloudKitSyncModule: Module {
       return try await self.pushRecords(zoneName: zoneName, payloads: records)
     }
 
+    AsyncFunction("pullChangesInDatabase") { (zoneName: String, sinceToken: String?, databaseScope: String, ownerName: String?) async throws -> [String: Any] in
+      let route = try self.databaseRoute(zoneName: zoneName, databaseScope: databaseScope, ownerName: ownerName)
+      if route.databaseScope == .privateScope {
+        try await self.ensureZone(route)
+      }
+      return try await self.pullChangesResilient(route: route, sinceToken: sinceToken)
+    }
+
+    AsyncFunction("pushRecordsInDatabase") { (zoneName: String, records: [[String: Any]], databaseScope: String, ownerName: String?) async throws -> [String: Any] in
+      let route = try self.databaseRoute(zoneName: zoneName, databaseScope: databaseScope, ownerName: ownerName)
+      if route.databaseScope == .privateScope {
+        try await self.ensureZone(route)
+      }
+      return try await self.pushRecords(route: route, payloads: records)
+    }
+
     AsyncFunction("resetZone") { (zoneName: String) async throws -> [String: Any] in
       let id = self.zoneID(zoneName)
       do {
@@ -57,6 +75,26 @@ public class CloudKitSyncModule: Module {
         "zoneName": zoneName,
         "reset": true
       ]
+    }
+
+    AsyncFunction("presentLedgerShare") { (ledgerId: String, title: String?) async throws -> [String: Any] in
+      let zoneName = "zone-\(ledgerId)"
+      let shareTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        ? title!.trimmingCharacters(in: .whitespacesAndNewlines)
+        : "Shared finance ledger"
+      try await self.ensureZone(zoneName)
+      let share = try await self.fetchOrCreateZoneWideShare(zoneName: zoneName, title: shareTitle)
+      try await self.presentCloudSharingController(share, title: shareTitle)
+
+      var result: [String: Any] = ["ledgerId": ledgerId]
+      if let url = share.url?.absoluteString {
+        result["shareUrl"] = url
+      }
+      return result
+    }
+
+    AsyncFunction("consumeAcceptedShares") { () -> [[String: Any]] in
+      CloudKitAcceptedShareStore.shared.consume()
     }
   }
 
@@ -105,23 +143,52 @@ public class CloudKitSyncModule: Module {
     CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
   }
 
+  private func databaseRoute(zoneName: String, databaseScope: String, ownerName: String?) throws -> CloudKitDatabaseRoute {
+    if databaseScope == "shared" {
+      guard let ownerName, !ownerName.isEmpty else {
+        throw CloudKitSyncError.missingSharedOwner
+      }
+      return CloudKitDatabaseRoute(
+        database: container.sharedCloudDatabase,
+        databaseScope: .sharedScope,
+        zoneID: CKRecordZone.ID(zoneName: zoneName, ownerName: ownerName),
+        zoneName: zoneName
+      )
+    }
+    return CloudKitDatabaseRoute(
+      database: container.privateCloudDatabase,
+      databaseScope: .privateScope,
+      zoneID: zoneID(zoneName),
+      zoneName: zoneName
+    )
+  }
+
   private func ledgerId(from zoneName: String) -> String {
     zoneName.hasPrefix("zone-") ? String(zoneName.dropFirst(5)) : zoneName
   }
 
   private func ensureZone(_ zoneName: String) async throws {
-    let id = zoneID(zoneName)
+    try await ensureZone(CloudKitDatabaseRoute(
+      database: container.privateCloudDatabase,
+      databaseScope: .privateScope,
+      zoneID: zoneID(zoneName),
+      zoneName: zoneName
+    ))
+  }
+
+  private func ensureZone(_ route: CloudKitDatabaseRoute) async throws {
+    let id = route.zoneID
     do {
-      _ = try await fetchZone(id)
+      _ = try await fetchZone(id, in: route.database)
     } catch {
       if !isNotFound(error) { throw error }
-      _ = try await saveZone(CKRecordZone(zoneID: id))
+      _ = try await saveZone(CKRecordZone(zoneID: id), in: route.database)
     }
   }
 
-  private func fetchZone(_ zoneID: CKRecordZone.ID) async throws -> CKRecordZone {
+  private func fetchZone(_ zoneID: CKRecordZone.ID, in database: CKDatabase? = nil) async throws -> CKRecordZone {
     try await withCheckedThrowingContinuation { continuation in
-      database.fetch(withRecordZoneID: zoneID) { zone, error in
+      (database ?? self.database).fetch(withRecordZoneID: zoneID) { zone, error in
         if let error {
           continuation.resume(throwing: error)
         } else if let zone {
@@ -133,9 +200,9 @@ public class CloudKitSyncModule: Module {
     }
   }
 
-  private func saveZone(_ zone: CKRecordZone) async throws -> CKRecordZone {
+  private func saveZone(_ zone: CKRecordZone, in database: CKDatabase? = nil) async throws -> CKRecordZone {
     try await withCheckedThrowingContinuation { continuation in
-      database.save(zone) { savedZone, error in
+      (database ?? self.database).save(zone) { savedZone, error in
         if let error {
           continuation.resume(throwing: error)
         } else if let savedZone {
@@ -161,6 +228,90 @@ public class CloudKitSyncModule: Module {
     }
   }
 
+  private func zoneWideShareRecordID(zoneName: String) -> CKRecord.ID {
+    CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID(zoneName))
+  }
+
+  private func isShareRecord(_ record: CKRecord) -> Bool {
+    record is CKShare || isShareRecordID(record.recordID)
+  }
+
+  private func isShareRecordID(_ recordID: CKRecord.ID) -> Bool {
+    recordID.recordName == CKRecordNameZoneWideShare
+  }
+
+  private func fetchOrCreateZoneWideShare(zoneName: String, title: String) async throws -> CKShare {
+    if let existing = try await fetchRecordIfExists(zoneWideShareRecordID(zoneName: zoneName)) {
+      guard let share = existing as? CKShare else {
+        throw CloudKitSyncError.invalidShareRecord
+      }
+      if share[CKShare.SystemFieldKey.title] as? String != title {
+        share[CKShare.SystemFieldKey.title] = title as NSString
+        return try await saveShare(share)
+      }
+      return share
+    }
+
+    let share = CKShare(recordZoneID: zoneID(zoneName))
+    share[CKShare.SystemFieldKey.title] = title as NSString
+    share.publicPermission = .none
+    return try await saveShare(share)
+  }
+
+  private func saveShare(_ share: CKShare) async throws -> CKShare {
+    let saved = try await saveRecord(share)
+    guard let savedShare = saved as? CKShare else {
+      throw CloudKitSyncError.invalidShareRecord
+    }
+    return savedShare
+  }
+
+  @MainActor
+  private func presentCloudSharingController(_ share: CKShare, title: String) throws {
+    guard let presenter = Self.topViewController() else {
+      throw CloudKitSyncError.missingPresenter
+    }
+
+    let controller = UICloudSharingController(share: share, container: container)
+    sharingDelegate.itemTitle = title
+    controller.delegate = sharingDelegate
+    if let popover = controller.popoverPresentationController {
+      popover.sourceView = presenter.view
+      popover.sourceRect = CGRect(
+        x: presenter.view.bounds.midX,
+        y: presenter.view.bounds.midY,
+        width: 1,
+        height: 1
+      )
+      popover.permittedArrowDirections = []
+    }
+    presenter.present(controller, animated: true)
+  }
+
+  @MainActor
+  private static func topViewController() -> UIViewController? {
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let window = scenes
+      .first { $0.activationState == .foregroundActive }?
+      .windows
+      .first { $0.isKeyWindow }
+    return topViewController(from: window?.rootViewController)
+  }
+
+  @MainActor
+  private static func topViewController(from controller: UIViewController?) -> UIViewController? {
+    if let navigation = controller as? UINavigationController {
+      return topViewController(from: navigation.visibleViewController)
+    }
+    if let tab = controller as? UITabBarController {
+      return topViewController(from: tab.selectedViewController)
+    }
+    if let presented = controller?.presentedViewController {
+      return topViewController(from: presented)
+    }
+    return controller
+  }
+
   private func pullChanges(zoneName: String, sinceToken: String?) async throws -> [String: Any] {
     let zoneID = zoneID(zoneName)
     let previousToken = try decodeChangeToken(sinceToken)
@@ -180,11 +331,13 @@ public class CloudKitSyncModule: Module {
 
       operation.recordChangedBlock = { [weak self] record in
         guard let self else { return }
+        if self.isShareRecord(record) { return }
         records.append(self.payload(from: record, zoneName: zoneName))
       }
 
       operation.recordWithIDWasDeletedBlock = { [weak self] recordID, recordType in
         guard let self else { return }
+        if self.isShareRecordID(recordID) { return }
         let now = self.isoFormatter.string(from: Date())
         records.append([
           "recordName": recordID.recordName,
@@ -232,9 +385,89 @@ public class CloudKitSyncModule: Module {
     }
   }
 
+  private func pullChangesResilient(route: CloudKitDatabaseRoute, sinceToken: String?) async throws -> [String: Any] {
+    do {
+      return try await pullChanges(route: route, sinceToken: sinceToken)
+    } catch {
+      guard sinceToken != nil, isRecoverableChangeTokenError(error) else { throw error }
+      return try await pullChanges(route: route, sinceToken: nil)
+    }
+  }
+
+  private func pullChanges(route: CloudKitDatabaseRoute, sinceToken: String?) async throws -> [String: Any] {
+    let previousToken = try decodeChangeToken(sinceToken)
+
+    return try await withCheckedThrowingContinuation { continuation in
+      var records: [[String: Any]] = []
+      var latestToken: CKServerChangeToken?
+      var operationError: Error?
+
+      let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
+      config.previousServerChangeToken = previousToken
+
+      let operation = CKFetchRecordZoneChangesOperation(
+        recordZoneIDs: [route.zoneID],
+        configurationsByRecordZoneID: [route.zoneID: config]
+      )
+
+      operation.recordChangedBlock = { [weak self] record in
+        guard let self else { return }
+        if self.isShareRecord(record) { return }
+        records.append(self.payload(from: record, zoneName: route.zoneName))
+      }
+
+      operation.recordWithIDWasDeletedBlock = { [weak self] recordID, recordType in
+        guard let self else { return }
+        if self.isShareRecordID(recordID) { return }
+        let now = self.isoFormatter.string(from: Date())
+        records.append([
+          "recordName": recordID.recordName,
+          "recordType": recordType,
+          "zoneName": route.zoneName,
+          "ledgerId": self.ledgerId(from: route.zoneName),
+          "fields": [:],
+          "updatedAt": now,
+          "deletedAt": now,
+          "syncStatus": "synced"
+        ])
+      }
+
+      operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
+        latestToken = token
+      }
+
+      operation.recordZoneFetchCompletionBlock = { _, token, _, _, error in
+        latestToken = token ?? latestToken
+        operationError = error
+      }
+
+      operation.fetchRecordZoneChangesCompletionBlock = { [weak self] error in
+        if let error = error ?? operationError {
+          continuation.resume(throwing: error)
+          return
+        }
+        let tokenString = try? self?.encodeChangeToken(latestToken)
+        continuation.resume(returning: [
+          "records": records,
+          "changeToken": tokenString as Any
+        ])
+      }
+
+      route.database.add(operation)
+    }
+  }
+
   private func pushRecords(zoneName: String, payloads: [[String: Any]]) async throws -> [String: Any] {
     var accepted: [[String: Any]] = []
     var conflicts: [[String: Any]] = []
+    var batchSaves: [CKRecord] = []
+
+    func flushBatchSaves() async throws {
+      guard !batchSaves.isEmpty else { return }
+      let savedRecords = try await saveRecords(batchSaves)
+      accepted.append(contentsOf: savedRecords.map { self.payload(from: $0, zoneName: zoneName) })
+      batchSaves.removeAll()
+    }
 
     for payload in payloads {
       let recordName = string(payload["recordName"]) ?? UUID().uuidString
@@ -242,18 +475,9 @@ public class CloudKitSyncModule: Module {
       let recordID = CKRecord.ID(recordName: recordName, zoneID: zoneID(zoneName))
       let localTag = string(payload["recordChangeTag"])
       let localDeletedAt = string(payload["deletedAt"])
-      let existing = try await fetchRecordIfExists(recordID)
-
-      if let existing, let localTag, existing.recordChangeTag != localTag {
-        conflicts.append([
-          "local": payload,
-          "remote": self.payload(from: existing, zoneName: zoneName),
-          "reason": "remote-newer"
-        ])
-        continue
-      }
 
       if localDeletedAt != nil {
+        try await flushBatchSaves()
         do {
           _ = try await deleteRecord(recordID)
         } catch {
@@ -266,6 +490,31 @@ public class CloudKitSyncModule: Module {
         continue
       }
 
+      if localTag == nil {
+        let record = CKRecord(recordType: recordType, recordID: recordID)
+        if let fields = payload["fields"] as? [String: Any] {
+          apply(fields: fields, to: record)
+        }
+        applySyncMetadata(from: payload, to: record)
+        batchSaves.append(record)
+        if batchSaves.count >= 200 {
+          try await flushBatchSaves()
+        }
+        continue
+      }
+
+      try await flushBatchSaves()
+      let existing = try await fetchRecordIfExists(recordID)
+
+      if let existing, let localTag, existing.recordChangeTag != localTag {
+        conflicts.append([
+          "local": payload,
+          "remote": self.payload(from: existing, zoneName: zoneName),
+          "reason": "remote-newer"
+        ])
+        continue
+      }
+
       let record = existing ?? CKRecord(recordType: recordType, recordID: recordID)
       if let fields = payload["fields"] as? [String: Any] {
         apply(fields: fields, to: record)
@@ -274,6 +523,7 @@ public class CloudKitSyncModule: Module {
       let saved = try await saveRecord(record)
       accepted.append(self.payload(from: saved, zoneName: zoneName))
     }
+    try await flushBatchSaves()
 
     return [
       "accepted": accepted,
@@ -281,9 +531,83 @@ public class CloudKitSyncModule: Module {
     ]
   }
 
-  private func fetchRecordIfExists(_ recordID: CKRecord.ID) async throws -> CKRecord? {
+  private func pushRecords(route: CloudKitDatabaseRoute, payloads: [[String: Any]]) async throws -> [String: Any] {
+    var accepted: [[String: Any]] = []
+    var conflicts: [[String: Any]] = []
+    var batchSaves: [CKRecord] = []
+
+    func flushBatchSaves() async throws {
+      guard !batchSaves.isEmpty else { return }
+      let savedRecords = try await saveRecords(batchSaves, in: route.database)
+      accepted.append(contentsOf: savedRecords.map { self.payload(from: $0, zoneName: route.zoneName) })
+      batchSaves.removeAll()
+    }
+
+    for payload in payloads {
+      let recordName = string(payload["recordName"]) ?? UUID().uuidString
+      let recordType = string(payload["recordType"]) ?? "transaction"
+      let recordID = CKRecord.ID(recordName: recordName, zoneID: route.zoneID)
+      let localTag = string(payload["recordChangeTag"])
+      let localDeletedAt = string(payload["deletedAt"])
+
+      if localDeletedAt != nil {
+        try await flushBatchSaves()
+        do {
+          _ = try await deleteRecord(recordID, in: route.database)
+        } catch {
+          if !isNotFound(error) { throw error }
+        }
+        accepted.append(payload.merging([
+          "recordChangeTag": NSNull(),
+          "syncStatus": "synced"
+        ]) { _, next in next })
+        continue
+      }
+
+      if localTag == nil {
+        let record = CKRecord(recordType: recordType, recordID: recordID)
+        if let fields = payload["fields"] as? [String: Any] {
+          apply(fields: fields, to: record)
+        }
+        applySyncMetadata(from: payload, to: record)
+        batchSaves.append(record)
+        if batchSaves.count >= 200 {
+          try await flushBatchSaves()
+        }
+        continue
+      }
+
+      try await flushBatchSaves()
+      let existing = try await fetchRecordIfExists(recordID, in: route.database)
+
+      if let existing, let localTag, existing.recordChangeTag != localTag {
+        conflicts.append([
+          "local": payload,
+          "remote": self.payload(from: existing, zoneName: route.zoneName),
+          "reason": "remote-newer"
+        ])
+        continue
+      }
+
+      let record = existing ?? CKRecord(recordType: recordType, recordID: recordID)
+      if let fields = payload["fields"] as? [String: Any] {
+        apply(fields: fields, to: record)
+      }
+      applySyncMetadata(from: payload, to: record)
+      let saved = try await saveRecord(record, in: route.database)
+      accepted.append(self.payload(from: saved, zoneName: route.zoneName))
+    }
+    try await flushBatchSaves()
+
+    return [
+      "accepted": accepted,
+      "conflicts": conflicts
+    ]
+  }
+
+  private func fetchRecordIfExists(_ recordID: CKRecord.ID, in database: CKDatabase? = nil) async throws -> CKRecord? {
     try await withCheckedThrowingContinuation { continuation in
-      database.fetch(withRecordID: recordID) { record, error in
+      (database ?? self.database).fetch(withRecordID: recordID) { record, error in
         if let error {
           if self.isNotFound(error) {
             continuation.resume(returning: nil)
@@ -297,9 +621,26 @@ public class CloudKitSyncModule: Module {
     }
   }
 
-  private func saveRecord(_ record: CKRecord) async throws -> CKRecord {
+  private func saveRecords(_ records: [CKRecord], in database: CKDatabase? = nil) async throws -> [CKRecord] {
+    guard !records.isEmpty else { return [] }
+    return try await withCheckedThrowingContinuation { continuation in
+      let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
+      operation.savePolicy = .changedKeys
+      operation.isAtomic = false
+      operation.modifyRecordsCompletionBlock = { savedRecords, _, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else {
+          continuation.resume(returning: savedRecords ?? [])
+        }
+      }
+      (database ?? self.database).add(operation)
+    }
+  }
+
+  private func saveRecord(_ record: CKRecord, in database: CKDatabase? = nil) async throws -> CKRecord {
     try await withCheckedThrowingContinuation { continuation in
-      database.save(record) { saved, error in
+      (database ?? self.database).save(record) { saved, error in
         if let error {
           continuation.resume(throwing: error)
         } else if let saved {
@@ -311,9 +652,9 @@ public class CloudKitSyncModule: Module {
     }
   }
 
-  private func deleteRecord(_ recordID: CKRecord.ID) async throws -> CKRecord.ID {
+  private func deleteRecord(_ recordID: CKRecord.ID, in database: CKDatabase? = nil) async throws -> CKRecord.ID {
     try await withCheckedThrowingContinuation { continuation in
-      database.delete(withRecordID: recordID) { deletedID, error in
+      (database ?? self.database).delete(withRecordID: recordID) { deletedID, error in
         if let error {
           continuation.resume(throwing: error)
         } else if let deletedID {
@@ -471,8 +812,225 @@ public class CloudKitSyncModule: Module {
   }
 }
 
+private final class CloudKitSharingControllerDelegate: NSObject, UICloudSharingControllerDelegate {
+  var itemTitle = "Shared finance ledger"
+
+  func itemTitle(for csc: UICloudSharingController) -> String? {
+    itemTitle
+  }
+
+  func itemType(for csc: UICloudSharingController) -> String? {
+    "Finance ledger"
+  }
+
+  func itemThumbnailData(for csc: UICloudSharingController) -> Data? {
+    let config = UIImage.SymbolConfiguration(pointSize: 44, weight: .semibold)
+    let image = UIImage(systemName: "chart.pie.fill", withConfiguration: config)?
+      .withTintColor(.systemBlue, renderingMode: .alwaysOriginal)
+    return image?.pngData()
+  }
+
+  func cloudSharingController(_ csc: UICloudSharingController, failedToSaveShareWithError error: Error) {
+    print("CloudKit share failed to save: \(error.localizedDescription)")
+  }
+
+  func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {}
+
+  func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {}
+}
+
+private struct CloudKitDatabaseRoute {
+  let database: CKDatabase
+  let databaseScope: CloudKitDatabaseScope
+  let zoneID: CKRecordZone.ID
+  let zoneName: String
+}
+
+private enum CloudKitDatabaseScope {
+  case privateScope
+  case sharedScope
+}
+
+private final class CloudKitAcceptedShareStore {
+  static let shared = CloudKitAcceptedShareStore()
+
+  private let userDefaultsKey = "CloudKitSyncAcceptedShares"
+  private let queue = DispatchQueue(label: "CloudKitSyncAcceptedShareStore")
+
+  private init() {}
+
+  func accept(_ metadata: CKShare.Metadata) {
+    Task {
+      do {
+        let payload = try await self.acceptShare(metadata)
+        self.append(payload)
+      } catch {
+        self.append([
+          "status": "failed",
+          "containerIdentifier": metadata.containerIdentifier,
+          "shareRecordName": metadata.share.recordID.recordName,
+          "zoneName": metadata.share.recordID.zoneID.zoneName,
+          "ownerName": metadata.share.recordID.zoneID.ownerName,
+          "error": error.localizedDescription,
+          "acceptedAt": ISO8601DateFormatter().string(from: Date())
+        ])
+      }
+    }
+  }
+
+  func consume() -> [[String: Any]] {
+    queue.sync {
+      let values = UserDefaults.standard.array(forKey: userDefaultsKey) as? [[String: Any]] ?? []
+      UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+      return values
+    }
+  }
+
+  private func acceptShare(_ metadata: CKShare.Metadata) async throws -> [String: Any] {
+    try await withCheckedThrowingContinuation { continuation in
+      let operation = CKAcceptSharesOperation(shareMetadatas: [metadata])
+      operation.qualityOfService = .userInteractive
+
+      var acceptedShare: CKShare?
+      var shareError: Error?
+      operation.perShareResultBlock = { _, result in
+        switch result {
+        case .success(let share):
+          acceptedShare = share
+        case .failure(let error):
+          shareError = error
+        }
+      }
+
+      operation.acceptSharesResultBlock = { result in
+        switch result {
+        case .success:
+          if let shareError {
+            continuation.resume(throwing: shareError)
+            return
+          }
+          guard let acceptedShare else {
+            continuation.resume(throwing: CloudKitSyncError.missingAcceptedShare)
+            return
+          }
+          continuation.resume(returning: self.payload(from: metadata, acceptedShare: acceptedShare))
+        case .failure(let error):
+          continuation.resume(throwing: error)
+        }
+      }
+
+      CKContainer(identifier: metadata.containerIdentifier).add(operation)
+    }
+  }
+
+  private func payload(from metadata: CKShare.Metadata, acceptedShare: CKShare) -> [String: Any] {
+    let zoneID = acceptedShare.recordID.zoneID
+    let zoneName = zoneID.zoneName
+    let ownerName = zoneID.ownerName
+    var payload: [String: Any] = [
+      "status": "accepted",
+      "databaseScope": "shared",
+      "containerIdentifier": metadata.containerIdentifier,
+      "ledgerId": ledgerId(from: zoneName),
+      "zoneName": zoneName,
+      "ownerName": ownerName,
+      "shareRecordName": acceptedShare.recordID.recordName,
+      "participantRole": roleString(metadata.participantRole),
+      "participantStatus": statusString(metadata.participantStatus),
+      "participantPermission": permissionString(metadata.participantPermission),
+      "acceptedAt": ISO8601DateFormatter().string(from: Date())
+    ]
+    if let shareUrl = acceptedShare.url?.absoluteString {
+      payload["shareUrl"] = shareUrl
+    }
+    return payload
+  }
+
+  private func append(_ payload: [String: Any]) {
+    queue.sync {
+      var values = UserDefaults.standard.array(forKey: userDefaultsKey) as? [[String: Any]] ?? []
+      values.append(payload)
+      UserDefaults.standard.set(values, forKey: userDefaultsKey)
+    }
+  }
+
+  private func ledgerId(from zoneName: String) -> String {
+    zoneName.hasPrefix("zone-") ? String(zoneName.dropFirst(5)) : zoneName
+  }
+
+  private func roleString(_ role: CKShare.ParticipantRole) -> String {
+    switch role.rawValue {
+    case 1:
+      return "owner"
+    case 2:
+      return "administrator"
+    case 3:
+      return "privateUser"
+    case 4:
+      return "publicUser"
+    case 0:
+      return "unknown"
+    default:
+      return "unknown"
+    }
+  }
+
+  private func statusString(_ status: CKShare.ParticipantAcceptanceStatus) -> String {
+    switch status {
+    case .accepted:
+      return "accepted"
+    case .pending:
+      return "pending"
+    case .removed:
+      return "removed"
+    case .unknown:
+      return "unknown"
+    @unknown default:
+      return "unknown"
+    }
+  }
+
+  private func permissionString(_ permission: CKShare.ParticipantPermission) -> String {
+    switch permission.rawValue {
+    case 1:
+      return "none"
+    case 2:
+      return "readOnly"
+    case 3:
+      return "readWrite"
+    case 0:
+      return "unknown"
+    default:
+      return "unknown"
+    }
+  }
+}
+
+public final class CloudKitSyncAppDelegateSubscriber: ExpoAppDelegateSubscriber {
+  public func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    if let metadata = launchOptions?[.cloudKitShareMetadata] as? CKShare.Metadata {
+      CloudKitAcceptedShareStore.shared.accept(metadata)
+    }
+    return false
+  }
+
+  public func application(
+    _ application: UIApplication,
+    userDidAcceptCloudKitShareWith cloudKitShareMetadata: CKShare.Metadata
+  ) {
+    CloudKitAcceptedShareStore.shared.accept(cloudKitShareMetadata)
+  }
+}
+
 private enum CloudKitSyncError: Error {
   case missingUserRecord
   case missingZone
   case missingRecord
+  case invalidShareRecord
+  case missingPresenter
+  case missingSharedOwner
+  case missingAcceptedShare
 }

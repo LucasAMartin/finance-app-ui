@@ -21,6 +21,16 @@ export interface SQLiteSyncTableAdapter {
 
 type SyncRow = Record<string, unknown>;
 
+const localLedgerMetaKeys = new Set([
+  'cloudDatabaseScope',
+  'cloudOwnerName',
+  'cloudZoneName',
+  'cloudShareRecordName',
+  'cloudShareUrl',
+  'cloudShareAcceptedAt',
+  'cloudParticipantPermission',
+]);
+
 const dateOnly = (value: string) => value.slice(0, 10);
 const monthOnly = (value: string) => value.slice(0, 7);
 
@@ -191,6 +201,34 @@ function decodeField(value: unknown, kind: SQLiteSyncFieldKind = 'text'): unknow
   return value;
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === 'string') return objectRecord(parseJson(value));
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stripLocalLedgerMeta(meta: unknown): Record<string, unknown> | undefined {
+  const source = objectRecord(meta);
+  if (!source) return undefined;
+  const next = { ...source };
+  localLedgerMetaKeys.forEach(key => {
+    delete next[key];
+  });
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function mergeLocalLedgerMeta(remoteMeta: unknown, localMeta: unknown): Record<string, unknown> | undefined {
+  const next = stripLocalLedgerMeta(remoteMeta) ?? {};
+  const local = objectRecord(localMeta);
+  localLedgerMetaKeys.forEach(key => {
+    if (local && Object.prototype.hasOwnProperty.call(local, key)) {
+      next[key] = local[key];
+    }
+  });
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 function fieldDefault(field: SQLiteSyncFieldMapping, record: SyncRecord): unknown {
   if (typeof field.defaultValue === 'function') {
     return (field.defaultValue as (record: SyncRecord) => unknown)(record);
@@ -208,7 +246,10 @@ function rowLedgerId(adapter: SQLiteSyncTableAdapter, row: SyncRow): string {
 function rowToRecord(adapter: SQLiteSyncTableAdapter, row: SyncRow): SyncRecord {
   const fields: Record<string, unknown> = {};
   adapter.fields.forEach(field => {
-    const value = decodeField(row[field.column], field.kind);
+    let value = decodeField(row[field.column], field.kind);
+    if (adapter.recordType === 'ledger' && field.field === 'meta') {
+      value = stripLocalLedgerMeta(value);
+    }
     if (value !== undefined) fields[field.field] = value;
   });
   return {
@@ -276,6 +317,9 @@ export class SQLiteSyncStore implements SyncRecordStore {
   applyRemoteRecord(record: SyncRecord): void {
     const adapter = adapterFor(record.recordType);
     const current = this.findRow(adapter, record.recordName);
+    if (record.recordType === 'ledger' && shouldApplyLedgerReset(record, current)) {
+      clearLedgerRowsForReset(this.database, record.ledgerId);
+    }
     const id = String(current?.id ?? record.fields.id ?? record.recordName);
     const columns = allRecordColumns(adapter);
     const values = columns.map(column => this.valueForColumn(adapter, record, column, current, id, 'synced'));
@@ -363,6 +407,34 @@ export class SQLiteSyncStore implements SyncRecordStore {
     const nextValue = Object.prototype.hasOwnProperty.call(record.fields, field.field)
       ? record.fields[field.field]
       : current?.[column] ?? fieldDefault(field, record);
+    if (adapter.recordType === 'ledger' && field.field === 'meta') {
+      const currentMeta = typeof current?.[column] === 'string' ? parseJson(current[column] as string) : current?.[column];
+      return encodeField(mergeLocalLedgerMeta(nextValue, currentMeta), field.kind);
+    }
     return encodeField(nextValue, field.kind);
   }
+}
+
+function shouldApplyLedgerReset(record: SyncRecord, current: SyncRow | null): boolean {
+  const incomingResetId = resetIdFromMeta(record.fields.meta);
+  if (!incomingResetId) return false;
+  const currentMeta = parseJson(typeof current?.meta === 'string' ? current.meta : null);
+  return resetIdFromMeta(currentMeta) !== incomingResetId;
+}
+
+function resetIdFromMeta(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined;
+  const resetId = (meta as { cloudResetId?: unknown }).cloudResetId;
+  return typeof resetId === 'string' && resetId.length > 0 ? resetId : undefined;
+}
+
+function clearLedgerRowsForReset(database: SQLiteDatabaseLike, ledgerId: string): void {
+  database.runSync('DELETE FROM attachments WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM transactions WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM incomes WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM budgets WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM bills WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM recurring_rules WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM categories WHERE ledger_id = ?', ledgerId);
+  database.runSync('DELETE FROM ledger_members WHERE ledger_id = ?', ledgerId);
 }

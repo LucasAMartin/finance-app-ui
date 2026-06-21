@@ -12,13 +12,15 @@
         "NSSpeechRecognitionUsageDescription": "Allow finance-app to recognize speech so you can add expenses hands-free.",
         "NSMicrophoneUsageDescription": "Allow finance-app to use the microphone to log expenses by voice.",
         "NSFaceIDUsageDescription": "Use Face ID to keep your financial information private.",
-        "NSPhotoLibraryUsageDescription": "Choose a photo from your library to use as the app background.",
-        "ITSAppUsesNonExemptEncryption": false
+        "NSPhotoLibraryUsageDescription": "Choose a photo from your library to use as your profile picture or app background.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "CKSharingSupported": true
       },
       "entitlements": {
         "com.apple.developer.icloud-container-identifiers": [
           "iCloud.com.lucasmartin.financeapp"
         ],
+        "com.apple.developer.icloud-extended-share-access": [],
         "com.apple.developer.icloud-services": [
           "CloudKit"
         ],
@@ -45,7 +47,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Choose a photo from your library to use as the app background."
+          "photosPermission": "Choose a photo from your library to use as your profile picture or app background."
         }
       ],
       [

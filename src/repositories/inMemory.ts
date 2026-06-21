@@ -10,11 +10,13 @@ import {
 import type {
   AppSettings,
   Attachment,
+  BindCloudIdentityInput,
   Bill,
   Budget,
   Category,
   CreateTransactionInput,
   DevDataRepo,
+  EnsureLedgerMemberInput,
   Income,
   Ledger,
   LedgerMember,
@@ -463,8 +465,82 @@ class InMemorySessionRepo implements SessionRepo {
     return ledger;
   }
 
+  updateLedgerLocalMeta(id: string, meta: Record<string, unknown> | undefined) {
+    const ledger = this.ledgersRepo.forceUpdate(id, { meta });
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return ledger;
+  }
+
   listMembers(ledgerId = activeLedgerId) {
     return this.ledgerMembersRepo.list().filter(member => member.ledgerId === ledgerId);
+  }
+
+  ensureMember(input: EnsureLedgerMemberInput) {
+    const existing = this.ledgerMembersRepo.list().find(member =>
+      member.ledgerId === input.ledgerId && member.userId === input.userId
+    );
+    if (existing) return existing;
+    const now = nowIso();
+    const member: LedgerMember = {
+      id: `member-${input.ledgerId}-${input.userId.replace(/[^A-Za-z0-9_.-]/g, '_')}`,
+      ledgerId: input.ledgerId,
+      userId: input.userId,
+      displayName: input.displayName ?? 'You',
+      role: input.role ?? 'member',
+      status: 'active',
+      allowOthersToEditMyItems: input.allowOthersToEditMyItems ?? true,
+      createdByUserId: input.userId,
+      updatedByUserId: input.userId,
+      createdAt: now,
+      updatedAt: now,
+      syncStatus: 'pending',
+      meta: input.meta,
+    };
+    this.ledgerMembersRepo.replaceAll([member, ...this.ledgerMembersRepo.list()]);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return member;
+  }
+
+  bindCloudIdentity(input: BindCloudIdentityInput) {
+    const member = this.ensureMember({
+      ...input,
+      role: input.role ?? (input.claimAsOwner ? 'owner' : 'member'),
+      displayName: input.displayName ?? 'You',
+      allowOthersToEditMyItems: input.allowOthersToEditMyItems ?? true,
+      meta: {
+        ...(input.meta ?? {}),
+        cloudKitUserId: input.userId,
+      },
+    });
+    this.ledgerMembersRepo.forceUpdate(member.id, {
+      displayName: input.displayName ?? 'You',
+      role: input.role ?? (input.claimAsOwner ? 'owner' : 'member'),
+      status: 'active',
+      allowOthersToEditMyItems: input.allowOthersToEditMyItems ?? true,
+      deletedAt: undefined,
+      meta: {
+        ...(input.meta ?? {}),
+        cloudKitUserId: input.userId,
+      },
+    });
+    const fakeUserIds = new Set([DEFAULT_OWNER_USER_ID, DEV_PARTNER_USER_ID]);
+    this.ledgerMembersRepo.list()
+      .filter(item => item.ledgerId === input.ledgerId && fakeUserIds.has(item.userId) && item.userId !== input.userId)
+      .forEach(item => {
+        this.ledgerMembersRepo.forceUpdate(item.id, { deletedAt: nowIso() });
+      });
+    if (input.claimAsOwner) {
+      this.ledgersRepo.forceUpdate(input.ledgerId, {
+        ownerUserId: input.userId,
+        createdByUserId: input.userId,
+        updatedByUserId: input.userId,
+      });
+    }
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return this.ledgerMembersRepo.get(member.id) ?? member;
   }
 
   updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>) {

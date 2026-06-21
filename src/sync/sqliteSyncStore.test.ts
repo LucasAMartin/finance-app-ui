@@ -38,6 +38,55 @@ function remoteTransaction(recordName: string, updatedAt = '2026-06-01T10:00:00.
   };
 }
 
+function remoteLedger(resetId: string, updatedAt = '2026-06-01T10:00:00.000Z'): SyncRecord {
+  return {
+    recordName: LEDGER_ID,
+    recordType: 'ledger',
+    zoneName: ZONE_NAME,
+    ledgerId: LEDGER_ID,
+    fields: {
+      name: 'Shared finances',
+      ownerUserId: 'alex',
+      active: true,
+      meta: {
+        seeded: true,
+        cloudResetId: resetId,
+        cloudResetAt: updatedAt,
+      },
+    },
+    createdByUserId: 'alex',
+    updatedByUserId: 'alex',
+    createdAt: '2026-06-01T09:00:00.000Z',
+    updatedAt,
+    recordChangeTag: `ledger-${resetId}`,
+    syncStatus: 'synced',
+  };
+}
+
+function remoteMember(userId: string, role: 'owner' | 'member', updatedAt = '2026-06-01T10:00:00.000Z'): SyncRecord {
+  const recordName = `member-${LEDGER_ID}-${userId}`;
+  return {
+    recordName,
+    recordType: 'ledgerMember',
+    zoneName: ZONE_NAME,
+    ledgerId: LEDGER_ID,
+    fields: {
+      userId,
+      displayName: userId === 'alex' ? 'Alex' : 'Partner',
+      role,
+      status: 'active',
+      allowOthersToEditMyItems: true,
+      meta: { seeded: true },
+    },
+    createdByUserId: 'alex',
+    updatedByUserId: 'alex',
+    createdAt: '2026-06-01T09:00:00.000Z',
+    updatedAt,
+    recordChangeTag: `member-${userId}-${updatedAt}`,
+    syncStatus: 'synced',
+  };
+}
+
 class PushAcceptingAdapter implements SyncAdapter {
   pushed: SyncRecord[] = [];
   private version = 0;
@@ -271,6 +320,51 @@ test('SQLite ledger currency updates sync through ledger metadata', async () => 
   assert.equal(db.getFirstSync<{ sync_status: string }>('SELECT sync_status FROM ledgers WHERE id = ?', LEDGER_ID)?.sync_status, 'synced');
 });
 
+test('SQLite ledger sync keeps local CloudKit routing metadata on device only', async () => {
+  const { repos, store, db } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const adapter = new PushAcceptingAdapter();
+
+  repos.sessionRepo.updateLedgerLocalMeta(LEDGER_ID, {
+    currencyCode: 'JPY',
+    cloudDatabaseScope: 'shared',
+    cloudOwnerName: '__owner__',
+    cloudZoneName: ZONE_NAME,
+    cloudShareRecordName: '__share__',
+    cloudParticipantPermission: 'readWrite',
+  });
+  repos.sessionRepo.updateLedger(LEDGER_ID, {
+    meta: {
+      ...(repos.sessionRepo.listLedgers()[0].meta ?? {}),
+      currencyCode: 'EUR',
+    },
+  });
+
+  const result = await syncWith(adapter, store);
+
+  assert.equal(result.pushedRecords, 1);
+  assert.deepEqual(adapter.pushed.at(-1)?.fields.meta, { currencyCode: 'EUR' });
+
+  store.applyRemoteRecord({
+    ...remoteLedger('remote-reset', '2026-06-01T12:00:00.000Z'),
+    fields: {
+      name: 'Shared finances',
+      ownerUserId: 'alex',
+      active: true,
+      meta: { currencyCode: 'CAD' },
+    },
+  });
+
+  const storedMeta = JSON.parse(db.getFirstSync<{ meta: string }>(
+    'SELECT meta FROM ledgers WHERE id = ?',
+    LEDGER_ID,
+  )?.meta ?? '{}');
+  assert.equal(storedMeta.currencyCode, 'CAD');
+  assert.equal(storedMeta.cloudDatabaseScope, 'shared');
+  assert.equal(storedMeta.cloudOwnerName, '__owner__');
+});
+
 test('SQLiteSyncStore applies remote transactions into the real transaction repo', async () => {
   const { repos, store } = fresh();
   clearDomainRows();
@@ -286,6 +380,39 @@ test('SQLiteSyncStore applies remote transactions into the real transaction repo
   assert.equal(tx.cat, 'groceries');
   assert.equal(tx.createdByUserId, 'partner');
   assert.equal(tx.syncStatus, 'synced');
+});
+
+test('SQLiteSyncStore clears stale local ledger rows when a remote reset marker is pulled', async () => {
+  const { repos, store } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const stale = repos.transactionsRepo.create({
+    merchant: 'Only On Device A',
+    cat: 'groceries',
+    amount: 19,
+    occurredAt: '2026-06-01T12:00:00.000Z',
+  });
+  getDb().runSync(
+    `UPDATE transactions
+     SET sync_status = 'synced', cloud_record_name = id, cloud_zone_name = ?, record_change_tag = ?
+     WHERE id = ?`,
+    ZONE_NAME,
+    'old-zone-tag',
+    stale.id,
+  );
+  repos.transactionsRepo.refresh?.();
+
+  const result = await syncWith(new PushAcceptingAdapter([
+    remoteLedger('reset-from-device-b', '2999-06-01T12:05:00.000Z'),
+    remoteMember('alex', 'owner', '2999-06-01T12:05:01.000Z'),
+    remoteMember('partner', 'member', '2999-06-01T12:05:02.000Z'),
+    remoteTransaction('fresh-after-reset', '2999-06-01T12:06:00.000Z'),
+  ]), store);
+
+  assert.equal(result.pulledRecords, 4);
+  assert.equal(repos.transactionsRepo.get(stale.id), undefined);
+  assert.equal(repos.transactionsRepo.get('fresh-after-reset')?.merchant, 'Remote Market');
+  assert.equal(repos.sessionRepo.listMembers().length, 2);
 });
 
 test('SQLiteSyncStore applies remote attachments without duplicate sync/domain timestamp columns', async () => {

@@ -13,7 +13,7 @@ import type { AppSession, Ledger, LedgerMember, SyncFields, SyncStatus } from '.
 import { openSQLiteDatabaseSync, type SQLiteDatabaseLike } from './driver';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 export const DEFAULT_LEDGER_ID = 'ledger-default';
 export const DEFAULT_OWNER_USER_ID = 'alex';
 export const DEV_PARTNER_USER_ID = 'partner';
@@ -408,6 +408,9 @@ function migrate(database: SQLiteDatabaseLike) {
         );
       `);
     }
+    if (version < 11) {
+      removeSeededDevPartner(database);
+    }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });
   if (version > 0) {
@@ -714,13 +717,6 @@ function backfillDefaultLedger(database: SQLiteDatabaseLike) {
     role: 'owner',
     allowOthersToEditMyItems: true,
   });
-  insertSeedMember(database, {
-    id: `member-${DEFAULT_LEDGER_ID}-${DEV_PARTNER_USER_ID}`,
-    userId: DEV_PARTNER_USER_ID,
-    displayName: 'Partner',
-    role: 'member',
-    allowOthersToEditMyItems: true,
-  });
   [
     'transactions',
     'incomes',
@@ -743,6 +739,22 @@ function backfillDefaultLedger(database: SQLiteDatabaseLike) {
     database.runSync(`UPDATE ${table} SET created_by_user_id = COALESCE(created_by_user_id, ?)`, DEFAULT_OWNER_USER_ID);
     database.runSync(`UPDATE ${table} SET updated_by_user_id = COALESCE(updated_by_user_id, ?)`, DEFAULT_OWNER_USER_ID);
   });
+}
+
+function removeSeededDevPartner(database: SQLiteDatabaseLike) {
+  const now = new Date().toISOString();
+  database.runSync(
+    `UPDATE ledger_members
+     SET deleted_at = COALESCE(deleted_at, ?),
+         updated_at = COALESCE(updated_at, ?),
+         sync_status = CASE WHEN sync_status = 'synced' THEN 'pending' ELSE sync_status END
+     WHERE user_id = ?
+       AND (meta IS NULL OR meta LIKE '%"seeded":true%')
+       AND deleted_at IS NULL`,
+    now,
+    now,
+    DEV_PARTNER_USER_ID,
+  );
 }
 
 function insertSeedMember(database: SQLiteDatabaseLike, member: {
@@ -778,10 +790,12 @@ export function getActiveLedgerId(): string {
 }
 
 export function getCurrentUserId(): string {
+  normalizeCurrentUserForActiveLedger();
   return currentUserId;
 }
 
 export function getSession(): AppSession {
+  normalizeCurrentUserForActiveLedger();
   return { activeLedgerId, currentUserId };
 }
 
@@ -838,6 +852,18 @@ export function updateLedger(id: string, patch: Partial<Omit<Ledger, 'id'>>): Le
   return listLedgers().find(ledger => ledger.id === id);
 }
 
+export function updateLedgerLocalMeta(id: string, meta: Record<string, unknown> | undefined): Ledger | undefined {
+  const current = getDb().getFirstSync<any>('SELECT * FROM ledgers WHERE id = ? AND deleted_at IS NULL', id);
+  if (!current) return undefined;
+  getDb().runSync(
+    'UPDATE ledgers SET meta = ? WHERE id = ?',
+    json(meta),
+    id,
+  );
+  sessionListeners.forEach(listener => listener());
+  return listLedgers().find(ledger => ledger.id === id);
+}
+
 export function listLedgerMembers(ledgerId = activeLedgerId): LedgerMember[] {
   return getDb().getAllSync<any>(
     'SELECT * FROM ledger_members WHERE ledger_id = ? AND deleted_at IS NULL ORDER BY role = ? DESC, display_name ASC',
@@ -864,6 +890,201 @@ export function listLedgerMembers(ledgerId = activeLedgerId): LedgerMember[] {
   }));
 }
 
+function normalizeCurrentUserForActiveLedger() {
+  const database = getDb();
+  const current = database.getFirstSync<{ id: string }>(
+    'SELECT id FROM ledger_members WHERE ledger_id = ? AND user_id = ? AND deleted_at IS NULL',
+    activeLedgerId,
+    currentUserId,
+  );
+  if (current) return;
+
+  const owner = database.getFirstSync<{ owner_user_id: string }>(
+    'SELECT owner_user_id FROM ledgers WHERE id = ? AND deleted_at IS NULL',
+    activeLedgerId,
+  );
+  if (owner?.owner_user_id) {
+    const ownerMember = database.getFirstSync<{ id: string }>(
+      'SELECT id FROM ledger_members WHERE ledger_id = ? AND user_id = ? AND deleted_at IS NULL',
+      activeLedgerId,
+      owner.owner_user_id,
+    );
+    if (ownerMember) {
+      currentUserId = owner.owner_user_id;
+      return;
+    }
+  }
+
+  const fallback = database.getFirstSync<{ user_id: string }>(
+    `SELECT user_id FROM ledger_members
+     WHERE ledger_id = ? AND deleted_at IS NULL
+     ORDER BY role = 'owner' DESC, display_name ASC
+     LIMIT 1`,
+    activeLedgerId,
+  );
+  if (fallback?.user_id) {
+    currentUserId = fallback.user_id;
+  }
+}
+
+function memberIdFor(ledgerId: string, userId: string): string {
+  const safeUserId = userId.replace(/[^A-Za-z0-9_.-]/g, '_');
+  return `member-${ledgerId}-${safeUserId}`;
+}
+
+export function ensureLedgerMember(input: {
+  ledgerId: string;
+  userId: string;
+  displayName?: string;
+  role?: LedgerMember['role'];
+  allowOthersToEditMyItems?: boolean;
+  meta?: Record<string, unknown>;
+}): LedgerMember {
+  const existing = getDb().getFirstSync<any>(
+    'SELECT id FROM ledger_members WHERE ledger_id = ? AND user_id = ? AND deleted_at IS NULL',
+    input.ledgerId,
+    input.userId,
+  );
+  if (existing?.id) {
+    return listLedgerMembers(input.ledgerId).find(member => member.id === existing.id) as LedgerMember;
+  }
+
+  const now = new Date().toISOString();
+  const id = memberIdFor(input.ledgerId, input.userId);
+  getDb().runSync(
+    `INSERT INTO ledger_members (
+      id, ledger_id, user_id, display_name, role, status,
+      allow_others_to_edit_my_items, created_by_user_id, updated_by_user_id,
+      created_at, updated_at, sync_status, meta
+    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'pending', ?)`,
+    id,
+    input.ledgerId,
+    input.userId,
+    input.displayName ?? 'You',
+    input.role ?? 'member',
+    input.allowOthersToEditMyItems === false ? 0 : 1,
+    input.userId,
+    input.userId,
+    now,
+    now,
+    json(input.meta),
+  );
+  sessionListeners.forEach(listener => listener());
+  return listLedgerMembers(input.ledgerId).find(member => member.id === id) as LedgerMember;
+}
+
+const cloudIdentityTables = [
+  'transactions',
+  'incomes',
+  'categories',
+  'budgets',
+  'recurring_rules',
+  'attachments',
+  'bills',
+];
+
+export function bindLedgerToCloudIdentity(input: {
+  ledgerId: string;
+  userId: string;
+  displayName?: string;
+  role?: LedgerMember['role'];
+  allowOthersToEditMyItems?: boolean;
+  meta?: Record<string, unknown>;
+  claimAsOwner?: boolean;
+}): LedgerMember {
+  const now = new Date().toISOString();
+  const member = ensureLedgerMember({
+    ...input,
+    role: input.role ?? (input.claimAsOwner ? 'owner' : 'member'),
+    displayName: input.displayName ?? 'You',
+    allowOthersToEditMyItems: input.allowOthersToEditMyItems ?? true,
+    meta: {
+      ...(input.meta ?? {}),
+      cloudKitUserId: input.userId,
+    },
+  });
+
+  getDb().runSync(
+    `UPDATE ledger_members
+     SET display_name = ?, role = ?, status = 'active', allow_others_to_edit_my_items = ?,
+         updated_by_user_id = ?, updated_at = ?, sync_status = 'pending', deleted_at = NULL,
+         meta = ?
+     WHERE id = ?`,
+    input.displayName ?? 'You',
+    input.role ?? (input.claimAsOwner ? 'owner' : 'member'),
+    input.allowOthersToEditMyItems === false ? 0 : 1,
+    input.userId,
+    now,
+    json({ ...(input.meta ?? {}), cloudKitUserId: input.userId }),
+    member.id,
+  );
+
+  getDb().runSync(
+    `UPDATE ledger_members
+     SET deleted_at = ?, updated_by_user_id = ?, updated_at = ?, sync_status = 'pending'
+     WHERE ledger_id = ?
+       AND user_id IN (?, ?)
+       AND user_id <> ?
+       AND deleted_at IS NULL`,
+    now,
+    input.userId,
+    now,
+    input.ledgerId,
+    DEFAULT_OWNER_USER_ID,
+    DEV_PARTNER_USER_ID,
+    input.userId,
+  );
+
+  if (input.claimAsOwner) {
+    getDb().runSync(
+      `UPDATE ledgers
+       SET owner_user_id = ?,
+           created_by_user_id = CASE WHEN created_by_user_id IS NULL OR created_by_user_id IN (?, ?) THEN ? ELSE created_by_user_id END,
+           updated_by_user_id = ?,
+           updated_at = ?,
+           sync_status = 'pending'
+       WHERE id = ?`,
+      input.userId,
+      DEFAULT_OWNER_USER_ID,
+      'local',
+      input.userId,
+      input.userId,
+      now,
+      input.ledgerId,
+    );
+
+    cloudIdentityTables.forEach(table => {
+      getDb().runSync(
+        `UPDATE ${table}
+         SET created_by_user_id = CASE WHEN created_by_user_id IS NULL OR created_by_user_id IN (?, ?) THEN ? ELSE created_by_user_id END,
+             updated_by_user_id = CASE WHEN updated_by_user_id IS NULL OR updated_by_user_id IN (?, ?) THEN ? ELSE updated_by_user_id END,
+             updated_at = COALESCE(updated_at, ?),
+             sync_status = 'pending'
+         WHERE ledger_id = ?
+           AND (
+             created_by_user_id IS NULL OR created_by_user_id IN (?, ?)
+             OR updated_by_user_id IS NULL OR updated_by_user_id IN (?, ?)
+           )`,
+        DEFAULT_OWNER_USER_ID,
+        'local',
+        input.userId,
+        DEFAULT_OWNER_USER_ID,
+        'local',
+        input.userId,
+        now,
+        input.ledgerId,
+        DEFAULT_OWNER_USER_ID,
+        'local',
+        DEFAULT_OWNER_USER_ID,
+        'local',
+      );
+    });
+  }
+
+  sessionListeners.forEach(listener => listener());
+  return listLedgerMembers(input.ledgerId).find(item => item.id === member.id) as LedgerMember;
+}
+
 export function updateLedgerMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>): LedgerMember | undefined {
   const current = getDb().getFirstSync<any>('SELECT * FROM ledger_members WHERE id = ?', id);
   if (!current) return undefined;
@@ -876,10 +1097,11 @@ export function updateLedgerMember(id: string, patch: Partial<Omit<LedgerMember,
   if (changingAnotherMember && patch.allowOthersToEditMyItems !== undefined) return undefined;
   if (changingAnotherMember && actor?.role !== 'owner') return undefined;
   const now = new Date().toISOString();
+  const nextMeta = patch.meta !== undefined ? patch.meta : (current.meta ? JSON.parse(current.meta) : undefined);
   getDb().runSync(
     `UPDATE ledger_members
      SET display_name = ?, role = ?, status = ?, allow_others_to_edit_my_items = ?,
-         updated_by_user_id = ?, updated_at = ?, sync_status = 'pending'
+         updated_by_user_id = ?, updated_at = ?, sync_status = 'pending', meta = ?
      WHERE id = ?`,
     patch.displayName ?? current.display_name,
     patch.role ?? current.role,
@@ -887,6 +1109,7 @@ export function updateLedgerMember(id: string, patch: Partial<Omit<LedgerMember,
     patch.allowOthersToEditMyItems !== undefined ? (patch.allowOthersToEditMyItems ? 1 : 0) : current.allow_others_to_edit_my_items,
     currentUserId,
     now,
+    json(nextMeta),
     id,
   );
   sessionListeners.forEach(listener => listener());

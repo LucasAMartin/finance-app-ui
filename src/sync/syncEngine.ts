@@ -66,6 +66,7 @@ export interface SyncLedgerOptions {
   store: SyncRecordStore;
   ledgerId: string;
   zoneName: string;
+  changeTokenKey?: string;
 }
 
 export interface SyncLedgerResult {
@@ -116,6 +117,7 @@ export async function syncLedger({
   store,
   ledgerId,
   zoneName,
+  changeTokenKey,
 }: SyncLedgerOptions): Promise<SyncLedgerResult> {
   const currentUser = await adapter.getCurrentUser();
   if (!currentUser.available) {
@@ -132,7 +134,8 @@ export async function syncLedger({
   let pushedRecords = 0;
   let conflicts = 0;
 
-  const pull = await adapter.pullChanges(zoneName, store.getChangeToken(zoneName));
+  const tokenKey = changeTokenKey ?? zoneName;
+  const pull = await adapter.pullChanges(zoneName, store.getChangeToken(tokenKey));
   orderedForApply(pull.records).forEach(remote => {
     if (remote.ledgerId !== ledgerId) return;
     const local = store.getRecord(remote.recordName);
@@ -142,7 +145,7 @@ export async function syncLedger({
       return;
     }
   });
-  store.setChangeToken(zoneName, pull.changeToken);
+  store.setChangeToken(tokenKey, pull.changeToken);
 
   const permitted: SyncRecord[] = [];
   store.listPendingRecords(ledgerId).forEach(record => {

@@ -7,9 +7,10 @@ import {
   StyleSheet,
   Animated,
   Switch,
+  Image as RNImage,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Host, Image } from '@expo/ui/swift-ui';
+import { Host, Image as SwiftUIImage } from '@expo/ui/swift-ui';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { Theme } from '../theme';
 import { ScreenExitButton } from './GlassButton';
@@ -41,6 +42,7 @@ interface Props {
   activeLedgerName?: string;
   currentUserId: string;
   ledgerMembers: LedgerMember[];
+  onOpenProfile: () => void;
   onCurrentUserChange: (userId: string) => void;
   onCurrentMemberEditLockChange: (allow: boolean) => void;
 }
@@ -70,6 +72,11 @@ const SECTIONS: DrawerSection[] = [
   },
 ];
 
+function memberProfileImageDataUri(member?: LedgerMember): string | undefined {
+  const value = member?.meta?.profileImageDataUri;
+  return typeof value === 'string' && value.startsWith('data:image/') ? value : undefined;
+}
+
 export function Drawer({
   theme,
   width,
@@ -81,6 +88,7 @@ export function Drawer({
   activeLedgerName,
   currentUserId,
   ledgerMembers,
+  onOpenProfile,
   onCurrentUserChange,
   onCurrentMemberEditLockChange,
 }: Props) {
@@ -88,6 +96,7 @@ export function Drawer({
   const currentMember = ledgerMembers.find(member => member.userId === currentUserId);
   const profileName = currentMember?.displayName ?? currentUserId;
   const initial = profileName.trim().slice(0, 1).toUpperCase() || 'U';
+  const profileImageDataUri = memberProfileImageDataUri(currentMember);
 
   const translateX = (progress as Animated.Value).interpolate
     ? (progress as Animated.Value).interpolate({
@@ -126,9 +135,19 @@ export function Drawer({
       </View>
 
       {/* Profile */}
-      <View style={styles.profile}>
+      <TouchableOpacity
+        onPress={onOpenProfile}
+        activeOpacity={0.72}
+        accessibilityRole="button"
+        accessibilityLabel="Open profile"
+        style={styles.profile}
+      >
         <View style={[styles.avatar, { backgroundColor: theme.accent.fill }]}>
-          <Text style={[TYPE.headline, { color: theme.accent.ink }]}>{initial}</Text>
+          {profileImageDataUri ? (
+            <RNImage source={{ uri: profileImageDataUri }} style={styles.avatarImage} />
+          ) : (
+            <Text style={[TYPE.headline, { color: theme.accent.ink }]}>{initial}</Text>
+          )}
         </View>
         <Text style={[TYPE.headline, { color: theme.text, marginTop: 12 }]}>
           {profileName}
@@ -136,7 +155,7 @@ export function Drawer({
         <Text style={[TYPE.bodySmEm, { color: theme.textSec, marginTop: 2 }]}>
           {activeLedgerName ?? 'Shared ledger'}
         </Text>
-      </View>
+      </TouchableOpacity>
 
       <View style={[styles.divider, { backgroundColor: theme.sep }]} />
 
@@ -160,7 +179,7 @@ export function Drawer({
                 style={styles.item}
               >
                 <Host style={styles.iconHost} ignoreSafeArea="all">
-                  <Image
+                  <SwiftUIImage
                     systemName={item.systemIcon}
                     size={20}
                     color={item.highlight ? theme.accent.dot : theme.textSec}
@@ -187,7 +206,7 @@ export function Drawer({
             </Text>
             <View style={styles.devRow}>
               <Host style={styles.iconHost} ignoreSafeArea="all">
-                <Image
+                <SwiftUIImage
                   systemName="externaldrive"
                   size={20}
                   color={theme.textSec}
@@ -213,7 +232,7 @@ export function Drawer({
             <View style={styles.devBlock}>
               <View style={styles.devHeaderRow}>
                 <Host style={styles.iconHost} ignoreSafeArea="all">
-                  <Image
+                  <SwiftUIImage
                     systemName="person.2"
                     size={20}
                     color={theme.textSec}
@@ -263,7 +282,7 @@ export function Drawer({
             {currentMember && (
               <View style={styles.devRow}>
                 <Host style={styles.iconHost} ignoreSafeArea="all">
-                  <Image
+                  <SwiftUIImage
                     systemName={currentMember.allowOthersToEditMyItems ? 'lock.open' : 'lock'}
                     size={20}
                     color={theme.textSec}
@@ -322,6 +341,11 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 60,
+    height: 60,
   },
   divider: {
     height: 1,

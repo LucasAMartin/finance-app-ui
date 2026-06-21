@@ -22,9 +22,13 @@ function clearDomainRows() {
 }
 
 function partnerMember(repos: Repositories) {
-  const member = repos.sessionRepo.listMembers().find(item => item.userId === 'partner');
-  assert.ok(member, 'expected seeded partner member');
-  return member;
+  return repos.sessionRepo.ensureMember({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'partner',
+    displayName: 'Partner',
+    role: 'member',
+    allowOthersToEditMyItems: true,
+  });
 }
 
 function alexMember(repos: Repositories) {
@@ -42,6 +46,7 @@ function unlockPartnerRows(repos: Repositories) {
 }
 
 function createPartnerTransaction(repos: Repositories) {
+  partnerMember(repos);
   repos.sessionRepo.setCurrentUserId('partner');
   return repos.transactionsRepo.create({
     merchant: 'Partner Market',
@@ -66,7 +71,7 @@ test('sqlite sample data reset clears and reloads ledger members plus ledger-sco
   assert.ok(repos.categoriesRepo.list().length > 0);
   assert.deepEqual(
     repos.sessionRepo.listMembers().map(member => member.userId).sort(),
-    ['alex', 'partner'],
+    ['alex'],
   );
   assert.ok(repos.transactionsRepo.list().every(row => row.ledgerId === DEFAULT_LEDGER_ID));
   assert.ok(repos.transactionsRepo.list().every(row => row.createdByUserId === 'alex'));
@@ -91,6 +96,90 @@ test('sqlite creates inject active ledger, current user ownership, timestamps, a
   assert.equal(tx.syncStatus, 'pending');
   assert.match(tx.createdAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
   assert.match(tx.updatedAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('sqlite ensures a CloudKit participant member and uses it for new edits', () => {
+  const repos = freshRepos();
+
+  const member = repos.sessionRepo.ensureMember({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-participant',
+    displayName: 'You',
+    role: 'member',
+    meta: { cloudKitUserId: 'icloud-participant' },
+  });
+  repos.sessionRepo.setCurrentUserId('icloud-participant');
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Participant Market',
+    cat: 'groceries',
+    amount: 12,
+    occurredAt: '2026-06-01T09:00:00.000Z',
+  });
+
+  assert.equal(member.syncStatus, 'pending');
+  assert.equal(member.userId, 'icloud-participant');
+  assert.equal(tx.createdByUserId, 'icloud-participant');
+  assert.equal(repos.sessionRepo.ensureMember({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-participant',
+  }).id, member.id);
+});
+
+test('sqlite binding owner to iCloud hides fake members and rewrites local ownership', () => {
+  const repos = freshRepos();
+  const existing = repos.transactionsRepo.create({
+    merchant: 'Seed Owner Market',
+    cat: 'groceries',
+    amount: 14,
+    occurredAt: '2026-06-01T09:00:00.000Z',
+  });
+
+  const member = repos.sessionRepo.bindCloudIdentity({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-owner',
+    displayName: 'You',
+    claimAsOwner: true,
+  });
+  repos.sessionRepo.setCurrentUserId('icloud-owner');
+  repos.transactionsRepo.refresh?.();
+  const next = repos.transactionsRepo.create({
+    merchant: 'Cloud Market',
+    cat: 'groceries',
+    amount: 18,
+    occurredAt: '2026-06-01T10:00:00.000Z',
+  });
+
+  assert.equal(member.role, 'owner');
+  assert.deepEqual(repos.sessionRepo.listMembers().map(item => item.userId), ['icloud-owner']);
+  assert.equal(repos.sessionRepo.listLedgers()[0].ownerUserId, 'icloud-owner');
+  assert.equal(repos.transactionsRepo.get(existing.id)?.createdByUserId, 'icloud-owner');
+  assert.equal(next.createdByUserId, 'icloud-owner');
+
+  repos.sessionRepo.setCurrentUserId('alex');
+  assert.equal(repos.sessionRepo.getSession().currentUserId, 'icloud-owner');
+});
+
+test('sqlite member profile edits persist display name and avatar metadata', () => {
+  const repos = freshRepos();
+  const member = repos.sessionRepo.bindCloudIdentity({
+    ledgerId: DEFAULT_LEDGER_ID,
+    userId: 'icloud-owner',
+    displayName: 'You',
+    claimAsOwner: true,
+  });
+  repos.sessionRepo.setCurrentUserId('icloud-owner');
+
+  const updated = repos.sessionRepo.updateMember(member.id, {
+    displayName: 'Lucas',
+    meta: {
+      ...(member.meta ?? {}),
+      profileImageDataUri: 'data:image/jpeg;base64,abc123',
+    },
+  });
+
+  assert.equal(updated?.displayName, 'Lucas');
+  assert.equal(updated?.meta?.profileImageDataUri, 'data:image/jpeg;base64,abc123');
+  assert.equal(updated?.syncStatus, 'pending');
 });
 
 test('sqlite legacy local owner rows stay editable and normalize on update', () => {
@@ -216,6 +305,7 @@ test('sqlite unknown creator denies edits by default', () => {
 
 test('sqlite non-owner member cannot change another member edit-lock setting', () => {
   const repos = freshRepos();
+  partnerMember(repos);
   repos.sessionRepo.setCurrentUserId('partner');
   const alex = alexMember(repos);
 
@@ -250,6 +340,7 @@ test('sqlite locked member historical rows remain visible and counted after memb
 
 test('sqlite member edit locks apply across synced domain repos', () => {
   const repos = freshRepos();
+  partnerMember(repos);
   repos.sessionRepo.setCurrentUserId('partner');
 
   const income = repos.incomeRepo.create({

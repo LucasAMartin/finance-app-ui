@@ -9,13 +9,16 @@ import { SQLiteSettingsRepo } from './settings';
 import { SQLiteTransactionsRepo } from './transactions';
 import {
   canEditRecord,
+  bindLedgerToCloudIdentity,
   getSession,
   isDevSeedDataEnabled,
   listLedgerMembers,
   listLedgers,
+  ensureLedgerMember,
   setCurrentUserId,
   setDevSeedDataEnabled,
   subscribeSession,
+  updateLedgerLocalMeta,
   updateLedger as updateLedgerRow,
   updateLedgerMember,
 } from './db';
@@ -71,8 +74,29 @@ class SQLiteSessionRepo implements SessionRepo {
     return ledger;
   }
 
+  updateLedgerLocalMeta(id: string, meta: Record<string, unknown> | undefined) {
+    const ledger = updateLedgerLocalMeta(id, meta);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return ledger;
+  }
+
   listMembers(ledgerId?: string) {
     return listLedgerMembers(ledgerId);
+  }
+
+  ensureMember(input: Parameters<typeof ensureLedgerMember>[0]) {
+    const member = ensureLedgerMember(input);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return member;
+  }
+
+  bindCloudIdentity(input: Parameters<typeof bindLedgerToCloudIdentity>[0]) {
+    const member = bindLedgerToCloudIdentity(input);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return member;
   }
 
   updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>) {

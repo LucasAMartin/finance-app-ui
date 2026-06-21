@@ -8,7 +8,7 @@ import {
   type NativeCloudKitModule,
   type NativeCloudKitRecordPayload,
 } from './nativeCloudKitAdapter.ts';
-import { syncActiveLedger } from './syncActiveLedger.ts';
+import { cloudKitRouteForActiveLedger, syncActiveLedger } from './syncActiveLedger.ts';
 import type { SyncRecord } from './syncEngine.ts';
 
 const baseRecord: SyncRecord = {
@@ -205,6 +205,76 @@ test('native CloudKit adapter maps pulled native records through the sync adapte
   assert.equal(result.records[0].recordName, 'tx-native');
   assert.equal(result.records[0].recordChangeTag, 'tag-pulled');
   assert.equal(result.records[0].fields.cat, 'groceries');
+});
+
+test('native CloudKit adapter routes shared ledgers through the shared database bridge', async () => {
+  const calls: string[] = [];
+  const nativeModule: NativeCloudKitModule = {
+    async getCurrentUser() {
+      return { available: true, userId: 'icloud-alex' };
+    },
+    async pullChanges() {
+      throw new Error('private pull should not be used for shared routes');
+    },
+    async pushRecords() {
+      throw new Error('private push should not be used for shared routes');
+    },
+    async pullChangesInDatabase(zoneName, sinceToken, databaseScope, ownerName) {
+      calls.push('pull');
+      assert.equal(zoneName, 'zone-ledger-default');
+      assert.equal(sinceToken, 'token-before');
+      assert.equal(databaseScope, 'shared');
+      assert.equal(ownerName, '__owner__');
+      return { records: [], changeToken: 'token-after' };
+    },
+    async pushRecordsInDatabase(zoneName, records, databaseScope, ownerName) {
+      calls.push('push');
+      assert.equal(zoneName, 'zone-ledger-default');
+      assert.equal(databaseScope, 'shared');
+      assert.equal(ownerName, '__owner__');
+      return {
+        accepted: records.map(record => ({
+          ...record,
+          recordChangeTag: 'tag-shared',
+          syncStatus: 'synced',
+        })),
+        conflicts: [],
+      };
+    },
+  };
+  const adapter = createNativeCloudKitSyncAdapter(nativeModule, {
+    databaseScope: 'shared',
+    ownerName: '__owner__',
+  });
+
+  const pull = await adapter.pullChanges('zone-ledger-default', 'token-before');
+  const push = await adapter.pushRecords('zone-ledger-default', [baseRecord]);
+
+  assert.deepEqual(calls, ['pull', 'push']);
+  assert.equal(pull.changeToken, 'token-after');
+  assert.equal(push.accepted[0].recordChangeTag, 'tag-shared');
+});
+
+test('cloudKitRouteForActiveLedger keeps shared ledgers on a separate owner-scoped token key', () => {
+  resetSQLiteDatabaseForTests();
+  getDb().runSync(
+    'UPDATE ledgers SET meta = ? WHERE id = ?',
+    JSON.stringify({
+      cloudDatabaseScope: 'shared',
+      cloudOwnerName: '__owner__',
+      cloudZoneName: 'zone-ledger-default',
+    }),
+    'ledger-default',
+  );
+
+  const route = cloudKitRouteForActiveLedger('ledger-default');
+
+  assert.deepEqual(route, {
+    zoneName: 'zone-ledger-default',
+    databaseScope: 'shared',
+    ownerName: '__owner__',
+    changeTokenKey: 'shared:__owner__:zone-ledger-default',
+  });
 });
 
 test('native CloudKit adapter rejects unknown native conflict reasons', async () => {

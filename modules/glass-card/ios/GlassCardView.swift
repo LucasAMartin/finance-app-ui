@@ -1,12 +1,6 @@
 import ExpoModulesCore
 import SwiftUI
 
-// Holds the React Native child views. Lives as a UIKit sibling ON TOP of the
-// glass host (not inside the SwiftUI hierarchy) — SwiftUI's Liquid Glass
-// composites above any UIView hosted within its controller, so the content has
-// to be a separate UIKit layer to stay crisp.
-final class RNChildrenView: UIView {}
-
 // SwiftUI layer: glass material only. Sits behind the RN content as its own
 // UIView. When pressable it's the content of an interactive Button so the
 // native spring + finger-tracking refraction fire on press.
@@ -37,21 +31,21 @@ private struct GlassCardBody: View {
 }
 
 // ExpoView subclass exposed to React Native.
-// Layers: glassHost (back, SwiftUI) + childrenView (front, RN content).
+// This view intentionally does not host React children. The JS component renders
+// it as a background sibling behind regular RN content so Fabric keeps normal
+// ownership of the content tree during refresh/unmount.
 public class GlassCardView: ExpoView {
   let onCardPress = EventDispatcher()
 
   var cornerRadius: CGFloat = 24 { didSet { if cornerRadius != oldValue { rebuildIfNeeded() } } }
   var isPressable: Bool = false  { didSet { if isPressable != oldValue { rebuildIfNeeded() } } }
 
-  private let childrenView = RNChildrenView()
   private var hostingVC: UIHostingController<AnyView>?
 
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     backgroundColor = .clear
     if #available(iOS 26.0, *) { rebuildSwiftUI() }
-    addSubview(childrenView) // on top of the glass
   }
 
   private func rebuildIfNeeded() {
@@ -68,7 +62,7 @@ public class GlassCardView: ExpoView {
     )
     let hvc = UIHostingController(rootView: AnyView(body))
     hvc.view.backgroundColor = .clear
-    insertSubview(hvc.view, at: 0) // behind childrenView
+    addSubview(hvc.view)
     hostingVC = hvc
     setNeedsLayout()
   }
@@ -76,10 +70,6 @@ public class GlassCardView: ExpoView {
   override public func layoutSubviews() {
     super.layoutSubviews()
     hostingVC?.view.frame = bounds
-    childrenView.frame = bounds
-    // Z-order, made deterministic regardless of rebuild/insert timing.
-    if let host = hostingVC?.view { sendSubviewToBack(host) }
-    bringSubviewToFront(childrenView)
   }
 
   // Pressable cards are a single tap target: route every in-bounds touch to the
@@ -94,21 +84,6 @@ public class GlassCardView: ExpoView {
       let local = host.convert(point, from: self)
       return host.hitTest(local, with: event) ?? host
     }
-    return super.hitTest(point, with: event)
-  }
-
-  // RN children land in `childrenView`. Yoga sizes GlassCardView from the JS
-  // shadow tree; childrenView shares the same origin (frame = bounds), so the
-  // Yoga-computed child frames line up.
-  override public func insertReactSubview(_ subview: UIView!, at atIndex: Int) {
-    childrenView.insertSubview(subview, at: atIndex)
-  }
-
-  override public func removeReactSubview(_ subview: UIView!) {
-    subview.removeFromSuperview()
-  }
-
-  override public func reactSubviews() -> [UIView]! {
-    childrenView.subviews
+    return nil
   }
 }

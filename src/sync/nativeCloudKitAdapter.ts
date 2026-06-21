@@ -32,12 +32,48 @@ export interface NativeCloudKitPushPayload {
   conflicts: NativeCloudKitConflictPayload[];
 }
 
+export type NativeCloudKitDatabaseScope = 'private' | 'shared';
+
+export interface NativeCloudKitDatabaseRoute {
+  databaseScope: NativeCloudKitDatabaseScope;
+  ownerName?: string;
+}
+
+export interface NativeCloudKitAcceptedShare {
+  status: 'accepted' | 'failed';
+  databaseScope?: NativeCloudKitDatabaseScope;
+  containerIdentifier?: string;
+  ledgerId?: string;
+  zoneName?: string;
+  ownerName?: string;
+  shareRecordName?: string;
+  shareUrl?: string;
+  participantRole?: string;
+  participantStatus?: string;
+  participantPermission?: string;
+  acceptedAt?: string;
+  error?: string;
+}
+
 export interface NativeCloudKitModule {
   getCurrentUser(): Promise<CloudKitAvailability>;
   pullChanges(zoneName: string, sinceToken?: string): Promise<NativeCloudKitPullPayload>;
   pushRecords(zoneName: string, records: NativeCloudKitRecordPayload[]): Promise<NativeCloudKitPushPayload>;
+  pullChangesInDatabase?(
+    zoneName: string,
+    sinceToken: string | undefined,
+    databaseScope: NativeCloudKitDatabaseScope,
+    ownerName?: string,
+  ): Promise<NativeCloudKitPullPayload>;
+  pushRecordsInDatabase?(
+    zoneName: string,
+    records: NativeCloudKitRecordPayload[],
+    databaseScope: NativeCloudKitDatabaseScope,
+    ownerName?: string,
+  ): Promise<NativeCloudKitPushPayload>;
   resetZone?(zoneName: string): Promise<{ zoneName: string; reset: boolean }>;
-  presentLedgerShare?(ledgerId: string): Promise<{ ledgerId: string; shareUrl?: string }>;
+  presentLedgerShare?(ledgerId: string, title?: string): Promise<{ ledgerId: string; shareUrl?: string }>;
+  consumeAcceptedShares?(): Promise<NativeCloudKitAcceptedShare[]>;
 }
 
 function isSyncStatus(value: unknown): value is SyncRecord['syncStatus'] {
@@ -125,7 +161,10 @@ function conflictFromNativePayload(payload: NativeCloudKitConflictPayload): Sync
   };
 }
 
-export function createNativeCloudKitSyncAdapter(nativeModule?: NativeCloudKitModule | null): SyncAdapter {
+export function createNativeCloudKitSyncAdapter(
+  nativeModule?: NativeCloudKitModule | null,
+  route: NativeCloudKitDatabaseRoute = { databaseScope: 'private' },
+): SyncAdapter {
   return {
     async getCurrentUser() {
       if (!nativeModule) return { available: false, reason: 'not-implemented' };
@@ -134,7 +173,9 @@ export function createNativeCloudKitSyncAdapter(nativeModule?: NativeCloudKitMod
 
     async pullChanges(zoneName, sinceToken): Promise<SyncPullResult> {
       if (!nativeModule) return { records: [], changeToken: sinceToken };
-      const result = await nativeModule.pullChanges(zoneName, sinceToken);
+      const result = route.databaseScope === 'private'
+        ? await nativeModule.pullChanges(zoneName, sinceToken)
+        : await pullChangesInRoutedDatabase(nativeModule, zoneName, sinceToken, route);
       return {
         records: result.records.map(recordFromNativePayload),
         changeToken: result.changeToken,
@@ -146,13 +187,56 @@ export function createNativeCloudKitSyncAdapter(nativeModule?: NativeCloudKitMod
         accepted: [],
         conflicts: records.map(local => ({ local, reason: 'permission-denied' })),
       };
-      const result = await nativeModule.pushRecords(zoneName, records.map(recordToNativePayload));
+      const payloads = records.map(recordToNativePayload);
+      const result = route.databaseScope === 'private'
+        ? await nativeModule.pushRecords(zoneName, payloads)
+        : await pushRecordsInRoutedDatabase(nativeModule, zoneName, payloads, route);
       return {
         accepted: result.accepted.map(recordFromNativePayload),
         conflicts: result.conflicts.map(conflictFromNativePayload),
       };
     },
   };
+}
+
+function requireSharedOwner(route: NativeCloudKitDatabaseRoute): string {
+  if (route.databaseScope !== 'shared') return '';
+  if (route.ownerName) return route.ownerName;
+  throw new Error('CloudKit shared database route is missing ownerName');
+}
+
+function pullChangesInRoutedDatabase(
+  nativeModule: NativeCloudKitModule,
+  zoneName: string,
+  sinceToken: string | undefined,
+  route: NativeCloudKitDatabaseRoute,
+): Promise<NativeCloudKitPullPayload> {
+  if (!nativeModule.pullChangesInDatabase) {
+    throw new Error('CloudKit shared database pull is unavailable in this build');
+  }
+  return nativeModule.pullChangesInDatabase(
+    zoneName,
+    sinceToken,
+    route.databaseScope,
+    requireSharedOwner(route),
+  );
+}
+
+function pushRecordsInRoutedDatabase(
+  nativeModule: NativeCloudKitModule,
+  zoneName: string,
+  records: NativeCloudKitRecordPayload[],
+  route: NativeCloudKitDatabaseRoute,
+): Promise<NativeCloudKitPushPayload> {
+  if (!nativeModule.pushRecordsInDatabase) {
+    throw new Error('CloudKit shared database push is unavailable in this build');
+  }
+  return nativeModule.pushRecordsInDatabase(
+    zoneName,
+    records,
+    route.databaseScope,
+    requireSharedOwner(route),
+  );
 }
 
 export const unavailableNativeCloudKitSyncAdapter = createNativeCloudKitSyncAdapter();

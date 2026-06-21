@@ -217,7 +217,7 @@ function createPreLedgerV8Schema(db: SQLiteDatabaseLike) {
 test('sqlite fresh install creates CloudKit-ready schema, members, and ledger indexes', () => {
   const db = resetSQLiteDatabaseForTests();
 
-  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 10);
+  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 11);
   expectColumns(db, 'ledgers', [
     'id',
     'name',
@@ -249,7 +249,7 @@ test('sqlite fresh install creates CloudKit-ready schema, members, and ledger in
 
   assert.deepEqual(
     db.getAllSync<{ user_id: string }>('SELECT user_id FROM ledger_members ORDER BY user_id').map(row => row.user_id),
-    ['alex', 'partner'],
+    ['alex'],
   );
 
   const expectedIndexes = new Map([
@@ -271,10 +271,10 @@ test('sqlite v8 migration backfills local single-user rows into the default shar
   const db = resetSQLiteDatabaseForTests(createPreLedgerV8Schema);
   const repos = createSQLiteRepositories();
 
-  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 10);
+  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 11);
   assert.deepEqual(
     repos.sessionRepo.listMembers().map(member => member.userId).sort(),
-    ['alex', 'partner'],
+    ['alex'],
   );
 
   const tx = repos.transactionsRepo.get('legacy-tx');

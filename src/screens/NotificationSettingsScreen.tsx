@@ -5,16 +5,33 @@ import {
   Linking,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DatePicker, Host, Image } from '@expo/ui/swift-ui';
-import { datePickerStyle, environment, tint } from '@expo/ui/swift-ui/modifiers';
-import type { SFSymbol } from 'sf-symbols-typescript';
+import {
+  Button as SwiftButton,
+  DatePicker,
+  Form as SwiftForm,
+  Host,
+  LabeledContent,
+  Picker,
+  Section as SwiftSection,
+  Text as SwiftText,
+  Toggle as SwiftToggle,
+} from '@expo/ui/swift-ui';
+import {
+  background,
+  datePickerStyle,
+  environment,
+  foregroundStyle,
+  listStyle,
+  pickerStyle,
+  scrollContentBackground,
+  tag,
+  tint,
+} from '@expo/ui/swift-ui/modifiers';
 
 import { Theme } from '../theme';
 import { ScreenExitButton } from '../components/GlassButton';
@@ -191,161 +208,159 @@ export function NotificationSettingsScreen({ theme, visible, onClose }: Props) {
           <View style={[styles.headerDivider, { backgroundColor: theme.hairline }]} />
         </View>
 
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{
-            paddingTop: insets.top + 52 + SPACE.lg,
-            paddingBottom: insets.bottom + SPACE.xxxl,
-          }}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={[styles.statusCard, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
-            <View style={styles.statusIconWrap}>
-              <Host style={styles.statusIconHost} ignoreSafeArea="all">
-                <Image systemName="bell" size={22} color={theme.text} />
-              </Host>
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[TYPE.subsectionTitle, { color: theme.text }]}>Local reminders</Text>
-              <Text style={[TYPE.caption, { color: theme.textSec, marginTop: SPACE.xs }]}>
-                {permissionCaption}
-              </Text>
-            </View>
-            <Text style={[TYPE.captionEm, { color: permission.granted ? theme.text : theme.textTer }]}>
-              {permissionLabel}
-            </Text>
-          </View>
-
-          <Pressable
-            onPress={sendTest}
-            accessibilityRole="button"
-            accessibilityLabel="Send test notification"
-            style={({ pressed }) => [
-              styles.testButton,
-              {
-                backgroundColor: pressed ? theme.chipBg : theme.surface,
-                borderColor: theme.hairline,
-              },
-            ]}
+        <View style={[styles.formWrap, { paddingTop: insets.top + 68 }]}>
+          <Host
+            style={styles.formHost}
+            colorScheme={theme.dark ? 'dark' : 'light'}
+            ignoreSafeArea="keyboard"
           >
-            <IconHost icon="paperplane" theme={theme} />
-            <View style={styles.rowCopy}>
-              <Text style={[TYPE.body, { color: theme.text }]}>Send test notification</Text>
-              <Text style={[TYPE.caption, { color: theme.textTer, marginTop: 2 }]}>
-                Schedules a local test alert for five seconds from now.
-              </Text>
-            </View>
-            <Text style={[TYPE.bodySm, { color: theme.textTer }]}>Test</Text>
-          </Pressable>
+            <SwiftForm
+              modifiers={[
+                listStyle('insetGrouped'),
+                scrollContentBackground('hidden'),
+                background(theme.bg),
+                tint(theme.accent.dot),
+              ]}
+            >
+              <SwiftSection footer={<SwiftText>{permissionCaption}</SwiftText>}>
+                <LabeledContent label="Permission">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: permission.granted ? 'primary' : 'secondary' })]}>
+                    {permissionLabel}
+                  </SwiftText>
+                </LabeledContent>
+                <SwiftButton
+                  label="Send Test Notification"
+                  systemImage="paperplane"
+                  onPress={sendTest}
+                />
+              </SwiftSection>
 
-          <SettingsGroup title="Bills" theme={theme}>
-            <NotificationToggleRow
-              theme={theme}
-              icon="bell"
-              label="Bill reminders"
-              caption="Quiet reminders before recurring bills are due."
-              value={prefs.billReminders.enabled}
-              onValueChange={value => updateToggle('billReminders', value)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="calendar"
-              label="Remind"
-              value={leadLabel(prefs.billReminders.leadDays)}
-              onPress={() => chooseLeadDays(setPrefs)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="clock"
-              label="Time"
-              value={timeLabel(prefs.billReminders.time)}
-              onPress={() => setTimeEditor('billTime')}
-            />
-          </SettingsGroup>
+              <SwiftSection title="Bills" footer={<SwiftText>Quiet reminders before recurring bills are due.</SwiftText>}>
+                <SwiftToggle
+                  label="Bill Reminders"
+                  systemImage="bell"
+                  isOn={prefs.billReminders.enabled}
+                  onIsOnChange={value => updateToggle('billReminders', value)}
+                />
+                <Picker
+                  label="Remind"
+                  systemImage="calendar"
+                  selection={prefs.billReminders.leadDays}
+                  onSelectionChange={value => {
+                    if (typeof value !== 'number') return;
+                    setPrefs(current => ({
+                      ...current,
+                      billReminders: { ...current.billReminders, leadDays: value as BillReminderLeadDays },
+                    }));
+                  }}
+                  modifiers={[pickerStyle('menu')]}
+                >
+                  {LEAD_OPTIONS.map(option => (
+                    <SwiftText key={option.value} modifiers={[tag(option.value)]}>
+                      {option.label}
+                    </SwiftText>
+                  ))}
+                </Picker>
+                <LabeledContent label="Time">
+                  <SwiftButton label={timeLabel(prefs.billReminders.time)} onPress={() => setTimeEditor('billTime')} />
+                </LabeledContent>
+              </SwiftSection>
 
-          <SettingsGroup title="Budget" theme={theme}>
-            <NotificationToggleRow
-              theme={theme}
-              icon="chart.bar"
-              label="Budget pace check"
-              caption="A restrained alert when a category is close to, or over, plan."
-              value={prefs.budgetAlerts.enabled}
-              onValueChange={value => updateToggle('budgetAlerts', value)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="exclamationmark.triangle"
-              label="Alert for"
-              value={budgetModeLabel(prefs.budgetAlerts.mode)}
-              onPress={() => chooseBudgetMode(setPrefs)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="clock"
-              label="Time"
-              value={timeLabel(prefs.budgetAlerts.time)}
-              onPress={() => setTimeEditor('budgetTime')}
-            />
-          </SettingsGroup>
+              <SwiftSection title="Budget" footer={<SwiftText>A restrained alert when a category is close to, or over, plan.</SwiftText>}>
+                <SwiftToggle
+                  label="Budget Pace Check"
+                  systemImage="chart.bar"
+                  isOn={prefs.budgetAlerts.enabled}
+                  onIsOnChange={value => updateToggle('budgetAlerts', value)}
+                />
+                <Picker
+                  label="Alert For"
+                  systemImage="exclamationmark.triangle"
+                  selection={prefs.budgetAlerts.mode}
+                  onSelectionChange={value => {
+                    if (value !== 'near-and-over' && value !== 'over-only') return;
+                    setPrefs(current => ({
+                      ...current,
+                      budgetAlerts: { ...current.budgetAlerts, mode: value },
+                    }));
+                  }}
+                  modifiers={[pickerStyle('menu')]}
+                >
+                  {BUDGET_MODE_OPTIONS.map(option => (
+                    <SwiftText key={option.value} modifiers={[tag(option.value)]}>
+                      {option.label}
+                    </SwiftText>
+                  ))}
+                </Picker>
+                <LabeledContent label="Time">
+                  <SwiftButton label={timeLabel(prefs.budgetAlerts.time)} onPress={() => setTimeEditor('budgetTime')} />
+                </LabeledContent>
+              </SwiftSection>
 
-          <SettingsGroup title="Summary" theme={theme}>
-            <NotificationToggleRow
-              theme={theme}
-              icon="calendar"
-              label="Weekly summary"
-              caption="A weekly check-in with spending, remaining income, and bills due soon."
-              value={prefs.weeklySummary.enabled}
-              onValueChange={value => updateToggle('weeklySummary', value)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="calendar"
-              label="Day"
-              value={weekdayLabel(prefs.weeklySummary.weekday)}
-              onPress={() => chooseWeekday(setPrefs)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="clock"
-              label="Time"
-              value={timeLabel(prefs.weeklySummary.time)}
-              onPress={() => setTimeEditor('weeklyTime')}
-            />
-          </SettingsGroup>
+              <SwiftSection title="Summary" footer={<SwiftText>A weekly check-in with spending, remaining income, and bills due soon.</SwiftText>}>
+                <SwiftToggle
+                  label="Weekly Summary"
+                  systemImage="calendar"
+                  isOn={prefs.weeklySummary.enabled}
+                  onIsOnChange={value => updateToggle('weeklySummary', value)}
+                />
+                <Picker
+                  label="Day"
+                  systemImage="calendar"
+                  selection={prefs.weeklySummary.weekday}
+                  onSelectionChange={value => {
+                    if (typeof value !== 'number') return;
+                    setPrefs(current => ({
+                      ...current,
+                      weeklySummary: { ...current.weeklySummary, weekday: value as NotificationWeekday },
+                    }));
+                  }}
+                  modifiers={[pickerStyle('menu')]}
+                >
+                  {WEEKDAY_OPTIONS.map(option => (
+                    <SwiftText key={option.value} modifiers={[tag(option.value)]}>
+                      {option.label}
+                    </SwiftText>
+                  ))}
+                </Picker>
+                <LabeledContent label="Time">
+                  <SwiftButton label={timeLabel(prefs.weeklySummary.time)} onPress={() => setTimeEditor('weeklyTime')} />
+                </LabeledContent>
+              </SwiftSection>
 
-          <SettingsGroup title="Goals" theme={theme}>
-            <NotificationToggleRow
-              theme={theme}
-              icon="target"
-              label="Goal contribution reminder"
-              caption="A monthly prompt to review planned savings contributions."
-              value={prefs.goalReminders.enabled}
-              onValueChange={value => updateToggle('goalReminders', value)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="calendar"
-              label="Day"
-              value={goalDayLabel(prefs.goalReminders.dayOfMonth)}
-              onPress={() => chooseGoalDay(setPrefs)}
-              showSeparator
-            />
-            <NotificationValueRow
-              theme={theme}
-              icon="clock"
-              label="Time"
-              value={timeLabel(prefs.goalReminders.time)}
-              onPress={() => setTimeEditor('goalTime')}
-            />
-          </SettingsGroup>
-        </ScrollView>
+              <SwiftSection title="Goals" footer={<SwiftText>A monthly prompt to review planned savings contributions.</SwiftText>}>
+                <SwiftToggle
+                  label="Goal Contribution Reminder"
+                  systemImage="target"
+                  isOn={prefs.goalReminders.enabled}
+                  onIsOnChange={value => updateToggle('goalReminders', value)}
+                />
+                <Picker
+                  label="Day"
+                  systemImage="calendar"
+                  selection={prefs.goalReminders.dayOfMonth}
+                  onSelectionChange={value => {
+                    if (typeof value !== 'number') return;
+                    setPrefs(current => ({
+                      ...current,
+                      goalReminders: { ...current.goalReminders, dayOfMonth: value },
+                    }));
+                  }}
+                  modifiers={[pickerStyle('menu')]}
+                >
+                  {GOAL_DAY_OPTIONS.map(option => (
+                    <SwiftText key={option.value} modifiers={[tag(option.value)]}>
+                      {option.label}
+                    </SwiftText>
+                  ))}
+                </Picker>
+                <LabeledContent label="Time">
+                  <SwiftButton label={timeLabel(prefs.goalReminders.time)} onPress={() => setTimeEditor('goalTime')} />
+                </LabeledContent>
+              </SwiftSection>
+            </SwiftForm>
+          </Host>
+        </View>
 
         <NativeTimePopup
           bottomInset={insets.bottom}
@@ -361,110 +376,6 @@ export function NotificationSettingsScreen({ theme, visible, onClose }: Props) {
       </View>
     </Animated.View>
   );
-}
-
-function SettingsGroup({
-  title,
-  theme,
-  children,
-}: {
-  title: string;
-  theme: Theme;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.group}>
-      <Text style={[TYPE.labelLg, styles.groupTitle, { color: theme.textTer }]}>{title}</Text>
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
-        {children}
-      </View>
-    </View>
-  );
-}
-
-function NotificationToggleRow({
-  theme,
-  icon,
-  label,
-  caption,
-  value,
-  onValueChange,
-  showSeparator,
-}: {
-  theme: Theme;
-  icon: SFSymbol;
-  label: string;
-  caption?: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  showSeparator?: boolean;
-}) {
-  return (
-    <View>
-      <View style={styles.row}>
-        <IconHost icon={icon} theme={theme} />
-        <View style={styles.rowCopy}>
-          <Text style={[TYPE.body, { color: theme.text }]}>{label}</Text>
-          {caption ? (
-            <Text style={[TYPE.caption, { color: theme.textTer, marginTop: 2 }]}>{caption}</Text>
-          ) : null}
-        </View>
-        <Switch
-          value={value}
-          onValueChange={onValueChange}
-          trackColor={{ false: theme.chipBg, true: theme.accent.fill }}
-          thumbColor={value ? theme.accent.ink : theme.surface}
-          ios_backgroundColor={theme.chipBg}
-          accessibilityLabel={label}
-        />
-      </View>
-      {showSeparator ? <Separator theme={theme} /> : null}
-    </View>
-  );
-}
-
-function NotificationValueRow({
-  theme,
-  icon,
-  label,
-  value,
-  onPress,
-  showSeparator,
-}: {
-  theme: Theme;
-  icon: SFSymbol;
-  label: string;
-  value: string;
-  onPress: () => void;
-  showSeparator?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [pressed && { backgroundColor: theme.chipBg }]}
-    >
-      <View style={styles.row}>
-        <IconHost icon={icon} theme={theme} />
-        <Text style={[TYPE.body, styles.rowCopy, { color: theme.text }]}>{label}</Text>
-        <Text style={[TYPE.bodySm, { color: theme.textTer }]}>{value}</Text>
-      </View>
-      {showSeparator ? <Separator theme={theme} /> : null}
-    </Pressable>
-  );
-}
-
-function IconHost({ icon, theme }: { icon: SFSymbol; theme: Theme }) {
-  return (
-    <Host style={styles.iconHost} ignoreSafeArea="all">
-      <Image systemName={icon} size={19} color={theme.textSec} />
-    </Host>
-  );
-}
-
-function Separator({ theme }: { theme: Theme }) {
-  return <View style={[styles.separator, { backgroundColor: theme.sep }]} />;
 }
 
 function NativeTimePopup({
@@ -538,58 +449,6 @@ function NativeTimePopup({
   );
 }
 
-function chooseLeadDays(setPrefs: (updater: (current: NotificationPrefs) => NotificationPrefs) => void) {
-  Alert.alert('Bill reminder', undefined, [
-    ...LEAD_OPTIONS.map(option => ({
-      text: option.label,
-      onPress: () => setPrefs(current => ({
-        ...current,
-        billReminders: { ...current.billReminders, leadDays: option.value },
-      })),
-    })),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
-}
-
-function chooseBudgetMode(setPrefs: (updater: (current: NotificationPrefs) => NotificationPrefs) => void) {
-  Alert.alert('Budget alerts', undefined, [
-    ...BUDGET_MODE_OPTIONS.map(option => ({
-      text: option.label,
-      onPress: () => setPrefs(current => ({
-        ...current,
-        budgetAlerts: { ...current.budgetAlerts, mode: option.value },
-      })),
-    })),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
-}
-
-function chooseWeekday(setPrefs: (updater: (current: NotificationPrefs) => NotificationPrefs) => void) {
-  Alert.alert('Weekly summary', undefined, [
-    ...WEEKDAY_OPTIONS.map(option => ({
-      text: option.label,
-      onPress: () => setPrefs(current => ({
-        ...current,
-        weeklySummary: { ...current.weeklySummary, weekday: option.value },
-      })),
-    })),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
-}
-
-function chooseGoalDay(setPrefs: (updater: (current: NotificationPrefs) => NotificationPrefs) => void) {
-  Alert.alert('Goal reminder', undefined, [
-    ...GOAL_DAY_OPTIONS.map(option => ({
-      text: option.label,
-      onPress: () => setPrefs(current => ({
-        ...current,
-        goalReminders: { ...current.goalReminders, dayOfMonth: option.value },
-      })),
-    })),
-    { text: 'Cancel', style: 'cancel' as const },
-  ]);
-}
-
 function updateTimePreference(
   prefs: NotificationPrefs,
   editor: NonNullable<TimeEditor>,
@@ -641,27 +500,6 @@ function timeLabel(time: NotificationTime) {
   return dateForTime(time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-function leadLabel(value: BillReminderLeadDays) {
-  if (value === 0) return 'On due day';
-  if (value === 1) return '1 day before';
-  return '3 days before';
-}
-
-function budgetModeLabel(value: BudgetAlertMode) {
-  return value === 'over-only' ? 'Over only' : 'Near limit and over';
-}
-
-function weekdayLabel(value: NotificationWeekday) {
-  return WEEKDAY_OPTIONS.find(option => option.value === value)?.label ?? 'Sunday';
-}
-
-function goalDayLabel(day: number) {
-  if (day === 1) return '1st of month';
-  if (day === 2) return '2nd of month';
-  if (day === 3) return '3rd of month';
-  return `${day}th of month`;
-}
-
 function dateForTime(time: NotificationTime) {
   const date = new Date();
   date.setHours(time.hour, time.minute, 0, 0);
@@ -696,75 +534,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: StyleSheet.hairlineWidth,
   },
-  statusCard: {
-    marginHorizontal: LAYOUT.screenGutter,
-    marginBottom: SPACE.xxl,
-    borderRadius: RADIUS.field,
-    borderWidth: 1,
-    padding: SPACE.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.md,
-  },
-  statusIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statusIconHost: {
-    width: 26,
-    height: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  testButton: {
-    marginHorizontal: LAYOUT.screenGutter,
-    marginTop: -SPACE.lg,
-    marginBottom: SPACE.xxl,
-    borderRadius: RADIUS.field,
-    borderWidth: 1,
-    paddingVertical: 13,
-    paddingHorizontal: SPACE.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.md,
-  },
-  group: {
-    marginBottom: SPACE.xxl,
-  },
-  groupTitle: {
-    marginLeft: LAYOUT.screenGutter + SPACE.xs,
-    marginBottom: SPACE.sm,
-  },
-  card: {
-    marginHorizontal: LAYOUT.screenGutter,
-    borderRadius: RADIUS.field,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE.md,
-    minHeight: 50,
-    paddingVertical: 13,
-    paddingHorizontal: SPACE.lg,
-  },
-  rowCopy: {
+  formWrap: {
     flex: 1,
-    minWidth: 0,
   },
-  iconHost: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: SPACE.lg + 24 + SPACE.md,
+  formHost: {
+    flex: 1,
   },
   modalRoot: {
     flex: 1,
