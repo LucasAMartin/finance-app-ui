@@ -29,6 +29,7 @@ import type {
   Transaction,
   TransactionCursor,
   TransactionPage,
+  TransactionPageWithSummary,
   TransactionQuery,
   TransactionSortOrder,
   TransactionSummary,
@@ -269,6 +270,27 @@ function matchesTxQuery(tx: Transaction, query: TransactionSummaryQuery): boolea
   return true;
 }
 
+function summarizeTransactions(rows: Transaction[]): TransactionSummary {
+  const days = new Set<string>();
+  let expenseCount = 0;
+  let expenseTotal = 0;
+
+  rows.forEach(tx => {
+    if (tx.type === 'income') return;
+    expenseCount += 1;
+    expenseTotal += tx.amount;
+    const day = (tx.occurredAt ?? '').slice(0, 10);
+    if (day) days.add(day);
+  });
+
+  return {
+    transactionCount: rows.length,
+    expenseCount,
+    expenseTotal,
+    expenseDayCount: days.size,
+  };
+}
+
 class InMemoryTransactionsRepo
   extends InMemoryRepository<Transaction, CreateTransactionInput, UpdateTransactionInput>
   implements TransactionsRepo {
@@ -294,16 +316,28 @@ class InMemoryTransactionsRepo
     };
   }
 
-  getSummary(query: TransactionSummaryQuery): TransactionSummary {
-    const filtered = this.list().filter(tx => matchesTxQuery(tx, query));
-    const expenses = filtered.filter(tx => tx.type !== 'income');
-    const days = new Set(expenses.map(tx => (tx.occurredAt ?? '').slice(0, 10)).filter(Boolean));
+  listPageWithSummary(query: TransactionQuery): TransactionPageWithSummary {
+    const sort = query.sort ?? DEFAULT_TX_SORT;
+    const filtered = this.list()
+      .filter(tx => matchesTxQuery(tx, query));
+    const summary = summarizeTransactions(filtered);
+    filtered.sort((a, b) => compareTx(a, b, sort));
+    const startIdx = query.cursor
+      ? filtered.findIndex(tx => tx.id === query.cursor?.id) + 1
+      : 0;
+    const safeStart = startIdx > 0 ? startIdx : 0;
+    const limit = Math.max(1, Math.min(query.limit, 200));
+    const rows = filtered.slice(safeStart, safeStart + limit);
+    const hasMore = safeStart + limit < filtered.length;
     return {
-      transactionCount: filtered.length,
-      expenseCount: expenses.length,
-      expenseTotal: expenses.reduce((sum, tx) => sum + tx.amount, 0),
-      expenseDayCount: days.size,
+      rows,
+      nextCursor: hasMore && rows.length > 0 ? cursorFromTx(rows[rows.length - 1]) : undefined,
+      summary,
     };
+  }
+
+  getSummary(query: TransactionSummaryQuery): TransactionSummary {
+    return summarizeTransactions(this.list().filter(tx => matchesTxQuery(tx, query)));
   }
 
   getSpendSeries(query: SpendSeriesQuery): SpendSeriesPoint[] {
@@ -422,6 +456,13 @@ class InMemorySessionRepo implements SessionRepo {
     return this.ledgersRepo.list();
   }
 
+  updateLedger(id: string, patch: Partial<Omit<Ledger, 'id'>>) {
+    const ledger = this.ledgersRepo.forceUpdate(id, patch);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return ledger;
+  }
+
   listMembers(ledgerId = activeLedgerId) {
     return this.ledgerMembersRepo.list().filter(member => member.ledgerId === ledgerId);
   }
@@ -441,6 +482,11 @@ class InMemorySessionRepo implements SessionRepo {
 
   canEdit(createdByUserId?: string, ledgerId = activeLedgerId): boolean {
     return canEditRow({ createdByUserId, ledgerId }, this.ledgerMembersRepo.list());
+  }
+
+  refresh(): void {
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
   }
 
   subscribe(listener: RepoListener) {

@@ -16,11 +16,34 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import * as Haptics from 'expo-haptics';
-import { GlassEffectContainer, Host, Menu, Button as SwiftButton, RNHostView } from '@expo/ui/swift-ui';
-import { buttonStyle, glassEffect } from '@expo/ui/swift-ui/modifiers';
+import {
+  GlassEffectContainer,
+  HStack,
+  Host,
+  Image as SwiftImage,
+  Menu,
+  Button as SwiftButton,
+  Rectangle,
+  RNHostView,
+  Spacer,
+  Text as SwiftText,
+  VStack,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityLabel as swiftAccessibilityLabel,
+  buttonStyle,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  lineLimit,
+  padding,
+  truncationMode,
+} from '@expo/ui/swift-ui/modifiers';
 import { SearchFilterBar } from '../components/SearchFilterBar';
 import { GlassCircleIcon, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 
+import { formatActiveCurrencyAmount } from '../currency';
 import { Theme, GROUP_COLORS, overText } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import { makeP, makeScrim, DARK_TEXT_SHADOW, MEDIA } from '../wallpaperPalette';
@@ -30,12 +53,14 @@ import { ScreenExitButton } from '../components/GlassButton';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
 import { MerchantMark } from '../components/MerchantMark';
-import { transactionUsesMerchantLogo } from '../merchantLogos';
+import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
+import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
 import { Money } from '../components/shared';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 import type {
   Category,
+  MerchantLogo,
   Transaction,
   TransactionSummaryQuery,
 } from '../repositories/types';
@@ -51,6 +76,7 @@ import {
 } from '../selectors/spending';
 import { buildSavedMetric } from '../selectors/savings';
 import { TYPE } from '../typography';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CHART_PAD = 16;
@@ -58,6 +84,34 @@ const CHART_W = SCREEN_W - CHART_PAD * 2;
 const CHART_H = 160;
 const DETAIL_CHART_INSET_Y = 20;
 const DETAIL_TX_LIMIT = 10;
+const NATIVE_DETAIL_DAY_PAD_X = 16;
+const NATIVE_DETAIL_DAY_PAD_TOP = 16;
+const NATIVE_DETAIL_DAY_PAD_BOTTOM = 4;
+const NATIVE_DETAIL_DAY_HEADER_H = 24;
+const NATIVE_DETAIL_TX_ROW_H = 58;
+
+const DETAIL_SF_SYMBOL: Record<string, SFSymbol> = {
+  cart: 'cart',
+  fork: 'fork.knife',
+  car: 'car',
+  bag: 'bag',
+  doc: 'doc',
+  film: 'film',
+  home: 'house',
+  wallet: 'wallet.pass',
+  receipt: 'receipt',
+  cards: 'creditcard',
+  repeat: 'repeat',
+  tag: 'tag',
+  sparkle: 'sparkles',
+  cup: 'cup.and.saucer',
+  cal: 'calendar',
+  note: 'note.text',
+  chart: 'chart.bar',
+  profile: 'person',
+  bell: 'bell',
+};
+const DETAIL_FALLBACK_SYMBOL: SFSymbol = 'tag';
 
 const TIMEFRAMES = ['1W', '1M', '1Y'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
@@ -93,12 +147,7 @@ function addDays(d: Date, days: number): Date {
 }
 
 function money(n: number, decimals = 0): string {
-  const abs = Math.abs(n);
-  const value =
-    abs >= 1000 && decimals === 0
-      ? Math.round(abs).toLocaleString()
-      : abs.toFixed(decimals);
-  return `$${value}`;
+  return formatActiveCurrencyAmount(Math.abs(n), decimals);
 }
 
 export interface InsightDetailTarget {
@@ -128,7 +177,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
   const incomes = useRepositoryList(incomeRepo);
   const cats = useMemo(() => categoryMap(categories), [categories]);
 
-  const { wallpaper } = useTheme();
+  const { wallpaper, currencyCode } = useTheme();
   const insets = useSafeAreaInsets();
   // Text directly on the wallpaper (header title, hero) stays light in both
   // themes, matching the Insights screen; frosted-card interiors use `p`, which
@@ -468,6 +517,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
   }, [selectedPointRange, listSlot, ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
 
   const [rows, setRows] = useState<Transaction[]>([]);
+  const merchantLogos = useMerchantLogoMap(rows, SUPPORTS_GLASS);
 
   useEffect(() => {
     if (!visible) return;
@@ -560,6 +610,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
               { paddingTop: insets.top + 64, paddingBottom: 120 },
             ]}
             data={dayKeys}
+            extraData={currencyCode}
             keyExtractor={day => day}
             renderItem={({ item: day }) => (
               <DetailDayGroup
@@ -568,6 +619,9 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
                 categories={categories}
                 cats={cats}
                 theme={theme}
+                merchantLogos={merchantLogos}
+                currencyCode={currencyCode}
+                onOpenTx={onOpenTx}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -859,13 +913,16 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
 // ─── DetailDayGroup ───────────────────────────────────────────────────────────
 
 function DetailDayGroup({
-  day, txs, categories, cats, theme,
+  day, txs, categories, cats, theme, merchantLogos, currencyCode, onOpenTx,
 }: {
   day: string;
   txs: Transaction[];
   categories: Category[];
   cats: Record<string, { label: string; icon: string; budget: number }>;
   theme: Theme;
+  merchantLogos: Map<string, MerchantLogo>;
+  currencyCode: string;
+  onOpenTx?: (tx: Transaction) => void;
 }) {
   const p = makeP(theme.dark);
   const tint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
@@ -877,6 +934,25 @@ function DetailDayGroup({
   const spendTotal  = txs.filter(tx => tx.type !== 'income').reduce((s, tx) => s + tx.amount, 0);
   const expenseCount = txs.filter(tx => tx.type !== 'income').length;
   const incomeColor = GROUP_COLORS.savings[theme.dark ? 'dark' : 'light'];
+
+  if (SUPPORTS_GLASS) {
+    return (
+      <NativeDetailDayGroup
+        label={label}
+        txs={txs}
+        categories={categories}
+        cats={cats}
+        theme={theme}
+        currencyCode={currencyCode}
+        p={p}
+        merchantLogos={merchantLogos}
+        spendTotal={spendTotal}
+        expenseCount={expenseCount}
+        incomeColor={incomeColor}
+        onOpenTx={onOpenTx}
+      />
+    );
+  }
 
   return (
     <BlurView intensity={theme.dark ? 50 : 90} tint={tint} style={styles.dayCard}>
@@ -893,9 +969,14 @@ function DetailDayGroup({
           const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
           const cat        = cats[tx.cat];
           const isIncome   = tx.type === 'income';
+          const open = () => onOpenTx?.(tx);
           return (
-            <View
+            <Pressable
               key={tx.id}
+              onPress={open}
+              disabled={!onOpenTx}
+              accessibilityRole={onOpenTx ? 'button' : undefined}
+              accessibilityLabel={`${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${isIncome ? '+' : '-'}${formatActiveCurrencyAmount(tx.amount, true)}`}
               style={[
                 styles.txRow,
                 {
@@ -932,11 +1013,217 @@ function DetailDayGroup({
                 prefix={isIncome ? '+$' : '−$'}
                 color={isIncome ? incomeColor : p.text}
               />
-            </View>
+            </Pressable>
           );
         })}
       </View>
     </BlurView>
+  );
+}
+
+type NativeDetailTxItem = {
+  id: string;
+  title: string;
+  meta: string;
+  amountText: string;
+  amountColor: string;
+  symbol: SFSymbol;
+  iconColor: string;
+  logoUrl?: string;
+  logoBgColor?: string | null;
+  recurring: boolean;
+  accessibilityLabel: string;
+  onOpen: () => void;
+};
+
+function NativeDetailDayGroup({
+  label,
+  txs,
+  categories,
+  cats,
+  theme,
+  currencyCode: _currencyCode,
+  p,
+  merchantLogos,
+  spendTotal,
+  expenseCount,
+  incomeColor,
+  onOpenTx,
+}: {
+  label: string;
+  txs: Transaction[];
+  categories: Category[];
+  cats: Record<string, { label: string; icon: string; budget: number }>;
+  theme: Theme;
+  currencyCode: string;
+  p: ReturnType<typeof makeP>;
+  merchantLogos: Map<string, MerchantLogo>;
+  spendTotal: number;
+  expenseCount: number;
+  incomeColor: string;
+  onOpenTx?: (tx: Transaction) => void;
+}) {
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const summary =
+    expenseCount > 1
+      ? `${formatActiveCurrencyAmount(spendTotal, true)} total`
+      : `${txs.length} ${txs.length === 1 ? 'transaction' : 'transactions'}`;
+  const summaryColor = expenseCount > 1 ? p.textSec : p.textTer;
+  const hostHeight =
+    NATIVE_DETAIL_DAY_PAD_TOP
+    + NATIVE_DETAIL_DAY_HEADER_H
+    + 8
+    + txs.length * NATIVE_DETAIL_TX_ROW_H
+    + NATIVE_DETAIL_DAY_PAD_BOTTOM;
+
+  const items: NativeDetailTxItem[] = txs.map(tx => {
+    const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
+    const cat = cats[tx.cat];
+    const isIncome = tx.type === 'income';
+    const logo = transactionUsesMerchantLogo(tx)
+      ? merchantLogos.get(merchantLogoKey(tx.merchant))
+      : undefined;
+    const amountText = `${isIncome ? '+' : '-'}${formatActiveCurrencyAmount(tx.amount, true)}`;
+    const meta = `${cat?.label ?? UNCATEGORIZED_LABEL} · ${tx.time}`;
+    return {
+      id: tx.id,
+      title: tx.merchant,
+      meta,
+      amountText,
+      amountColor: isIncome ? incomeColor : p.text,
+      symbol: DETAIL_SF_SYMBOL[cat?.icon ?? ''] ?? DETAIL_FALLBACK_SYMBOL,
+      iconColor: groupColor,
+      logoUrl: logo?.logoUrl,
+      logoBgColor: logo?.bgColor,
+      recurring: !!tx.recurring,
+      accessibilityLabel: `${tx.merchant}, ${meta}, ${amountText}`,
+      onOpen: () => onOpenTx?.(tx),
+    };
+  });
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: hostHeight }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={0}
+          modifiers={[
+            padding({
+              leading: NATIVE_DETAIL_DAY_PAD_X,
+              trailing: NATIVE_DETAIL_DAY_PAD_X,
+              top: NATIVE_DETAIL_DAY_PAD_TOP,
+              bottom: NATIVE_DETAIL_DAY_PAD_BOTTOM,
+            }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <HStack
+            alignment="center"
+            spacing={12}
+            modifiers={[
+              padding({ bottom: 8 }),
+              frame({ height: NATIVE_DETAIL_DAY_HEADER_H + 8, maxWidth: 10000, alignment: 'leading' }),
+            ]}
+          >
+            <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(p.textTer), lineLimit(1)]}>
+              {label}
+            </SwiftText>
+            <Spacer />
+            <SwiftText modifiers={[font({ size: 14, weight: 'semibold' }), foregroundStyle(summaryColor), lineLimit(1)]}>
+              {summary}
+            </SwiftText>
+          </HStack>
+          <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            {items.map((item, index) => (
+              <NativeDetailTxRow
+                key={item.id}
+                item={item}
+                p={p}
+                last={index === items.length - 1}
+              />
+            ))}
+          </VStack>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeDetailTxRow({
+  item,
+  p,
+  last,
+}: {
+  item: NativeDetailTxItem;
+  p: ReturnType<typeof makeP>;
+  last: boolean;
+}) {
+  return (
+    <SwiftButton
+      onPress={item.onOpen}
+      modifiers={[
+        buttonStyle('plain'),
+        swiftAccessibilityLabel(item.accessibilityLabel),
+      ]}
+    >
+      <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        <HStack
+          alignment="center"
+          spacing={12}
+          modifiers={[frame({ height: NATIVE_DETAIL_TX_ROW_H - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' })]}
+        >
+          <NativeMerchantMark
+            logoUrl={item.logoUrl}
+            logoBgColor={item.logoBgColor}
+            fallbackSystemName={item.symbol}
+            fallbackColor={item.iconColor}
+            fallbackBackgroundColor={`${item.iconColor}24`}
+            size={32}
+          />
+          <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            <HStack alignment="center" spacing={5}>
+              <SwiftText
+                modifiers={[
+                  font({ size: 15 }),
+                  foregroundStyle(p.text),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                ]}
+              >
+                {item.title}
+              </SwiftText>
+              {item.recurring ? (
+                <SwiftImage systemName="repeat" size={11} color={p.textTer} />
+              ) : null}
+            </HStack>
+            <SwiftText
+              modifiers={[
+                font({ size: 12 }),
+                foregroundStyle(p.textSec),
+                lineLimit(1),
+                truncationMode('tail'),
+              ]}
+            >
+              {item.meta}
+            </SwiftText>
+          </VStack>
+          <Spacer minLength={8} />
+          <SwiftText modifiers={[font({ size: 13, weight: 'medium' }), foregroundStyle(item.amountColor), lineLimit(1)]}>
+            {item.amountText}
+          </SwiftText>
+        </HStack>
+        {!last ? <Rectangle modifiers={[frame({ height: 1, maxWidth: 10000 }), foregroundStyle(p.hairline)]} /> : null}
+      </VStack>
+    </SwiftButton>
   );
 }
 

@@ -108,6 +108,23 @@ function clearDomainRows() {
   `);
 }
 
+function markSharingRowsSynced() {
+  getDb().runSync(
+    `UPDATE ledgers
+     SET sync_status = 'synced', cloud_record_name = id, cloud_zone_name = ?, record_change_tag = 'seed-ledger'
+     WHERE id = ?`,
+    ZONE_NAME,
+    LEDGER_ID,
+  );
+  getDb().runSync(
+    `UPDATE ledger_members
+     SET sync_status = 'synced', cloud_record_name = id, cloud_zone_name = ?, record_change_tag = 'seed-member'
+     WHERE ledger_id = ?`,
+    ZONE_NAME,
+    LEDGER_ID,
+  );
+}
+
 async function syncWith(adapter: SyncAdapter, store: SQLiteSyncStore) {
   return syncLedger({ adapter, store, ledgerId: LEDGER_ID, zoneName: ZONE_NAME });
 }
@@ -115,6 +132,7 @@ async function syncWith(adapter: SyncAdapter, store: SQLiteSyncStore) {
 test('SQLiteSyncStore emits pending local rows as SyncRecords through the registry', () => {
   const { repos, store } = fresh();
   clearDomainRows();
+  markSharingRowsSynced();
   const tx = repos.transactionsRepo.create({
     merchant: 'Local Market',
     cat: 'groceries',
@@ -133,9 +151,34 @@ test('SQLiteSyncStore emits pending local rows as SyncRecords through the regist
   assert.equal(records[0].syncStatus, 'pending');
 });
 
+test('SQLiteSyncStore emits pre-sync local rows for first CloudKit upload', () => {
+  const { repos, store, db } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Migrated Market',
+    cat: 'groceries',
+    amount: 18,
+    occurredAt: '2026-06-01T10:00:00.000Z',
+  });
+  db.runSync(
+    `UPDATE transactions
+     SET sync_status = 'local'
+     WHERE id = ?`,
+    tx.id,
+  );
+
+  const records = store.listPendingRecords(LEDGER_ID);
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0].recordName, tx.id);
+  assert.equal(records[0].syncStatus, 'local');
+});
+
 test('SQLiteSyncStore marks accepted local pushes as synced with CloudKit metadata', async () => {
   const { repos, store, db } = fresh();
   clearDomainRows();
+  markSharingRowsSynced();
   const tx = repos.transactionsRepo.create({
     merchant: 'Local Market',
     cat: 'groceries',
@@ -160,9 +203,78 @@ test('SQLiteSyncStore marks accepted local pushes as synced with CloudKit metada
   assert.equal(store.getChangeToken(ZONE_NAME), 'token-after-pull');
 });
 
+test('SQLite transaction edits re-enter pending sync and push updated fields', async () => {
+  const { repos, store, db } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Before Market',
+    cat: 'groceries',
+    amount: 18,
+    occurredAt: '2026-06-01T10:00:00.000Z',
+  });
+  const adapter = new PushAcceptingAdapter();
+  await syncWith(adapter, store);
+
+  const edited = repos.transactionsRepo.update(tx.id, {
+    merchant: 'After Market',
+    amount: 27,
+  });
+
+  assert.ok(edited);
+  const pending = db.getFirstSync<{
+    sync_status: string;
+    merchant: string;
+    amount: number;
+    record_change_tag: string;
+  }>('SELECT sync_status, merchant, amount, record_change_tag FROM transactions WHERE id = ?', tx.id);
+  assert.equal(pending?.sync_status, 'pending');
+  assert.equal(pending?.merchant, 'After Market');
+  assert.equal(pending?.amount, 27);
+  assert.equal(pending?.record_change_tag, 'tag-1');
+
+  const result = await syncWith(adapter, store);
+
+  assert.equal(result.pushedRecords, 1);
+  const pushed = adapter.pushed.at(-1);
+  assert.equal(pushed?.recordName, tx.id);
+  assert.equal(pushed?.fields.merchant, 'After Market');
+  assert.equal(pushed?.fields.amount, 27);
+  assert.equal(db.getFirstSync<{ sync_status: string }>('SELECT sync_status FROM transactions WHERE id = ?', tx.id)?.sync_status, 'synced');
+});
+
+test('SQLite ledger currency updates sync through ledger metadata', async () => {
+  const { repos, store, db } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const adapter = new PushAcceptingAdapter();
+
+  const ledger = repos.sessionRepo.updateLedger(LEDGER_ID, {
+    meta: { currencyCode: 'JPY' },
+  });
+
+  assert.equal(ledger?.meta?.currencyCode, 'JPY');
+  const pending = db.getFirstSync<{ sync_status: string; meta: string }>(
+    'SELECT sync_status, meta FROM ledgers WHERE id = ?',
+    LEDGER_ID,
+  );
+  assert.equal(pending?.sync_status, 'pending');
+  assert.deepEqual(JSON.parse(pending?.meta ?? '{}'), { currencyCode: 'JPY' });
+
+  const result = await syncWith(adapter, store);
+
+  assert.equal(result.pushedRecords, 1);
+  const pushed = adapter.pushed.at(-1);
+  assert.equal(pushed?.recordName, LEDGER_ID);
+  assert.equal(pushed?.recordType, 'ledger');
+  assert.deepEqual(pushed?.fields.meta, { currencyCode: 'JPY' });
+  assert.equal(db.getFirstSync<{ sync_status: string }>('SELECT sync_status FROM ledgers WHERE id = ?', LEDGER_ID)?.sync_status, 'synced');
+});
+
 test('SQLiteSyncStore applies remote transactions into the real transaction repo', async () => {
   const { repos, store } = fresh();
   clearDomainRows();
+  markSharingRowsSynced();
   const adapter = new PushAcceptingAdapter([remoteTransaction('remote-tx')]);
 
   const result = await syncWith(adapter, store);
@@ -179,6 +291,7 @@ test('SQLiteSyncStore applies remote transactions into the real transaction repo
 test('SQLiteSyncStore applies remote attachments without duplicate sync/domain timestamp columns', async () => {
   const { repos, store } = fresh();
   clearDomainRows();
+  markSharingRowsSynced();
   const tx = repos.transactionsRepo.create({
     merchant: 'Receipt Market',
     cat: 'groceries',
@@ -215,9 +328,42 @@ test('SQLiteSyncStore applies remote attachments without duplicate sync/domain t
   assert.equal(attachment.syncStatus, 'synced');
 });
 
+test('SQLiteSyncStore applies pulled attachments after their transactions even when returned first', async () => {
+  const { repos, store } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const tx = remoteTransaction('remote-tx-for-attachment');
+  const attachment: SyncRecord = {
+    recordName: 'remote-attachment-first',
+    recordType: 'attachment',
+    zoneName: ZONE_NAME,
+    ledgerId: LEDGER_ID,
+    fields: {
+      transactionId: tx.recordName,
+      localUri: 'file:///remote-receipt.jpg',
+      type: 'receipt',
+      createdAt: '2026-06-01T10:01:00.000Z',
+    },
+    createdByUserId: 'partner',
+    updatedByUserId: 'partner',
+    createdAt: '2026-06-01T10:01:00.000Z',
+    updatedAt: '2026-06-01T10:02:00.000Z',
+    recordChangeTag: 'attachment-tag',
+    syncStatus: 'synced',
+  };
+  const adapter = new PushAcceptingAdapter([attachment, tx]);
+
+  const result = await syncWith(adapter, store);
+
+  assert.equal(result.pulledRecords, 2);
+  assert.ok(repos.transactionsRepo.get(tx.recordName));
+  assert.equal(repos.attachmentsRepo.get(attachment.recordName)?.transactionId, tx.recordName);
+});
+
 test('SQLiteSyncStore applies remote tombstones and keeps the raw tombstone row', async () => {
   const { repos, store, db } = fresh();
   clearDomainRows();
+  markSharingRowsSynced();
   const tx = repos.transactionsRepo.create({
     merchant: 'Delete Local',
     cat: 'shopping',
@@ -226,11 +372,12 @@ test('SQLiteSyncStore applies remote tombstones and keeps the raw tombstone row'
   });
   db.runSync(
     `UPDATE transactions
-     SET sync_status = 'synced', cloud_record_name = ?, cloud_zone_name = ?, record_change_tag = ?
+     SET sync_status = 'synced', cloud_record_name = ?, cloud_zone_name = ?, record_change_tag = ?, updated_at = ?
      WHERE id = ?`,
     tx.id,
     ZONE_NAME,
     'before-delete',
+    '2026-06-01T10:00:00.000Z',
     tx.id,
   );
   const deleted = {
@@ -254,6 +401,7 @@ test('SQLiteSyncStore applies remote tombstones and keeps the raw tombstone row'
 test('SQLiteSyncStore marks push conflicts as conflicted in SQLite', async () => {
   const { repos, store, db } = fresh();
   clearDomainRows();
+  markSharingRowsSynced();
   const tx = repos.transactionsRepo.create({
     merchant: 'Conflict Local',
     cat: 'shopping',
@@ -307,7 +455,7 @@ test('SQLiteSyncStore applies remote edit locks before protected local edits are
   const result = await syncWith(adapter, store);
 
   assert.equal(result.conflicts, 1);
-  assert.equal(adapter.pushed.length, 0);
+  assert.equal(adapter.pushed.some(record => record.recordType === 'transaction'), false);
   assert.equal(
     db.getFirstSync<{ allow_others_to_edit_my_items: number }>(
       'SELECT allow_others_to_edit_my_items FROM ledger_members WHERE user_id = ?',

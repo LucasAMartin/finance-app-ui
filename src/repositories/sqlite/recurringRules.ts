@@ -1,5 +1,6 @@
 import {
   canEditRecord,
+  createdByUserIdForUpdate,
   getCurrentUserId,
   getDb,
   json,
@@ -130,7 +131,7 @@ export class SQLiteRecurringRulesRepo extends SQLiteRepository<RecurringRule> {
       next.monthOfYear ?? null,
       next.estimate ? 1 : 0,
       next.active ? 1 : 0,
-      next.createdByUserId ?? 'local',
+      createdByUserIdForUpdate(current.createdByUserId, next.createdByUserId),
       sync.updatedByUserId,
       sync.updatedAt,
       next.cloudRecordName ?? null,

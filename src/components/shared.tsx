@@ -4,6 +4,8 @@ import * as Haptics from 'expo-haptics';
 import { Host, Button as SwiftButton, Text as SwiftText, GlassEffectContainer } from '@expo/ui/swift-ui';
 import { frame, glassEffect, foregroundStyle, font, contentShape, shapes, disabled as disabledModifier } from '@expo/ui/swift-ui/modifiers';
 import { Theme } from '../theme';
+import { useTheme } from '../ThemeProvider';
+import { currencyDecimals } from '../currency';
 import { TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
@@ -64,11 +66,17 @@ interface MoneyProps {
 }
 
 export function Money({ value, size = 16, weight = '600', color, prefix = '−$', theme }: MoneyProps) {
+  const { currency } = useTheme();
   const abs = Math.abs(value);
-  const whole = Math.floor(abs).toLocaleString();
-  const frac = Math.round((abs - Math.floor(abs)) * 100).toString().padStart(2, '0');
+  const decimals = currencyDecimals(currency);
+  const rounded = decimals === 0 ? Math.round(abs) : abs;
+  const whole = Math.floor(rounded).toLocaleString();
+  const frac = decimals === 0
+    ? ''
+    : Math.round((rounded - Math.floor(rounded)) * 100).toString().padStart(2, '0');
   const col = color ?? theme.text;
   const tracking = size >= 28 ? -1.2 : size >= 18 ? -0.5 : -0.2;
+  const currencyPrefix = prefix.replace('$', currency.symbol);
   return (
     <Text style={{
       fontSize: size,
@@ -77,7 +85,7 @@ export function Money({ value, size = 16, weight = '600', color, prefix = '−$'
       letterSpacing: tracking,
       lineHeight: Math.round(size * 1.1),
     }}>
-      {prefix}{whole}.{frac}
+      {currencyPrefix}{whole}{decimals === 0 ? '' : `.${frac}`}
     </Text>
   );
 }

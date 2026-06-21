@@ -18,7 +18,36 @@ import {
   BottomSheetBackdrop,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
-import { Button as SwiftButton, Host, Menu } from '@expo/ui/swift-ui';
+import {
+  Button as SwiftButton,
+  GlassEffectContainer,
+  HStack,
+  Host,
+  Image as SwiftImage,
+  Menu,
+  Picker,
+  Rectangle,
+  Spacer,
+  Text as SwiftText,
+  VStack,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityHint as swiftAccessibilityHint,
+  accessibilityLabel as swiftAccessibilityLabel,
+  background,
+  clipped,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  lineLimit,
+  padding,
+  pickerStyle,
+  shapes,
+  tag,
+  tint,
+  truncationMode,
+} from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import * as Haptics from 'expo-haptics';
 
@@ -28,9 +57,11 @@ import {
   Theme,
   OVER_DOT,
   CAUTION_AMBER,
+  ON_GROUP_ICON,
   overText,
   cautionText,
 } from '../theme';
+import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import {
   MEDIA,
   DARK_TEXT_SHADOW,
@@ -65,6 +96,7 @@ import { buildSavedMetric } from '../selectors/savings';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
 import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
+import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
@@ -81,6 +113,8 @@ import { SnapshotViz, type SnapshotVizSpec } from '../components/charts/Snapshot
 import { TYPE } from '../typography';
 import { RADIUS } from '../radius';
 import { SPACE, LAYOUT } from '../spacing';
+import { merchantLogoKey, useMerchantLogoMap } from '../merchantLogos';
+import type { SFSymbol } from 'sf-symbols-typescript';
 
 // SCREEN_H is used for scroll-based animation interpolation only; it only needs
 // the initial value (the parallax scrim range is stable after mount).
@@ -91,6 +125,33 @@ const CARD_INNER_PAD = LAYOUT.cardPadX;
 const CHART_H = 188;
 const TILE_PAD = 16;
 const CHART_RESET_DELAY_MS = 220;
+const NATIVE_INSIGHT_ROW_H = 64;
+const NATIVE_INSIGHT_TITLE_H = 24;
+const NATIVE_WHERE_PICKER_H = 30;
+const NATIVE_WHERE_ROW_H = 68;
+
+const INSIGHT_SF_SYMBOL: Record<string, SFSymbol> = {
+  cart: 'cart',
+  fork: 'fork.knife',
+  car: 'car',
+  bag: 'bag',
+  doc: 'doc',
+  film: 'film',
+  home: 'house',
+  wallet: 'wallet.pass',
+  receipt: 'receipt',
+  cards: 'creditcard',
+  repeat: 'repeat',
+  tag: 'tag',
+  sparkle: 'sparkles',
+  cup: 'cup.and.saucer',
+  cal: 'calendar',
+  note: 'note.text',
+  chart: 'chart.bar',
+  profile: 'person',
+  bell: 'bell',
+};
+const INSIGHT_FALLBACK_SYMBOL: SFSymbol = 'tag';
 
 // Neutral chart-line colors — deliberately off-accent so the eye reads
 // category/group data rather than action color. Defined here once so all
@@ -237,11 +298,7 @@ function buildInsightBins(
 }
 
 function money(n: number, decimals = 0): string {
-  const abs = Math.abs(n);
-  if (decimals > 0) {
-    return `$${abs.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
-  }
-  return `$${abs >= 1000 ? Math.round(abs).toLocaleString() : abs.toFixed(0)}`;
+  return formatActiveCurrencyAmount(Math.abs(n), decimals);
 }
 
 function signedMoney(n: number): string {
@@ -315,6 +372,291 @@ function DeltaBadge({
       <Icon name={isUp ? 'chevUp' : 'chevDown'} size={10} color={tint} stroke={2.6} />
       <Text style={[TYPE.captionEm, { color: tint }]}>{d.pct}%</Text>
     </View>
+  );
+}
+
+type NativeWhereItem = BreakdownItem & {
+  fill: number;
+  symbol: SFSymbol;
+  logoUrl?: string;
+  logoBgColor?: string | null;
+};
+
+function nativeInsightGlassTint(dark: boolean) {
+  return dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+}
+
+function NativeWhatChangedSection({
+  theme,
+  p,
+  items,
+  onOpen,
+}: {
+  theme: Theme;
+  p: ReturnType<typeof makeP>;
+  items: Snapshot[];
+  onOpen: (detail: InsightDetail) => void;
+}) {
+  const hostHeight = TILE_PAD * 2 + NATIVE_INSIGHT_TITLE_H + SPACE.sm + items.length * NATIVE_INSIGHT_ROW_H;
+  return (
+    <Host ignoreSafeArea="all" colorScheme={theme.dark ? 'dark' : 'light'} style={{ width: '100%', height: hostHeight }}>
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={SPACE.sm}
+          modifiers={[
+            padding({ leading: TILE_PAD, trailing: TILE_PAD, top: TILE_PAD, bottom: TILE_PAD }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: nativeInsightGlassTint(theme.dark) },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <SwiftText modifiers={[font({ size: 18, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+            What changed
+          </SwiftText>
+          <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            {items.map((item, index) => (
+              <NativeWhatChangedRow
+                key={item.key}
+                item={item}
+                p={p}
+                last={index === items.length - 1}
+                onOpen={() => onOpen(item.detail)}
+              />
+            ))}
+          </VStack>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeWhatChangedRow({
+  item,
+  p,
+  last,
+  onOpen,
+}: {
+  item: Snapshot;
+  p: ReturnType<typeof makeP>;
+  last: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <SwiftButton
+      onPress={onOpen}
+      modifiers={[swiftAccessibilityLabel(`${item.label}. ${item.title}`)]}
+    >
+      <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        <HStack
+          alignment="center"
+          spacing={SPACE.md}
+          modifiers={[frame({ height: NATIVE_INSIGHT_ROW_H - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' })]}
+        >
+          <SwiftImage
+            systemName={INSIGHT_SF_SYMBOL[item.icon] ?? INSIGHT_FALLBACK_SYMBOL}
+            size={15}
+            color={item.color}
+            modifiers={[
+              frame({ width: 32, height: 32 }),
+              background(`${item.color}26`, shapes.roundedRectangle({ cornerRadius: 16 })),
+            ]}
+          />
+          <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            <SwiftText modifiers={[font({ size: 9, weight: 'semibold' }), foregroundStyle(p.textTer), lineLimit(1)]}>
+              {item.label.toUpperCase()}
+            </SwiftText>
+            <SwiftText modifiers={[font({ size: 13, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1), truncationMode('tail')]}>
+              {item.title}
+            </SwiftText>
+          </VStack>
+          <SwiftImage systemName="chevron.right" size={12} color={p.textTer} />
+        </HStack>
+        {!last ? <Rectangle modifiers={[frame({ height: 1, maxWidth: 10000 }), foregroundStyle(p.hairline)]} /> : null}
+      </VStack>
+    </SwiftButton>
+  );
+}
+
+function NativeWhereItWentSection({
+  theme,
+  p,
+  whereTab,
+  pickerTint,
+  items,
+  onTabChange,
+  onOpen,
+}: {
+  theme: Theme;
+  p: ReturnType<typeof makeP>;
+  whereTab: number;
+  pickerTint: string;
+  items: NativeWhereItem[];
+  onTabChange: (index: number) => void;
+  onOpen: (detail: InsightDetail) => void;
+}) {
+  const listHeight = items.length === 0 ? 44 : items.length * NATIVE_WHERE_ROW_H;
+  const hostHeight = TILE_PAD * 2 + NATIVE_INSIGHT_TITLE_H + SPACE.md + NATIVE_WHERE_PICKER_H + SPACE.md + listHeight;
+  return (
+    <Host ignoreSafeArea="all" colorScheme={theme.dark ? 'dark' : 'light'} style={{ width: '100%', height: hostHeight }}>
+      <GlassEffectContainer>
+        <VStack
+          alignment="leading"
+          spacing={SPACE.md}
+          modifiers={[
+            padding({ leading: TILE_PAD, trailing: TILE_PAD, top: TILE_PAD, bottom: TILE_PAD }),
+            frame({ maxWidth: 10000, alignment: 'leading' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: nativeInsightGlassTint(theme.dark) },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <SwiftText modifiers={[font({ size: 18, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+            Where it went
+          </SwiftText>
+          <Picker
+            selection={whereTab}
+            onSelectionChange={(value) => onTabChange(Number(value))}
+            modifiers={[
+              padding({ top: 0, bottom: 0 }),
+              pickerStyle('segmented'),
+              tint(pickerTint),
+              frame({ height: NATIVE_WHERE_PICKER_H, maxWidth: 10000 }),
+            ]}
+          >
+            <SwiftText modifiers={[tag(0)]}>Top Categories</SwiftText>
+            <SwiftText modifiers={[tag(1)]}>Top Merchants</SwiftText>
+          </Picker>
+          {items.length === 0 ? (
+            <SwiftText modifiers={[font({ size: 13 }), foregroundStyle(p.textTer)]}>
+              Nothing here for this period.
+            </SwiftText>
+          ) : (
+            <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+              {items.map((item, index) => (
+                <NativeWhereItWentRow
+                  key={item.key}
+                  item={item}
+                  p={p}
+                  dark={theme.dark}
+                  merchantMode={whereTab === 1}
+                  last={index === items.length - 1}
+                  onOpen={() => onOpen(item.detail)}
+                />
+              ))}
+            </VStack>
+          )}
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
+function NativeWhereItWentRow({
+  item,
+  p,
+  dark,
+  merchantMode,
+  last,
+  onOpen,
+}: {
+  item: NativeWhereItem;
+  p: ReturnType<typeof makeP>;
+  dark: boolean;
+  merchantMode: boolean;
+  last: boolean;
+  onOpen: () => void;
+}) {
+  const barW = 150;
+  const fillW = Math.max(4, Math.min(barW, item.fill * barW));
+  return (
+    <SwiftButton
+      onPress={onOpen}
+      modifiers={[
+        swiftAccessibilityLabel(`${item.label}, ${money(item.spent, 2)}`),
+        swiftAccessibilityHint('Open insight details'),
+      ]}
+    >
+      <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        <VStack alignment="leading" spacing={SPACE.xs} modifiers={[frame({ height: NATIVE_WHERE_ROW_H - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' })]}>
+          <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+            {merchantMode ? (
+              <NativeMerchantMark
+                logoUrl={item.logoUrl}
+                logoBgColor={item.logoBgColor}
+                fallbackSystemName={item.symbol}
+                fallbackColor={item.color}
+                fallbackBackgroundColor={`${item.color}26`}
+                size={32}
+              />
+            ) : (
+              <SwiftImage
+                systemName={item.symbol}
+                size={15}
+                color={item.color}
+                modifiers={[
+                  frame({ width: 32, height: 32 }),
+                  background(`${item.color}26`, shapes.roundedRectangle({ cornerRadius: 16 })),
+                ]}
+              />
+            )}
+            <VStack alignment="leading" spacing={SPACE.xs} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+              <HStack alignment="center" spacing={SPACE.sm} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                <SwiftText modifiers={[font({ size: 14, weight: 'medium' }), foregroundStyle(p.text), lineLimit(1), truncationMode('tail')]}>
+                  {item.label}
+                </SwiftText>
+                <Spacer minLength={SPACE.sm} />
+                <NativeInsightsDeltaBadge spent={item.spent} prevSpent={item.prevSpent} dark={dark} />
+                <SwiftText modifiers={[font({ size: 14, weight: 'medium' }), foregroundStyle(p.text), lineLimit(1)]}>
+                  {money(item.spent, 2)}
+                </SwiftText>
+                <SwiftImage systemName="chevron.right" size={12} color={p.textTer} />
+              </HStack>
+              <HStack
+                alignment="center"
+                spacing={0}
+                modifiers={[
+                  frame({ width: barW, height: 5, alignment: 'leading' }),
+                  background(p.hairline, shapes.roundedRectangle({ cornerRadius: 3 })),
+                  clipped(),
+                ]}
+              >
+                <Rectangle modifiers={[frame({ width: fillW, height: 5 }), foregroundStyle(item.color)]} />
+              </HStack>
+            </VStack>
+          </HStack>
+        </VStack>
+        {!last ? <Rectangle modifiers={[frame({ height: 1, maxWidth: 10000 }), foregroundStyle(p.hairline)]} /> : null}
+      </VStack>
+    </SwiftButton>
+  );
+}
+
+function NativeInsightsDeltaBadge({
+  spent,
+  prevSpent,
+  dark,
+}: {
+  spent: number;
+  prevSpent: number;
+  dark: boolean;
+}) {
+  const d = computeDelta(spent, prevSpent);
+  if (d.kind === 'hide' || d.kind === 'flat' || d.kind === 'new') return null;
+  const isUp = d.kind === 'up';
+  const tintColor = isUp ? OVER_DOT : groupDisplayColor('savings', dark);
+  return (
+    <HStack alignment="center" spacing={2}>
+      <SwiftImage systemName={isUp ? 'chevron.up' : 'chevron.down'} size={9} color={tintColor} />
+      <SwiftText modifiers={[font({ size: 12, weight: 'medium' }), foregroundStyle(tintColor), lineLimit(1)]}>
+        {d.pct}%
+      </SwiftText>
+    </HStack>
   );
 }
 
@@ -618,7 +960,7 @@ export function InsightsScreen({
   const budgets = useRepositoryList(budgetsRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
   const incomes = useRepositoryList(incomeRepo);
-  const { wallpaper, wallpaperFloorBase } = useTheme();
+  const { wallpaper, wallpaperFloorBase, currencyCode } = useTheme();
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
   const pWall = makeP(true);
@@ -683,6 +1025,7 @@ export function InsightsScreen({
     } while (cursor);
     return rows;
   }, [transactionsRepo, ranges, repoVersion]);
+  const merchantLogos = useMerchantLogoMap(transactions, SUPPORTS_GLASS);
   // A range whose end is in the past is settled: its totals are actuals, not
   // projections, so we drop the "pace"/"projected" framing for it.
   const rangeComplete = ranges.current.to <= now;
@@ -1186,6 +1529,7 @@ export function InsightsScreen({
     catBreakdown.rows,
     catBreakdown.variableTotal,
     categories,
+    currencyCode,
     insightBins,
     merchBreakdown.rows,
     now,
@@ -1284,7 +1628,7 @@ export function InsightsScreen({
           },
         };
       });
-  }, [catBreakdown.rows, categories, period, ranges, rangeContextLabel, theme.dark, total]);
+  }, [catBreakdown.rows, categories, currencyCode, period, ranges, rangeContextLabel, theme.dark, total]);
 
   const merchantItems = useMemo<BreakdownItem[]>(() => {
     const per = period.toLowerCase();
@@ -1318,10 +1662,27 @@ export function InsightsScreen({
           },
         };
       });
-  }, [merchBreakdown.rows, categories, period, ranges, rangeContextLabel, theme.dark, total]);
+  }, [merchBreakdown.rows, categories, currencyCode, period, ranges, rangeContextLabel, theme.dark, total]);
 
   const whereItems = whereTab === 0 ? categoryItems : merchantItems;
   const whereMax = whereItems[0]?.spent ?? 0;
+  const wherePickerTint =
+    whereItems[0]?.color
+    ?? (whereTab === 0
+      ? GROUP_COLORS.needs[theme.dark ? 'dark' : 'light']
+      : GROUP_COLORS.wants[theme.dark ? 'dark' : 'light']);
+  const nativeWhereItems = useMemo<NativeWhereItem[]>(() => (
+    whereItems.map(item => {
+      const logo = whereTab === 1 ? merchantLogos.get(merchantLogoKey(item.label)) : undefined;
+      return {
+        ...item,
+        fill: whereMax > 0 ? item.spent / whereMax : 0,
+        symbol: INSIGHT_SF_SYMBOL[item.icon] ?? INSIGHT_FALLBACK_SYMBOL,
+        logoUrl: logo?.logoUrl,
+        logoBgColor: logo?.bgColor,
+      };
+    })
+  ), [merchantLogos, whereItems, whereMax, whereTab]);
 
   // Daily (Week/Month) or monthly (Year) spend series powering the hero line.
   // Aggregated in the data layer (GROUP BY) rather than by iterating every row.
@@ -1394,11 +1755,15 @@ export function InsightsScreen({
   useEffect(() => setScrubIdx(null), [cumulativeSeries]);
 
   const splitMoney = (n: number) => {
+    const currency = getActiveCurrency();
+    if (currency.decimals === 0) {
+      return { whole: `${currency.symbol}${Math.round(n).toLocaleString()}`, cents: '' };
+    }
     const whole = Math.floor(n).toLocaleString();
     const cents = Math.round((n - Math.floor(n)) * 100)
       .toString()
       .padStart(2, '0');
-    return { whole: `$${whole}`, cents: `.${cents}` };
+    return { whole: `${currency.symbol}${whole}`, cents: `.${cents}` };
   };
 
   // Date/label the scrubbed point represents.
@@ -1820,48 +2185,57 @@ export function InsightsScreen({
 
               {/* What changed — movement vs the previous period */}
               {changeSnapshots.length > 0 ? (
-                <BentoTile dark={theme.dark} tier="secondary">
-                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
-                    What changed
-                  </Text>
-                  {changeSnapshots.map((s, i) => (
-                    <Pressable
-                      key={s.key}
-                      onPress={() => setInsightDetail(s.detail)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${s.label}. ${s.title}`}
-                      style={({ pressed }) => [
-                        styles.changeRow,
-                        {
-                          borderBottomWidth:
-                            i < changeSnapshots.length - 1
-                              ? StyleSheet.hairlineWidth
-                              : 0,
-                          borderBottomColor: p.hairline,
-                          opacity: pressed ? 0.6 : 1,
-                        },
-                      ]}
-                    >
-                      <View
-                        style={[styles.changeIcon, { backgroundColor: `${s.color}26` }]}
+                SUPPORTS_GLASS ? (
+                  <NativeWhatChangedSection
+                    theme={theme}
+                    p={p}
+                    items={changeSnapshots}
+                    onOpen={setInsightDetail}
+                  />
+                ) : (
+                  <BentoTile dark={theme.dark} tier="secondary">
+                    <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
+                      What changed
+                    </Text>
+                    {changeSnapshots.map((s, i) => (
+                      <Pressable
+                        key={s.key}
+                        onPress={() => setInsightDetail(s.detail)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${s.label}. ${s.title}`}
+                        style={({ pressed }) => [
+                          styles.changeRow,
+                          {
+                            borderBottomWidth:
+                              i < changeSnapshots.length - 1
+                                ? StyleSheet.hairlineWidth
+                                : 0,
+                            borderBottomColor: p.hairline,
+                            opacity: pressed ? 0.6 : 1,
+                          },
+                        ]}
                       >
-                        <Icon name={s.icon} size={15} color={s.color} stroke={1.8} />
-                      </View>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={[TYPE.labelSm, { color: p.textTer }]}>
-                          {s.label}
-                        </Text>
-                        <Text
-                          style={[TYPE.bodySmEm, { color: p.text, marginTop: 2 }]}
-                          numberOfLines={1}
+                        <View
+                          style={[styles.changeIcon, { backgroundColor: `${s.color}26` }]}
                         >
-                          {s.title}
-                        </Text>
-                      </View>
-                      <Icon name="chevR" size={14} color={p.textTer} stroke={2.1} />
-                    </Pressable>
-                  ))}
-                </BentoTile>
+                          <Icon name={s.icon} size={15} color={s.color} stroke={1.8} />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                            {s.label}
+                          </Text>
+                          <Text
+                            style={[TYPE.bodySmEm, { color: p.text, marginTop: 2 }]}
+                            numberOfLines={1}
+                          >
+                            {s.title}
+                          </Text>
+                        </View>
+                        <Icon name="chevR" size={14} color={p.textTer} stroke={2.1} />
+                      </Pressable>
+                    ))}
+                  </BentoTile>
+                )
               ) : null}
 
               {/* Where it went — switchable top categories / merchants. Carries
@@ -1869,133 +2243,145 @@ export function InsightsScreen({
                   lists read as a matched pair; the picker switches the sub-view
                   and a row tap opens the same insight sheet. */}
               {hasSpending ? (
-                <BentoTile dark={theme.dark} tier="secondary">
-                  <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: 8 }]} accessibilityRole="header">
-                    Where it went
-                  </Text>
-                  <SegmentedControl
-                    accessibilityLabel="View by"
-                    values={WHERE_TABS as unknown as string[]}
-                    selectedIndex={whereTab}
-                    onChange={(e) =>
-                      setWhereTab(e.nativeEvent.selectedSegmentIndex)
-                    }
-                    tintColor={theme.accent.dot}
-                    appearance={theme.dark ? 'dark' : 'light'}
-                    backgroundColor={theme.chipBg}
-                    fontStyle={{ color: theme.textSec }}
-                    activeFontStyle={{
-                      color: theme.accent.ink,
-                      fontWeight: '600',
-                    }}
-                    style={styles.whereSeg}
+                SUPPORTS_GLASS ? (
+                  <NativeWhereItWentSection
+                    theme={theme}
+                    p={p}
+                    whereTab={whereTab}
+                    pickerTint={wherePickerTint}
+                    items={nativeWhereItems}
+                    onTabChange={setWhereTab}
+                    onOpen={setInsightDetail}
                   />
-                  <View style={styles.whereList}>
-                    {whereItems.length === 0 ? (
-                      <Text
-                        style={[
-                          TYPE.bodySm,
-                          { color: p.textTer, paddingVertical: 12 },
-                        ]}
-                      >
-                        Nothing here for this period.
-                      </Text>
-                    ) : (
-                      whereItems.map((it, i) => {
-                        const fill = whereMax > 0 ? it.spent / whereMax : 0;
-                        return (
-                          <Pressable
-                            key={it.key}
-                            onPress={() => setInsightDetail(it.detail)}
-                            onLongPress={() => {
-                              Haptics.selectionAsync().catch(() => {});
-                              onViewActivity(it.detail.filter!);
-                            }}
-                            delayLongPress={400}
-                            accessibilityRole="button"
-                            accessibilityLabel={`${it.label}, ${money(it.spent, 2)}`}
-                            accessibilityHint="Long press to see matching transactions"
-                            style={({ pressed }) => [
-                              styles.catRow,
-                              {
-                                borderBottomWidth:
-                                  i < whereItems.length - 1
-                                    ? StyleSheet.hairlineWidth
-                                    : 0,
-                                borderBottomColor: p.hairline,
-                                opacity: pressed ? 0.6 : 1,
-                              },
-                            ]}
-                          >
-                            {whereTab === 1 ? (
-                              <MerchantMark
-                                merchant={it.label}
-                                catIcon={it.icon}
-                                color={it.color}
-                                size={32}
-                              />
-                            ) : (
-                              <View
-                                style={[styles.catIcon, { backgroundColor: `${it.color}26` }]}
-                              >
-                                <Icon
-                                  name={it.icon}
-                                  size={15}
+  ) : (
+                  <BentoTile dark={theme.dark} tier="secondary">
+                    <Text style={[styles.bentoSection, { color: p.text, marginTop: 0, marginBottom: SPACE.md }]} accessibilityRole="header">
+                      Where it went
+                    </Text>
+                    <SegmentedControl
+                      accessibilityLabel="View by"
+                      values={WHERE_TABS as unknown as string[]}
+                      selectedIndex={whereTab}
+                      onChange={(e) =>
+                        setWhereTab(e.nativeEvent.selectedSegmentIndex)
+                      }
+                      tintColor={wherePickerTint}
+                      appearance={theme.dark ? 'dark' : 'light'}
+                      backgroundColor="transparent"
+                      fontStyle={{ color: theme.textSec }}
+                      activeFontStyle={{
+                        color: ON_GROUP_ICON,
+                        fontWeight: '600',
+                      }}
+                      style={styles.whereSeg}
+                    />
+                    <View style={[styles.whereList, { marginTop: SPACE.md }]}>
+                      {whereItems.length === 0 ? (
+                        <Text
+                          style={[
+                            TYPE.bodySm,
+                            { color: p.textTer, paddingVertical: 12 },
+                          ]}
+                        >
+                          Nothing here for this period.
+                        </Text>
+                      ) : (
+                        whereItems.map((it, i) => {
+                          const fill = whereMax > 0 ? it.spent / whereMax : 0;
+                          return (
+                            <Pressable
+                              key={it.key}
+                              onPress={() => setInsightDetail(it.detail)}
+                              onLongPress={() => {
+                                Haptics.selectionAsync().catch(() => {});
+                                onViewActivity(it.detail.filter!);
+                              }}
+                              delayLongPress={400}
+                              accessibilityRole="button"
+                              accessibilityLabel={`${it.label}, ${money(it.spent, 2)}`}
+                              accessibilityHint="Long press to see matching transactions"
+                              style={({ pressed }) => [
+                                styles.catRow,
+                                {
+                                  borderBottomWidth:
+                                    i < whereItems.length - 1
+                                      ? StyleSheet.hairlineWidth
+                                      : 0,
+                                  borderBottomColor: p.hairline,
+                                  opacity: pressed ? 0.6 : 1,
+                                },
+                              ]}
+                            >
+                              {whereTab === 1 ? (
+                                <MerchantMark
+                                  merchant={it.label}
+                                  catIcon={it.icon}
                                   color={it.color}
-                                  stroke={1.8}
+                                  size={32}
                                 />
-                              </View>
-                            )}
-                            <View style={styles.catMid}>
-                              <View style={styles.catTopLine}>
-                                <Text
-                                  style={[
-                                    TYPE.body,
-                                    { color: p.text, flexShrink: 1 },
-                                  ]}
-                                  numberOfLines={1}
+                              ) : (
+                                <View
+                                  style={[styles.catIcon, { backgroundColor: `${it.color}26` }]}
                                 >
-                                  {it.label}
-                                </Text>
-                                <View style={styles.catRight}>
-                                  <View style={styles.deltaSlot}>
-                                    <DeltaBadge
-                                      spent={it.spent}
-                                      prevSpent={it.prevSpent}
-                                      dark={theme.dark}
-                                    />
-                                  </View>
-                                  <Text style={[TYPE.body, { color: p.text, textAlign: 'right' }]}>
-                                    {money(it.spent, 2)}
+                                  <Icon
+                                    name={it.icon}
+                                    size={15}
+                                    color={it.color}
+                                    stroke={1.8}
+                                  />
+                                </View>
+                              )}
+                              <View style={styles.catMid}>
+                                <View style={styles.catTopLine}>
+                                  <Text
+                                    style={[
+                                      TYPE.body,
+                                      { color: p.text, flexShrink: 1 },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {it.label}
                                   </Text>
-                                  <View style={styles.catChevron}>
-                                    <Icon name="chevR" size={12} color={p.textTer} stroke={2.2} />
+                                  <View style={styles.catRight}>
+                                    <View style={styles.deltaSlot}>
+                                      <DeltaBadge
+                                        spent={it.spent}
+                                        prevSpent={it.prevSpent}
+                                        dark={theme.dark}
+                                      />
+                                    </View>
+                                    <Text style={[TYPE.body, { color: p.text, textAlign: 'right' }]}>
+                                      {money(it.spent, 2)}
+                                    </Text>
+                                    <View style={styles.catChevron}>
+                                      <Icon name="chevR" size={12} color={p.textTer} stroke={2.2} />
+                                    </View>
                                   </View>
                                 </View>
-                              </View>
-                              <View
-                                style={[
-                                  styles.catBar,
-                                  { backgroundColor: p.hairline },
-                                ]}
-                              >
                                 <View
                                   style={[
-                                    styles.catBarFill,
-                                    {
-                                      width: `${Math.max(4, fill * 100)}%` as any,
-                                      backgroundColor: it.color,
-                                    },
+                                    styles.catBar,
+                                    { backgroundColor: p.hairline },
                                   ]}
-                                />
+                                >
+                                  <View
+                                    style={[
+                                      styles.catBarFill,
+                                      {
+                                        width: `${Math.max(4, fill * 100)}%` as any,
+                                        backgroundColor: it.color,
+                                      },
+                                    ]}
+                                  />
+                                </View>
                               </View>
-                            </View>
-                          </Pressable>
-                        );
-                      })
-                    )}
-                  </View>
-                </BentoTile>
+                            </Pressable>
+                          );
+                        })
+                      )}
+                    </View>
+                  </BentoTile>
+                )
               ) : (
                 <BentoTile dark={theme.dark} tier="secondary">
                   <EmptyState
@@ -2159,8 +2545,8 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   // "Where it went" tile: segmented picker at the top, list below.
-  whereSeg: { height: 30, borderRadius: RADIUS.field, overflow: 'hidden', marginTop: 4, marginBottom: 10 },
-  whereList: { marginTop: 4 },
+  whereSeg: { height: 30, borderRadius: RADIUS.field, overflow: 'hidden' },
+  whereList: { marginTop: SPACE.md },
   tileBar: {
     height: 6,
     borderRadius: 3,

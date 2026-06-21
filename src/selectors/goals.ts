@@ -1,4 +1,5 @@
 import type { Category } from '../repositories/types';
+import { formatActiveCurrencyAmount } from '../currency';
 
 export type GoalStatus = 'active' | 'paused' | 'completed' | 'archived';
 
@@ -37,11 +38,11 @@ interface GoalOptions {
 }
 
 export const todayKey = () => new Date().toISOString().slice(0, 10);
-export const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
+export const money0 = (n: number) => formatActiveCurrencyAmount(n, 0);
 export const clampPct = (n: number) => Math.max(0, Math.min(100, n));
 
 export const parseAmount = (value: string): number | null => {
-  const cleaned = value.replace(/[$,\s]/g, '');
+  const cleaned = value.replace(/[^\d.]/g, '');
   if (!cleaned) return null;
   const n = Number(cleaned);
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
@@ -228,32 +229,31 @@ export const statusFor = (goal: Goal): GoalHealth => {
   if (goal.status === 'paused') return { label: 'Paused', tone: 'neutral' };
   const remaining = Math.max(0, goal.target - goal.saved);
   if (remaining <= 0 || goal.status === 'completed') return { label: 'Complete', tone: 'good' };
-  const needed = suggestedMonthly(goal.target, goal.saved, goal.deadline);
   if (!goal.deadline) return { label: 'No deadline', tone: 'neutral' };
   if (!goal.monthlyContribution || goal.monthlyContribution <= 0) {
     return {
       label: 'No monthly',
       tone: 'neutral',
-      subtext: needed > 0 ? `${money0(needed)}/mo needed` : undefined,
     };
   }
-  const deficit = needed - goal.monthlyContribution;
-  if (goal.monthlyContribution + 1 < needed) {
+
+  const delta = monthDeltaVsDeadline(goal);
+  if (delta !== null && delta >= 2) {
     return {
-      label: 'Behind',
+      label: 'Behind target',
       tone: 'caution',
-      subtext: deficit > 0 ? `${money0(Math.ceil(deficit))}/mo short` : undefined,
     };
   }
-  if (goal.monthlyContribution > needed * 1.18) {
-    const delta = monthDeltaVsDeadline(goal);
+  if (delta !== null && delta <= -2) {
     return {
-      label: 'Ahead',
+      label: 'Ahead of target',
       tone: 'good',
-      subtext: delta !== null && delta < 0 ? `${Math.abs(delta)}mo early` : undefined,
     };
   }
-  return { label: 'On pace', tone: 'good' };
+  return {
+    label: 'On target',
+    tone: 'good',
+  };
 };
 
 export const goalProgressPct = (goal: Goal) =>

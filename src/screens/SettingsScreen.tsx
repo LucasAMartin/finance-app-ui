@@ -10,12 +10,17 @@ import {
   Alert,
 } from 'react-native';
 import Constants from 'expo-constants';
+import * as LocalAuthentication from 'expo-local-authentication';
+import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Host, Image } from '@expo/ui/swift-ui';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { Theme, overText } from '../theme';
 import { useTheme } from '../ThemeProvider';
+import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
+import { getNotificationPrefs, notificationSummary } from '../notifications/preferences';
+import { CURRENCY_OPTIONS } from '../currency';
 import { ScreenExitButton } from '../components/GlassButton';
 import { TYPE } from '../typography';
 import { RADIUS } from '../radius';
@@ -26,7 +31,11 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onOpenAppearance: () => void;
+  onOpenNotifications: () => void;
   onOpenIncome: () => void;
+  onOpenSharing: (intent?: 'overview' | 'members' | 'invite') => void;
+  onICloudSyncChange: (enabled: boolean) => void;
+  onResetSyncedSampleData?: () => void;
   activeLedgerName?: string;
   memberCount: number;
 }
@@ -35,6 +44,7 @@ interface Props {
 // `action` fires a one-shot (export, sign out). `value` is the trailing summary.
 type Row =
   | { kind: 'nav'; icon: SFSymbol; label: string; value?: string; onPress: () => void }
+  | { kind: 'currency'; icon: SFSymbol; label: string }
   | { kind: 'toggle'; icon: SFSymbol; label: string; caption?: string; value: boolean; onValueChange: (v: boolean) => void }
   | { kind: 'action'; icon: SFSymbol; label: string; destructive?: boolean; onPress: () => void }
   | { kind: 'info'; icon: SFSymbol; label: string; value: string };
@@ -49,12 +59,19 @@ export function SettingsScreen({
   visible,
   onClose,
   onOpenAppearance,
+  onOpenNotifications,
   onOpenIncome,
+  onOpenSharing,
+  onICloudSyncChange,
+  onResetSyncedSampleData,
   activeLedgerName,
   memberCount,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { dark, metaFlag, setMetaFlag } = useTheme();
+  const { dark, metaFlag, setMetaFlag, currency, currencyCode, setCurrencyCode } = useTheme();
+  const { settingsRepo } = useRepositories();
+  const settings = useRepositoryList(settingsRepo)[0];
+  const notifications = getNotificationPrefs(settings);
 
   // Slide-up + fade, mirroring ThemeScreen so pushed screens feel consistent.
   const anim = React.useRef(new Animated.Value(0)).current;
@@ -71,8 +88,8 @@ export function SettingsScreen({
   const profileName = activeLedgerName ?? 'Shared ledger';
 
   // Several rows below describe features whose native/backend half isn't built
-  // yet (push notifications, app lock, CloudKit sync, export, invites). They
-  // ship as real, persisted UI; this is the honest placeholder for the action.
+  // yet (CloudKit sync, export, invites). They ship as real, persisted UI; this
+  // is the honest placeholder for the action.
   const comingSoon = (title: string) =>
     Alert.alert(title, 'This will be available in a future update.');
 
@@ -84,6 +101,46 @@ export function SettingsScreen({
 
   const toggle = (key: string) => (v: boolean) => setMetaFlag(key, v);
 
+  const handleAppLockChange = async (enabled: boolean) => {
+    if (!enabled) {
+      setMetaFlag('appLock', false);
+      return;
+    }
+    try {
+      const [hasHardware, enrolled, types] = await Promise.all([
+        LocalAuthentication.hasHardwareAsync(),
+        LocalAuthentication.isEnrolledAsync(),
+        LocalAuthentication.supportedAuthenticationTypesAsync(),
+      ]);
+      if (!hasHardware || !enrolled) {
+        Alert.alert(
+          'Face ID is not ready',
+          'Set up Face ID in iOS Settings first, then return here to require it for the app.',
+        );
+        return;
+      }
+      if (!types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
+        Alert.alert(
+          'Face ID is unavailable',
+          'This device does not report Face ID as an available authentication method.',
+        );
+        return;
+      }
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Enable Face ID',
+        cancelLabel: 'Cancel',
+        disableDeviceFallback: true,
+        fallbackLabel: '',
+        biometricsSecurityLevel: 'strong',
+      });
+      if (result.success) {
+        setMetaFlag('appLock', true);
+      }
+    } catch {
+      Alert.alert('Face ID unavailable', 'The authentication prompt could not be opened.');
+    }
+  };
+
   const groups: Group[] = [
     {
       rows: [
@@ -93,39 +150,44 @@ export function SettingsScreen({
     {
       title: 'Notifications',
       rows: [
-        { kind: 'toggle', icon: 'bell', label: 'Bill reminders', value: metaFlag('notifyBills'), onValueChange: toggle('notifyBills') },
-        { kind: 'toggle', icon: 'exclamationmark.triangle', label: 'Over-budget alerts', value: metaFlag('notifyOverBudget'), onValueChange: toggle('notifyOverBudget') },
-        { kind: 'toggle', icon: 'calendar', label: 'Weekly summary', value: metaFlag('notifyWeekly'), onValueChange: toggle('notifyWeekly') },
+        {
+          kind: 'nav',
+          icon: 'bell',
+          label: 'Notifications',
+          value: notificationSummary(notifications),
+          onPress: onOpenNotifications,
+        },
       ],
     },
     {
       title: 'Privacy & Security',
       rows: [
-        { kind: 'toggle', icon: 'faceid', label: 'Require Face ID', caption: 'Lock the app when it opens', value: metaFlag('appLock'), onValueChange: toggle('appLock') },
-        { kind: 'toggle', icon: 'eye.slash', label: 'Hide amounts when inactive', value: metaFlag('hideAmounts'), onValueChange: toggle('hideAmounts') },
+        { kind: 'toggle', icon: 'faceid', label: 'Require Face ID', caption: 'Lock the app when it opens or returns from background', value: metaFlag('appLock'), onValueChange: handleAppLockChange },
       ],
     },
     {
       title: 'Preferences',
       rows: [
-        { kind: 'nav', icon: 'dollarsign.circle', label: 'Currency', value: 'USD', onPress: () => comingSoon('Currency') },
+        { kind: 'currency', icon: 'dollarsign.circle', label: 'Currency' },
         { kind: 'nav', icon: 'banknote', label: 'Monthly income', onPress: onOpenIncome },
-        { kind: 'nav', icon: 'calendar', label: 'Start week on', value: 'Sunday', onPress: () => comingSoon('Start week on') },
       ],
     },
     {
       title: 'Data',
       rows: [
-        { kind: 'toggle', icon: 'icloud', label: 'iCloud sync', value: metaFlag('icloudSync'), onValueChange: toggle('icloudSync') },
+        { kind: 'toggle', icon: 'icloud', label: 'iCloud sync', value: metaFlag('icloudSync'), onValueChange: onICloudSyncChange },
         { kind: 'action', icon: 'square.and.arrow.up', label: 'Export data', onPress: () => comingSoon('Export data') },
+        ...(__DEV__ && onResetSyncedSampleData
+          ? [{ kind: 'action' as const, icon: 'arrow.counterclockwise.icloud' as SFSymbol, label: 'Reset synced sample data', destructive: true, onPress: onResetSyncedSampleData }]
+          : []),
       ],
     },
     {
       title: 'Sharing',
       rows: [
-        { kind: 'nav', icon: 'person.2', label: 'Shared ledger', value: profileName, onPress: () => comingSoon('Shared ledger') },
-        { kind: 'nav', icon: 'person.3', label: 'Members', value: String(memberCount), onPress: () => comingSoon('Members') },
-        { kind: 'action', icon: 'person.badge.plus', label: 'Invite someone', onPress: () => comingSoon('Invite someone') },
+        { kind: 'nav', icon: 'person.2', label: 'Shared ledger', value: profileName, onPress: () => onOpenSharing('overview') },
+        { kind: 'nav', icon: 'person.3', label: 'Members', value: String(memberCount), onPress: () => onOpenSharing('members') },
+        { kind: 'action', icon: 'person.badge.plus', label: 'Invite someone', onPress: () => onOpenSharing('invite') },
       ],
     },
     {
@@ -186,6 +248,9 @@ export function SettingsScreen({
                     key={ri}
                     theme={theme}
                     dark={dark}
+                    currencyCode={currencyCode}
+                    currencyLabel={`${currency.symbol} ${currency.code}`}
+                    onCurrencyChange={setCurrencyCode}
                     row={row}
                     showSeparator={ri < group.rows.length - 1}
                   />
@@ -202,17 +267,24 @@ export function SettingsScreen({
 function SettingsRowView({
   theme,
   dark,
+  currencyCode,
+  currencyLabel,
+  onCurrencyChange,
   row,
   showSeparator,
 }: {
   theme: Theme;
   dark: boolean;
+  currencyCode: string;
+  currencyLabel: string;
+  onCurrencyChange: (code: string) => void;
   row: Row;
   showSeparator: boolean;
 }) {
   const destructive = row.kind === 'action' && row.destructive;
   const ember = overText(dark);
   const tint = destructive ? ember : theme.text;
+  const isCurrency = row.kind === 'currency';
 
   const body = (
     <View style={styles.row}>
@@ -243,7 +315,11 @@ function SettingsRowView({
         <Text style={[TYPE.bodySm, { color: theme.textTer }]}>{row.value}</Text>
       ) : (
         <View style={styles.rowTrailing}>
-          {row.kind === 'nav' && row.value != null && (
+          {isCurrency ? (
+            <Text style={[TYPE.bodySm, { color: theme.textTer }]} numberOfLines={1}>
+              {currencyLabel}
+            </Text>
+          ) : row.kind === 'nav' && row.value != null && (
             <Text style={[TYPE.bodySm, { color: theme.textTer }]} numberOfLines={1}>
               {row.value}
             </Text>
@@ -267,6 +343,25 @@ function SettingsRowView({
 
   if (row.kind === 'toggle' || row.kind === 'info') {
     return <View>{content}</View>;
+  }
+  if (isCurrency) {
+    return (
+      <MenuView
+        shouldOpenOnLongPress={false}
+        themeVariant={theme.dark ? 'dark' : 'light'}
+        actions={CURRENCY_OPTIONS.map(option => ({
+          id: option.code,
+          title: `${option.symbol} ${option.code}`,
+          subtitle: option.name,
+          state: option.code === currencyCode ? 'on' as const : 'off' as const,
+        }))}
+        onPressAction={({ nativeEvent }) => {
+          onCurrencyChange(nativeEvent.event);
+        }}
+      >
+        {content}
+      </MenuView>
+    );
   }
   return (
     <Pressable

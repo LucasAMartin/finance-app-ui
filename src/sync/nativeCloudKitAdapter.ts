@@ -36,6 +36,7 @@ export interface NativeCloudKitModule {
   getCurrentUser(): Promise<CloudKitAvailability>;
   pullChanges(zoneName: string, sinceToken?: string): Promise<NativeCloudKitPullPayload>;
   pushRecords(zoneName: string, records: NativeCloudKitRecordPayload[]): Promise<NativeCloudKitPushPayload>;
+  resetZone?(zoneName: string): Promise<{ zoneName: string; reset: boolean }>;
   presentLedgerShare?(ledgerId: string): Promise<{ ledgerId: string; shareUrl?: string }>;
 }
 

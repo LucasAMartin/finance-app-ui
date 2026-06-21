@@ -11,10 +11,22 @@
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow finance-app to recognize speech so you can add expenses hands-free.",
         "NSMicrophoneUsageDescription": "Allow finance-app to use the microphone to log expenses by voice.",
+        "NSFaceIDUsageDescription": "Use Face ID to keep your financial information private.",
         "NSPhotoLibraryUsageDescription": "Choose a photo from your library to use as the app background.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "com.anonymous.finance-app"
+      "entitlements": {
+        "com.apple.developer.icloud-container-identifiers": [
+          "iCloud.com.lucasmartin.financeapp"
+        ],
+        "com.apple.developer.icloud-services": [
+          "CloudKit"
+        ],
+        "com.apple.developer.ubiquity-container-identifiers": [
+          "iCloud.com.lucasmartin.financeapp"
+        ]
+      },
+      "bundleIdentifier": "com.lucasmartin.financeapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -47,6 +59,12 @@
       "expo-sqlite",
       "expo-status-bar",
       [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to keep your financial information private."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-screen.png",
@@ -56,6 +74,7 @@
       ],
       "expo-router",
       "expo-image",
+      "expo-notifications",
       [
         "expo-build-properties",
         {

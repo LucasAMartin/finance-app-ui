@@ -26,6 +26,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON, cautionText } from '../theme';
+import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
 import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
@@ -175,7 +176,7 @@ const NATIVE_BUDGET_GROUP_ADD_HEIGHT = 48;
 
 const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   needs: { label: 'Needs', icon: 'home' },
-  wants: { label: 'Wants', icon: 'sparkle' },
+  wants: { label: 'Wants', icon: 'tag' },
   savings: { label: 'Savings', icon: 'wallet' },
 };
 
@@ -217,7 +218,7 @@ const incomeMonthly = (inc: Income): number => {
 };
 
 const fmtAmt = (n: number) => n % 1 !== 0 ? n.toFixed(2) : n.toLocaleString();
-const fmtMoney = (n: number) => Math.round(n).toLocaleString();
+const fmtMoney = (n: number) => formatActiveCurrencyAmount(n, 0);
 const fmtPct = (n: number) => `${Math.round(n * 100)}%`;
 
 // Groups the live keypad draft exactly like fmtMoney so the amount keeps an
@@ -232,7 +233,7 @@ const formatDraft = (draft: string): string => {
 };
 
 const parseAmountDraft = (text: string): number | null => {
-  const clean = text.replace(/[$,\s]/g, '');
+  const clean = text.replace(/[^\d.]/g, '');
   if (!/^\d*\.?\d{0,2}$/.test(clean) || clean === '' || clean === '.') return null;
   const v = Number(clean);
   return Number.isFinite(v) && v >= 0 ? v : null;
@@ -475,6 +476,8 @@ type NativeBudgetRowItem = {
   onDelete?: () => void;
 };
 
+type RevealAmountMeasurement = (top: number, height: number, remeasure?: () => void) => void;
+
 function NativeBudgetAllocationCard({
   theme,
   p,
@@ -603,6 +606,7 @@ function NativeBudgetGroupCard({
   rows,
   onToggle,
   onAddCategory,
+  onRevealAmount,
 }: {
   theme: Theme;
   p: P;
@@ -618,7 +622,9 @@ function NativeBudgetGroupCard({
   rows: NativeBudgetRowItem[];
   onToggle: () => void;
   onAddCategory: () => void;
+  onRevealAmount?: RevealAmountMeasurement;
 }) {
+  const cardRef = useRef<View>(null);
   const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
   const progress = target > 0 ? Math.min(total / target, 1) : 0;
   const statusColor = isOverTarget ? OVER_DOT : p.textSec;
@@ -634,146 +640,183 @@ function NativeBudgetGroupCard({
     LAYOUT.cardPadBottom;
   let sawBill = false;
 
+  const revealAmount = useCallback((row: NativeBudgetRowItem) => {
+    row.onEditAmount();
+    if (!onRevealAmount) return;
+
+    const measure = () => {
+      cardRef.current?.measureInWindow((_x, y) => {
+        let rowOffset = LAYOUT.cardPadTop + NATIVE_BUDGET_GROUP_HEADER_HEIGHT;
+        let foundFirstBill = false;
+
+        for (const item of rows) {
+          if (item.kind === 'bill' && !foundFirstBill) {
+            rowOffset += NATIVE_BUDGET_GROUP_RECURRING_HEIGHT;
+            foundFirstBill = true;
+          }
+          if (item.id === row.id) {
+            onRevealAmount(y + rowOffset, NATIVE_BUDGET_GROUP_ROW_HEIGHT, measure);
+            return;
+          }
+          rowOffset += NATIVE_BUDGET_GROUP_ROW_HEIGHT;
+        }
+      });
+    };
+
+    requestAnimationFrame(measure);
+    setTimeout(measure, 180);
+    setTimeout(measure, 340);
+  }, [onRevealAmount, rows]);
+
   return (
-    <Host
-      ignoreSafeArea="all"
-      colorScheme={theme.dark ? 'dark' : 'light'}
+    <View
+      ref={cardRef}
+      collapsable={false}
       style={{ width: '100%', height: hostHeight }}
     >
-      <GlassEffectContainer>
-        <VStack
-          alignment="leading"
-          spacing={0}
-          modifiers={[
-            padding({
-              leading: LAYOUT.cardPadX,
-              trailing: LAYOUT.cardPadX,
-              top: LAYOUT.cardPadTop,
-              bottom: LAYOUT.cardPadBottom,
-            }),
-            frame({ maxWidth: 10000, alignment: 'leading' }),
-            glassEffect({
-              glass: { variant: 'regular', interactive: true, tint: glassTint },
-              shape: 'roundedRectangle',
-              cornerRadius: RADIUS.card,
-            }),
-          ]}
-        >
-          <SwiftButton
-            onPress={onToggle}
-            modifiers={[
-              swiftAccessibilityLabel(`${open ? 'Collapse' : 'Expand'} ${label} budget group`),
-              swiftAccessibilityHint(`${label} target is ${fmtPct(targetPct)}`),
-            ]}
-          >
-            <VStack
-              alignment="leading"
-              spacing={SPACE.sm}
-              modifiers={[
-                frame({ height: NATIVE_BUDGET_GROUP_HEADER_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
-              ]}
-            >
-              <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
-                <SwiftImage
-                  systemName={icon}
-                  size={15}
-                  color={color}
-                  modifiers={[
-                    frame({ width: 34, height: 34 }),
-                    background(`${color}22`, shapes.roundedRectangle({ cornerRadius: 17 })),
-                  ]}
-                />
-                <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
-                  <SwiftText modifiers={[font({ size: 16, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
-                    {label}
-                  </SwiftText>
-                  <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(statusColor), lineLimit(1)]}>
-                    {isOverTarget ? `$${fmtMoney(delta)} over target` : `$${fmtMoney(target)} target · ${fmtPct(targetPct)}`}
-                  </SwiftText>
-                </VStack>
-                <SwiftText modifiers={[font({ size: 18, weight: 'semibold' }), foregroundStyle(color), lineLimit(1)]}>
-                  ${fmtMoney(total)}
-                </SwiftText>
-                <SwiftImage
-                  systemName={open ? 'chevron.up' : 'chevron.down'}
-                  size={12}
-                  color={p.textTer}
-                />
-              </HStack>
-              <ProgressView
-                value={progress}
-                modifiers={[
-                  progressViewStyle('linear'),
-                  tint(isOverTarget ? OVER_DOT : color),
-                  frame({ maxWidth: 10000 }),
-                ]}
-              />
-            </VStack>
-          </SwiftButton>
-
+      <Host
+        ignoreSafeArea="all"
+        colorScheme={theme.dark ? 'dark' : 'light'}
+        style={StyleSheet.absoluteFill}
+      >
+        <GlassEffectContainer>
           <VStack
             alignment="leading"
             spacing={0}
             modifiers={[
-              frame({ height: detailsHeight, maxWidth: 10000, alignment: 'topLeading' }),
-              clipped(),
+              padding({
+                leading: LAYOUT.cardPadX,
+                trailing: LAYOUT.cardPadX,
+                top: LAYOUT.cardPadTop,
+                bottom: LAYOUT.cardPadBottom,
+              }),
+              frame({ maxWidth: 10000, alignment: 'leading' }),
+              glassEffect({
+                glass: { variant: 'regular', interactive: true, tint: glassTint },
+                shape: 'roundedRectangle',
+                cornerRadius: RADIUS.card,
+              }),
             ]}
           >
-            {rows.map((row, index) => {
-              const showRecurringDivider = row.kind === 'bill' && !sawBill;
-              if (row.kind === 'bill') sawBill = true;
-              const last = index === rows.length - 1;
-              return (
-                <VStack key={row.id} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
-                  {showRecurringDivider ? (
-                    <HStack
-                      alignment="center"
-                      spacing={SPACE.sm}
-                      modifiers={[frame({ height: NATIVE_BUDGET_GROUP_RECURRING_HEIGHT, maxWidth: 10000, alignment: 'leading' })]}
-                    >
-                      <SwiftImage systemName="repeat" size={11} color={p.textTer} />
-                      <SwiftText modifiers={[font({ size: 11, weight: 'semibold' }), foregroundStyle(p.textTer)]}>
-                        Recurring
-                      </SwiftText>
-                    </HStack>
-                  ) : null}
-                  <NativeBudgetRow
-                    item={row}
-                    p={p}
-                    last={last}
-                  />
-                </VStack>
-              );
-            })}
-          </VStack>
-
-          <Rectangle
-            modifiers={[
-              frame({ height: open && rows.length > 0 ? 1 : 0, maxWidth: 10000 }),
-              foregroundStyle(p.hairline),
-              opacity(open && rows.length > 0 ? 1 : 0),
-            ]}
-          />
-          <SwiftButton
-            onPress={onAddCategory}
-            modifiers={[swiftAccessibilityLabel(`Add category to ${label}`), tint(color)]}
-          >
-            <HStack
-              alignment="center"
-              spacing={SPACE.sm}
+            <SwiftButton
+              onPress={onToggle}
               modifiers={[
-                frame({ height: NATIVE_BUDGET_GROUP_ADD_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
+                swiftAccessibilityLabel(`${open ? 'Collapse' : 'Expand'} ${label} budget group`),
+                swiftAccessibilityHint(`${label} target is ${fmtPct(targetPct)}`),
               ]}
             >
-              <SwiftImage systemName="plus" size={13} color={color} />
-              <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(color)]}>
-                Add category
-              </SwiftText>
-            </HStack>
-          </SwiftButton>
-        </VStack>
-      </GlassEffectContainer>
-    </Host>
+              <VStack
+                alignment="leading"
+                spacing={SPACE.sm}
+                modifiers={[
+                  frame({ height: NATIVE_BUDGET_GROUP_HEADER_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
+                ]}
+              >
+                <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                  <SwiftImage
+                    systemName={icon}
+                    size={15}
+                    color={color}
+                    modifiers={[
+                      frame({ width: 34, height: 34 }),
+                      background(`${color}22`, shapes.roundedRectangle({ cornerRadius: 17 })),
+                    ]}
+                  />
+                  <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                    <SwiftText modifiers={[font({ size: 16, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+                      {label}
+                    </SwiftText>
+                    <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(statusColor), lineLimit(1)]}>
+                      {isOverTarget ? `${fmtMoney(delta)} over target` : `${fmtMoney(target)} target · ${fmtPct(targetPct)}`}
+                    </SwiftText>
+                  </VStack>
+                  <SwiftText modifiers={[font({ size: 18, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+                    {fmtMoney(total)}
+                  </SwiftText>
+                  <SwiftImage
+                    systemName={open ? 'chevron.up' : 'chevron.down'}
+                    size={12}
+                    color={p.textTer}
+                  />
+                </HStack>
+                <ProgressView
+                  value={progress}
+                  modifiers={[
+                    progressViewStyle('linear'),
+                    tint(isOverTarget ? OVER_DOT : color),
+                    frame({ maxWidth: 10000 }),
+                  ]}
+                />
+              </VStack>
+            </SwiftButton>
+
+            <VStack
+              alignment="leading"
+              spacing={0}
+              modifiers={[
+                frame({ height: detailsHeight, maxWidth: 10000, alignment: 'topLeading' }),
+                clipped(),
+              ]}
+            >
+              {rows.map((row, index) => {
+                const showRecurringDivider = row.kind === 'bill' && !sawBill;
+                if (row.kind === 'bill') sawBill = true;
+                const last = index === rows.length - 1;
+                const rowForRender = onRevealAmount
+                  ? { ...row, onEditAmount: () => revealAmount(row) }
+                  : row;
+                return (
+                  <VStack key={row.id} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+                    {showRecurringDivider ? (
+                      <HStack
+                        alignment="center"
+                        spacing={SPACE.sm}
+                        modifiers={[frame({ height: NATIVE_BUDGET_GROUP_RECURRING_HEIGHT, maxWidth: 10000, alignment: 'leading' })]}
+                      >
+                        <SwiftImage systemName="repeat" size={11} color={p.textTer} />
+                        <SwiftText modifiers={[font({ size: 11, weight: 'semibold' }), foregroundStyle(p.textTer)]}>
+                          Recurring
+                        </SwiftText>
+                      </HStack>
+                    ) : null}
+                    <NativeBudgetRow
+                      item={rowForRender}
+                      p={p}
+                      last={last}
+                    />
+                  </VStack>
+                );
+              })}
+            </VStack>
+
+            <Rectangle
+              modifiers={[
+                frame({ height: open && rows.length > 0 ? 1 : 0, maxWidth: 10000 }),
+                foregroundStyle(p.hairline),
+                opacity(open && rows.length > 0 ? 1 : 0),
+              ]}
+            />
+            <SwiftButton
+              onPress={onAddCategory}
+              modifiers={[swiftAccessibilityLabel(`Add category to ${label}`), tint(color)]}
+            >
+              <HStack
+                alignment="center"
+                spacing={SPACE.sm}
+                modifiers={[
+                  frame({ height: NATIVE_BUDGET_GROUP_ADD_HEIGHT, maxWidth: 10000, alignment: 'leading' }),
+                ]}
+              >
+                <SwiftImage systemName="plus" size={13} color={color} />
+                <SwiftText modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(color)]}>
+                  Add category
+                </SwiftText>
+              </HStack>
+            </SwiftButton>
+          </VStack>
+        </GlassEffectContainer>
+      </Host>
+    </View>
   );
 }
 
@@ -797,7 +840,11 @@ function NativeBudgetRow({
           background(`${item.color}24`, shapes.roundedRectangle({ cornerRadius: 16 })),
         ]}
       />
-      <VStack alignment="leading" spacing={3} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+      <VStack
+        alignment="leading"
+        spacing={item.meta ? SPACE.xs : 2}
+        modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}
+      >
         <SwiftText
           modifiers={[
             font({ size: 14, weight: 'medium' }),
@@ -906,12 +953,13 @@ function NativeBudgetRow({
 }
 
 function NativeBudgetAmountButton({ item, p }: { item: NativeBudgetRowItem; p: P }) {
+  const symbol = getActiveCurrency().symbol;
   const amountText = item.active
-    ? `$${formatDraft(item.draft)}`
-    : `$${fmtAmt(item.amount)}`;
+    ? `${symbol}${formatDraft(item.draft)}`
+    : `${symbol}${fmtAmt(item.amount)}`;
   const amountColor = item.active ? item.color : p.textSec;
   const content = (
-    <VStack alignment="trailing" spacing={3} modifiers={[opacity(item.editable ? 1 : 0.58)]}>
+    <VStack alignment="trailing" spacing={SPACE.xs} modifiers={[opacity(item.editable ? 1 : 0.58)]}>
       <SwiftText
         modifiers={[
           font({ size: 15, weight: 'semibold' }),
@@ -1000,7 +1048,7 @@ function LiveDraftText({ color }: { color: string }) {
   const draft = useSyncExternalStore(store!.subscribe, store!.getSnapshot);
   return (
     <Text maxFontSizeMultiplier={MAX_FONT_SCALE} numberOfLines={1} style={[styles.catBudgetText, { color }]}>
-      <Text style={{ opacity: 0.55 }}>$</Text>{formatDraft(draft)}
+      <Text style={{ opacity: 0.55 }}>{getActiveCurrency().symbol}</Text>{formatDraft(draft)}
     </Text>
   );
 }
@@ -1032,17 +1080,25 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
   accentColor: string;
   underlineColor: string;
   onStartEdit: () => void;
-  onMeasured: (top: number, height: number) => void;
+  onMeasured: RevealAmountMeasurement;
   accessibilityLabel?: string;
   disabled?: boolean;
 }) {
   const ref = useRef<View>(null);
 
+  const measureForReveal = useCallback(() => {
+    ref.current?.measureInWindow((_x, y, _w, h) => {
+      if (h > 0) onMeasured(y, h, measureForReveal);
+    });
+  }, [onMeasured]);
+
   const startEdit = () => {
     if (disabled) return;
     // Begin editing synchronously; measure afterwards purely for scroll-into-view.
     onStartEdit();
-    ref.current?.measureInWindow((_x, y, _w, h) => onMeasured(y, h));
+    requestAnimationFrame(measureForReveal);
+    setTimeout(measureForReveal, 180);
+    setTimeout(measureForReveal, 340);
   };
 
   // Display and edit share one fixed-metric row: a "$" prefix glued to the
@@ -1052,7 +1108,7 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
   // live value comes from LiveDraftText (store-subscribed) so only it repaints.
   if (active) {
     return (
-      <View style={[styles.catBudgetWrap, { borderBottomColor: accentColor }]}>
+      <View ref={ref} collapsable={false} style={[styles.catBudgetWrap, { borderBottomColor: accentColor }]}>
         <LiveDraftText color={color} />
         <EditCaret color={accentColor} />
       </View>
@@ -1075,7 +1131,7 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
           numberOfLines={1}
           style={[styles.catBudgetText, { color }]}
         >
-          <Text style={{ opacity: 0.55 }}>$</Text>{fmtAmt(value)}
+          <Text style={{ opacity: 0.55 }}>{getActiveCurrency().symbol}</Text>{fmtAmt(value)}
         </Text>
         <View style={styles.catBudgetCaretSpacer} />
       </View>
@@ -1208,6 +1264,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     [subscribeDraft, getDraftSnapshot],
   );
   const [keypadH, setKeypadH] = useState(340);
+  const editRevealBoxRef = useRef<{ top: number; height: number } | null>(null);
+  const editRevealMeasureRef = useRef<(() => void) | null>(null);
+  const editRevealScrollTargetRef = useRef<number | null>(null);
+  const editRevealScrollFrameRef = useRef<number | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [categoryLabelDraft, setCategoryLabelDraft] = useState('');
   const [categoryIconDraft, setCategoryIconDraft] = useState('tag');
@@ -1433,11 +1493,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       showNotice('This item is locked by its owner.');
       return;
     }
-	    const wasOpen = editingKeyRef.current !== null;
+    const previousKey = editingKeyRef.current;
+	    const wasOpen = previousKey !== null;
     // Switching rows mid-edit: commit the one we're leaving first. editingKey goes
     // straight from one key to the next (never null), so the keypad and tab bar
     // don't blink between rows.
     if (editingKey && editingKey !== key) flushEditDraft(editingKey, draftStore.value);
+    if (previousKey !== key) editRevealScrollTargetRef.current = null;
     editingKeyRef.current = key;
     const initialDraft = amountToBudgetDraft(value);
     setDraft(initialDraft);
@@ -1454,16 +1516,44 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     if (SUPPORTS_GLASS) setNativeDraft(next);
   }, [setDraft, draftStore]);
 
-  // Lift the tapped row above the keypad if the pad would cover it.
-  const scrollEditIntoView = (top: number, height: number) => {
+  const scrollEditIntoViewNow = useCallback((top: number, height: number) => {
     const keypadTop = SCREEN_H - keypadH - KEYPAD_DONE_AREA;
-    const delta = (top + height) - (keypadTop - 16);
-    if (delta > 0) {
-      requestAnimationFrame(() => {
-        scrollViewRef.current?.scrollTo?.({ y: scrollOffsetRef.current + delta, animated: true });
-      });
+    const delta = (top + height) - (keypadTop - SPACE.lg);
+    if (delta <= 4) return;
+
+    const nextY = Math.max(0, scrollOffsetRef.current + delta);
+    const previousTarget = editRevealScrollTargetRef.current;
+    if (previousTarget !== null && Math.abs(previousTarget - nextY) < 6) return;
+
+    editRevealScrollTargetRef.current = nextY;
+    if (editRevealScrollFrameRef.current !== null) {
+      cancelAnimationFrame(editRevealScrollFrameRef.current);
     }
-  };
+    editRevealScrollFrameRef.current = requestAnimationFrame(() => {
+      editRevealScrollFrameRef.current = null;
+      scrollViewRef.current?.scrollTo?.({ y: nextY, animated: true });
+    });
+  }, [keypadH]);
+
+  // Lift the tapped row above the keypad if the pad would cover it. We do one
+  // immediate pass for responsiveness, then a second pass after the keypad
+  // settles so the final height can't leave the value tucked behind it.
+  const scrollEditIntoView = useCallback<RevealAmountMeasurement>((top, height, remeasure) => {
+    editRevealBoxRef.current = { top, height };
+    if (remeasure) editRevealMeasureRef.current = remeasure;
+    scrollEditIntoViewNow(top, height);
+  }, [scrollEditIntoViewNow]);
+
+  useEffect(() => {
+    if (!editingKeyRef.current) return;
+    if (editRevealMeasureRef.current) {
+      requestAnimationFrame(() => editRevealMeasureRef.current?.());
+      return;
+    }
+    const box = editRevealBoxRef.current;
+    if (!box) return;
+    scrollEditIntoViewNow(box.top, box.height);
+  }, [keypadH, editingKey, scrollEditIntoViewNow]);
 
   const closeAmountEdit = () => {
     if (!editingKeyRef.current) return;
@@ -1474,6 +1564,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     editingKeyRef.current = null;
     setEditingKey(null);
     if (SUPPORTS_GLASS) setNativeDraft('');
+    editRevealBoxRef.current = null;
+    editRevealMeasureRef.current = null;
+    editRevealScrollTargetRef.current = null;
+    if (editRevealScrollFrameRef.current !== null) {
+      cancelAnimationFrame(editRevealScrollFrameRef.current);
+      editRevealScrollFrameRef.current = null;
+    }
   };
 
   // A tap anywhere in the content closes the keypad — but a tap on another amount
@@ -2035,15 +2132,15 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                     activeOpacity={0.7}
                     onPress={() => { if (incomeBtnRef.current) onOpenIncome?.(incomeBtnRef.current); }}
                     accessibilityRole="button"
-                    accessibilityLabel={`Income $${fmtMoney(income)}, assigned $${fmtMoney(totalBudgeted)}. Edit income`}
+                    accessibilityLabel={`Income ${fmtMoney(income)}, assigned ${fmtMoney(totalBudgeted)}. Edit income`}
                   >
                     <View ref={incomeBtnRef} collapsable={false} style={styles.heroStatusRow}>
                       <View style={{ borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.35)', flexDirection: 'row', alignItems: 'baseline' }}>
-                        <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, shadow]}>${fmtMoney(income)}</Text>
+                        <Text style={[TYPE.onMediaStatus, { color: pWallpaper.text }, shadow]}>{fmtMoney(income)}</Text>
                         <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> Income</Text>
                       </View>
                       <Text style={[TYPE.onMediaStatusSub, { color: pWallpaper.textSec }, shadow]}> · </Text>
-                      <Text style={[TYPE.onMediaStatus, { color: isOver ? OVER_DOT : pWallpaper.text }, shadow]}>${fmtMoney(totalBudgeted)}</Text>
+                      <Text style={[TYPE.onMediaStatus, { color: isOver ? OVER_DOT : pWallpaper.text }, shadow]}>{fmtMoney(totalBudgeted)}</Text>
                       <Text style={[TYPE.onMediaStatusSub, { color: isOver ? OVER_DOT : pWallpaper.textSec }, shadow]}> Assigned</Text>
                     </View>
                   </TouchableOpacity>
@@ -2241,6 +2338,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                       rows={nativeRows}
                       onToggle={() => toggleGroupCollapsed(g.key)}
                       onAddCategory={beginAddCategory}
+                      onRevealAmount={scrollEditIntoView}
                     />
                   );
                 }
@@ -2262,11 +2360,11 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                          <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: p.text }]}>{g.label}</Text>
 	                        </View>
 	                        <Text style={[TYPE.caption, { color: groupIsOver ? (g.key === 'savings' ? savingsCol : OVER_DOT) : p.textSec }]}>
-	                          {groupIsOver ? `\$${fmtMoney(groupDelta)} over target of ${fmtPct(g.targetPct)}` : `\$${fmtMoney(groupTarget)} target · ${fmtPct(g.targetPct)}`}
+	                          {groupIsOver ? `${fmtMoney(groupDelta)} over target of ${fmtPct(g.targetPct)}` : `${fmtMoney(groupTarget)} target · ${fmtPct(g.targetPct)}`}
 	                        </Text>
 	                      </View>
 	                      <View style={styles.groupHeadAmount}>
-	                        <Text style={[TYPE.subsectionTitle, { color: groupColor }]}>${groupTotal.toLocaleString()}</Text>
+	                        <Text style={[TYPE.subsectionTitle, { color: p.text }]}>{fmtMoney(groupTotal)}</Text>
 	                        <RotatingChevron open={!isCollapsed} color={p.textTer} />
 	                      </View>
 	                    </TouchableOpacity>
@@ -2307,12 +2405,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                               </View>
 	                              <View style={{ flex: 1, minWidth: 0 }}>
 	                                <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
-	                                {subGoal && (
+                                {subGoal && (
                                   <>
-                                    <View style={[styles.subGoalTrack, { backgroundColor: p.hairline, marginTop: 5, width: '100%' }]}>
+                                    <View style={[styles.subGoalTrack, { backgroundColor: p.hairline, marginTop: SPACE.sm, width: '100%' }]}>
                                       <View style={{ height: '100%', borderRadius: 2, width: `${subGoalPct}%`, backgroundColor: groupColor }} />
                                     </View>
-                                    <Text style={[TYPE.caption, { color: p.textSec, marginTop: 3 }]}>
+                                    <Text style={[TYPE.caption, { color: p.textSec, marginTop: SPACE.xs }]}>
                                       <Text style={{ color: subGoalStatusColor }}>
                                         {subGoalStatus?.label}
                                       </Text>
@@ -2321,7 +2419,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                   </>
                                 )}
                               </View>
-	                              <EditableBudgetAmount
+                              <EditableBudgetAmount
                                 value={subBudget}
                                 active={editingKey === rowKey}
                                 color={p.textSec}
@@ -2366,12 +2464,12 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                              <View style={{ flex: 1, minWidth: 0 }}>
 	                                <Text style={[TYPE.body, { color: p.text }]} numberOfLines={1}>{sub.label}</Text>
 	                              </View>
-	                              <EditableBudgetAmount
+                              <EditableBudgetAmount
                                 value={subBudget}
                                 active={editingKey === rowKey}
                                 color={p.textSec}
                                 accentColor={theme.accent.dot}
-                                underlineColor={p.hairline}
+	                                underlineColor={p.hairline}
 	                                onStartEdit={() => startAmountEdit(rowKey, subBudget)}
 	                                onMeasured={scrollEditIntoView}
 	                                accessibilityLabel={`Edit ${sub.label} budget`}
@@ -2421,9 +2519,9 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                 <EditableBudgetAmount
 	                                  value={budgets[rowKey] ?? bill.fullAmount}
 	                                  active={editingKey === rowKey}
-                                  color={p.textSec}
-                                  accentColor={theme.accent.dot}
-                                  underlineColor={p.hairline}
+	                                  color={p.textSec}
+	                                  accentColor={theme.accent.dot}
+	                                  underlineColor={p.hairline}
 	                                  onStartEdit={() => startAmountEdit(rowKey, budgets[rowKey] ?? bill.fullAmount)}
 	                                  onMeasured={scrollEditIntoView}
 	                                  accessibilityLabel={`Edit ${bill.name} budget`}
@@ -2532,9 +2630,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   );
 }
 
-const guardDollar = (t: string): string => {
-  if (t === '' || t === '$') return t;
-  return t.startsWith('$') ? t : `$${t.replace(/\$/g, '')}`;
+const guardCurrencyPrefix = (t: string): string => {
+  const symbol = getActiveCurrency().symbol;
+  if (t === '' || t === symbol) return t;
+  return t.startsWith(symbol) ? t : `${symbol}${t.replace(/[^\d.]/g, '')}`;
 };
 
 const parseDeadline = (s: string): Date | null => {
@@ -2559,8 +2658,8 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
   underlineColor: string;
   onActivate: () => void;
 }) {
-  // displayValue may arrive as "500" or "$500" depending on which path set it.
-  const raw = displayValue.replace(/[$,\s]/g, '');
+  const symbol = getActiveCurrency().symbol;
+  const raw = displayValue.replace(/[^\d.]/g, '');
   const num = raw !== '' ? Number(raw) : NaN;
   const isPlaceholder = !displayValue && !active;
 
@@ -2568,7 +2667,7 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
     return (
       <View style={[styles.catBudgetWrap, { borderBottomColor: accentColor }]}>
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.catBudgetText, { color }]}>
-          <Text style={{ opacity: 0.55 }}>$</Text>{draft ? formatDraft(draft) : ''}
+          <Text style={{ opacity: 0.55 }}>{symbol}</Text>{draft ? formatDraft(draft) : ''}
         </Text>
         <EditCaret color={accentColor} />
       </View>
@@ -2579,7 +2678,7 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
     <TouchableOpacity onPress={onActivate} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 12, right: 6 }}>
       <View style={[styles.catBudgetWrap, { borderBottomColor: underlineColor }]}>
         <Text maxFontSizeMultiplier={MAX_FONT_SCALE} style={[styles.catBudgetText, { color: isPlaceholder ? underlineColor : color }]}>
-          {isPlaceholder ? placeholder : <><Text style={{ opacity: 0.55 }}>$</Text>{fmtAmt(isNaN(num) ? 0 : num)}</>}
+          {isPlaceholder ? placeholder : <><Text style={{ opacity: 0.55 }}>{symbol}</Text>{fmtAmt(isNaN(num) ? 0 : num)}</>}
         </Text>
         <View style={styles.catBudgetCaretSpacer} />
       </View>
@@ -2657,9 +2756,10 @@ function CategoryEditSheet({
       deadlineAutoFilled.current = false;
       const parsed = parseDeadline(goalDeadline);
       deadlineDateRef.current = parsed;
-      setBudgetDisplay(budget ? `$${budget}` : '');
-      setGoalTargetDisplay(goalTarget ? `$${goalTarget}` : '');
-      setGoalSavedDisplay(goalSaved ? `$${goalSaved}` : '');
+      const symbol = getActiveCurrency().symbol;
+      setBudgetDisplay(budget ? `${symbol}${budget}` : '');
+      setGoalTargetDisplay(goalTarget ? `${symbol}${goalTarget}` : '');
+      setGoalSavedDisplay(goalSaved ? `${symbol}${goalSaved}` : '');
       setDeadlineDate(parsed);
       setActiveNumField(null);
       sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -2738,7 +2838,7 @@ function CategoryEditSheet({
 
   const activateNumFieldNow = (field: NumField, currentDisplay: string) => {
     if (activeNumField && activeNumField !== field) commitNumField(activeNumField);
-    const raw = currentDisplay.replace(/[$,\s]/g, '');
+    const raw = currentDisplay.replace(/[^\d.]/g, '');
     const n = Number(raw);
     // Cash-register keypad expects "X.XX" format. A bare integer like "900"
     // would be misread as 900¢ = $9.00 on the first key press.
@@ -2994,7 +3094,7 @@ function CategoryEditSheet({
                 displayValue={budgetDisplay}
                 draft={activeNumField === 'budget' ? numDraft : ''}
                 active={activeNumField === 'budget'}
-                placeholder="$0"
+                placeholder={`${getActiveCurrency().symbol}0`}
                 color={theme.text}
                 accentColor={theme.accent.dot}
                 underlineColor={theme.hairline}

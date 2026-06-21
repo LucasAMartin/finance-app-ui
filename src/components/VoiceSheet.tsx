@@ -8,6 +8,7 @@ import {
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import { Theme } from '../theme';
+import { getActiveCurrency } from '../currency';
 import { Icon } from './Icon';
 import { ScreenExitButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
@@ -32,7 +33,7 @@ const MANUAL_INDEX = 1;
 
 const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   needs: { label: 'Needs', icon: 'home' },
-  wants: { label: 'Wants', icon: 'sparkle' },
+  wants: { label: 'Wants', icon: 'tag' },
   savings: { label: 'Savings', icon: 'wallet' },
 };
 const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
@@ -518,7 +519,7 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
               {/* Amount display — only the freshly entered digit eases in */}
               <View style={S.manualAmountWrap}>
                 <View style={S.manualAmountRow}>
-                  <Text style={[S.manualAmountSign, { color: theme.textSec }]}>$</Text>
+                  <Text style={[S.manualAmountSign, { color: theme.textSec }]}>{getActiveCurrency().symbol}</Text>
                   <AmountText
                     value={manualAmt}
                     color={canSave ? theme.text : theme.textTer}

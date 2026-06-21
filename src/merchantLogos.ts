@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { InteractionManager } from 'react-native';
 import { useRepositories, useRepositoryItem, useRepositoryList } from './repositories/RepositoryProvider';
 import type { MerchantLogo, MerchantLogosRepo, Transaction } from './repositories/types';
 import {
@@ -101,24 +102,26 @@ export function useMerchantLogo(merchant: string, enabled = true): MerchantLogo 
 
   useEffect(() => {
     if (!canLookup || !key) return;
-    // Migration: any previously cached URL that is no longer a safe Logo.dev CDN
-    // URL (e.g. legacy Brandfetch / app-proxy entries) is invalidated to an error
-    // with backoff so it re-resolves through the new resolver.
-    if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
-      merchantLogosRepo.create({
-        id: key,
-        merchantKey: key,
-        displayName: merchant.trim(),
-        status: 'error',
-        source: entry.source ?? RESOLVED_SOURCE,
-        lastCheckedAt: new Date().toISOString(),
-        retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
-        failureCount: entry.failureCount + 1,
-        meta: { error: 'unsafe_logo_url_rejected' },
-      });
-      return;
-    }
-    resolveAndCacheMerchantLogo(merchant, merchantLogosRepo, entry).catch(() => {});
+    const task = InteractionManager.runAfterInteractions(() => {
+      // Migration: any previously cached URL that is no longer a safe Logo.dev
+      // CDN URL is invalidated only after the first interactive frame.
+      if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
+        merchantLogosRepo.create({
+          id: key,
+          merchantKey: key,
+          displayName: merchant.trim(),
+          status: 'error',
+          source: entry.source ?? RESOLVED_SOURCE,
+          lastCheckedAt: new Date().toISOString(),
+          retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
+          failureCount: entry.failureCount + 1,
+          meta: { error: 'unsafe_logo_url_rejected' },
+        });
+        return;
+      }
+      resolveAndCacheMerchantLogo(merchant, merchantLogosRepo, entry).catch(() => {});
+    });
+    return () => task.cancel();
   }, [canLookup, entry, key, merchant, merchantLogosRepo]);
 
   if (canLookup && entry?.status === 'resolved' && isSafeLogoUrl(entry.logoUrl) && !isExpired(entry)) return entry;
@@ -138,31 +141,34 @@ export function useMerchantLogoMap(transactions: Transaction[], enabled = true):
   useEffect(() => {
     if (!enabled) return;
 
-    const seen = new Set<string>();
-    transactions.forEach(tx => {
-      if (!transactionUsesMerchantLogo(tx)) return;
-      const key = merchantLogoKey(tx.merchant);
-      if (!key || seen.has(key)) return;
-      seen.add(key);
+    const task = InteractionManager.runAfterInteractions(() => {
+      const seen = new Set<string>();
+      transactions.forEach(tx => {
+        if (!transactionUsesMerchantLogo(tx)) return;
+        const key = merchantLogoKey(tx.merchant);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
 
-      const entry = entriesByKey.get(key);
-      if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
-        merchantLogosRepo.create({
-          id: key,
-          merchantKey: key,
-          displayName: tx.merchant.trim(),
-          status: 'error',
-          source: entry.source ?? RESOLVED_SOURCE,
-          lastCheckedAt: new Date().toISOString(),
-          retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
-          failureCount: entry.failureCount + 1,
-          meta: { error: 'unsafe_logo_url_rejected' },
-        });
-        return;
-      }
+        const entry = entriesByKey.get(key);
+        if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
+          merchantLogosRepo.create({
+            id: key,
+            merchantKey: key,
+            displayName: tx.merchant.trim(),
+            status: 'error',
+            source: entry.source ?? RESOLVED_SOURCE,
+            lastCheckedAt: new Date().toISOString(),
+            retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
+            failureCount: entry.failureCount + 1,
+            meta: { error: 'unsafe_logo_url_rejected' },
+          });
+          return;
+        }
 
-      resolveAndCacheMerchantLogo(tx.merchant, merchantLogosRepo, entry).catch(() => {});
+        resolveAndCacheMerchantLogo(tx.merchant, merchantLogosRepo, entry).catch(() => {});
+      });
     });
+    return () => task.cancel();
   }, [enabled, entriesByKey, merchantLogosRepo, transactions]);
 
   return useMemo(() => {

@@ -90,8 +90,25 @@ function remoteWins(local: SyncRecord, remote: SyncRecord): boolean {
 
 function shouldApplyRemote(local: SyncRecord | undefined, remote: SyncRecord): boolean {
   if (!local) return true;
+  if (local.syncStatus === 'local') return true;
   if (local.syncStatus !== 'pending') return remoteWins(local, remote);
   return remoteWins(local, remote);
+}
+
+const RECORD_APPLY_ORDER: Record<SyncRecordType, number> = {
+  ledger: 0,
+  ledgerMember: 1,
+  category: 2,
+  recurringRule: 3,
+  transaction: 4,
+  income: 4,
+  budget: 4,
+  bill: 4,
+  attachment: 5,
+};
+
+function orderedForApply(records: SyncRecord[]): SyncRecord[] {
+  return [...records].sort((a, b) => RECORD_APPLY_ORDER[a.recordType] - RECORD_APPLY_ORDER[b.recordType]);
 }
 
 export async function syncLedger({
@@ -116,7 +133,7 @@ export async function syncLedger({
   let conflicts = 0;
 
   const pull = await adapter.pullChanges(zoneName, store.getChangeToken(zoneName));
-  pull.records.forEach(remote => {
+  orderedForApply(pull.records).forEach(remote => {
     if (remote.ledgerId !== ledgerId) return;
     const local = store.getRecord(remote.recordName);
     if (shouldApplyRemote(local, remote)) {

@@ -18,6 +18,7 @@ import Svg, {
 } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 
+import { formatActiveCurrencyAmount } from '../../currency';
 import { GROUP_COLORS, OVER_DOT, type Theme } from '../../theme';
 import { TYPE } from '../../typography';
 import type { ActivityInitialFilter } from '../../selectors/spending';
@@ -55,10 +56,7 @@ export interface InsightBin {
 }
 
 const fmtMoney = (v: number, decimals = 0) => {
-  const abs = Math.abs(v);
-  if (abs >= 1000 && decimals === 0)
-    return `$${Math.round(v).toLocaleString()}`;
-  return `$${v.toFixed(decimals)}`;
+  return formatActiveCurrencyAmount(v, decimals);
 };
 
 const shortDate = (d: Date) =>

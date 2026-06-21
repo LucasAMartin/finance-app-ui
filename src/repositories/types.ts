@@ -25,6 +25,7 @@ export interface Ledger extends SyncFields {
   name: string;
   ownerUserId: string;
   active: boolean;
+  meta?: Record<string, unknown>;
 }
 
 export interface LedgerMember extends SyncFields {
@@ -225,6 +226,10 @@ export interface TransactionPage {
   nextCursor?: TransactionCursor;
 }
 
+export interface TransactionPageWithSummary extends TransactionPage {
+  summary: TransactionSummary;
+}
+
 export interface TransactionSummaryQuery {
   categoryIds?: string[];
   merchantQuery?: string;
@@ -273,12 +278,14 @@ export interface Repository<T extends { id: string }, CreateInput = Omit<T, 'id'
   create(input: CreateInput): T;
   update(id: string, patch: UpdateInput): T | undefined;
   delete(id: string): void;
+  refresh?(): void;
   subscribe(listener: RepoListener): Unsubscribe;
 }
 
 export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, UpdateTransactionInput> & {
   canEdit(tx: Transaction): boolean;
   listPage(query: TransactionQuery): TransactionPage;
+  listPageWithSummary?: (query: TransactionQuery) => TransactionPageWithSummary;
   getSummary(query: TransactionSummaryQuery): TransactionSummary;
   /** Aggregate expense spend grouped into ordered day/month buckets, computed in
    *  the data layer (SQL GROUP BY) rather than by loading every row. */
@@ -312,9 +319,11 @@ export interface SessionRepo {
   getSession(): AppSession;
   setCurrentUserId(userId: string): void;
   listLedgers(): Ledger[];
+  updateLedger(id: string, patch: Partial<Omit<Ledger, 'id'>>): Ledger | undefined;
   listMembers(ledgerId?: string): LedgerMember[];
   updateMember(id: string, patch: Partial<Omit<LedgerMember, 'id' | 'ledgerId' | 'userId'>>): LedgerMember | undefined;
   canEdit(createdByUserId?: string, ledgerId?: string): boolean;
+  refresh?(): void;
   subscribe(listener: RepoListener): Unsubscribe;
 }
 

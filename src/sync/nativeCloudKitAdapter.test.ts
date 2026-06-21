@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { resetSQLiteDatabaseForTests } from '../repositories/sqlite/db.ts';
+import { getDb, resetSQLiteDatabaseForTests } from '../repositories/sqlite/db.ts';
 import {
   createNativeCloudKitSyncAdapter,
   recordFromNativePayload,
@@ -98,6 +98,48 @@ test('native CloudKit adapter pauses cleanly when native module is missing', asy
   assert.equal(result.reason, 'not-implemented');
   assert.equal(result.pulledRecords, 0);
   assert.equal(result.pushedRecords, 0);
+});
+
+test('syncActiveLedger clears stale CloudKit change tokens and retries once', async () => {
+  resetSQLiteDatabaseForTests();
+  getDb().runSync(
+    'INSERT INTO sync_state (zone_name, change_token, updated_at) VALUES (?, ?, ?)',
+    'zone-ledger-default',
+    'old-token',
+    '2026-06-01T10:00:00.000Z',
+  );
+  let pulls = 0;
+  const adapter = createNativeCloudKitSyncAdapter({
+    async getCurrentUser() {
+      return { available: true, userId: 'icloud-alex' };
+    },
+    async pullChanges(_zoneName, sinceToken) {
+      pulls += 1;
+      if (sinceToken === 'old-token') {
+        throw new Error('CKErrorDomain Code=21 "changeTokenExpired"');
+      }
+      return { records: [], changeToken: 'fresh-token' };
+    },
+    async pushRecords(_zoneName, records) {
+      return {
+        accepted: records.map(record => ({
+          ...record,
+          recordChangeTag: `tag-${record.recordName}`,
+          syncStatus: 'synced',
+        })),
+        conflicts: [],
+      };
+    },
+  });
+
+  const result = await syncActiveLedger({ adapter });
+
+  assert.equal(pulls, 2);
+  assert.equal(result.status, 'synced');
+  assert.equal(getDb().getFirstSync<{ change_token: string }>(
+    'SELECT change_token FROM sync_state WHERE zone_name = ?',
+    'zone-ledger-default',
+  )?.change_token, 'fresh-token');
 });
 
 test('native CloudKit adapter forwards push payloads and maps accepted responses', async () => {

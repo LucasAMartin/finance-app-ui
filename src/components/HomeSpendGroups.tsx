@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, TouchableOpacity, View, Text, StyleSheet } from 'react-native';
 import { Theme, GROUP_COLORS, OVER_DOT } from '../theme';
+import { formatActiveCurrencyAmount } from '../currency';
 import type { SpendGroup } from '../repositories/types';
 import { Icon } from './Icon';
 import { Collapsible } from './Collapsible';
@@ -17,8 +18,7 @@ interface Props {
   onMedia?: boolean;
 }
 
-const fmtAmount = (n: number) =>
-  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtAmount = (n: number) => formatActiveCurrencyAmount(n, true);
 
 export function HomeSpendGroups({ theme, groups, income, compact, onMedia }: Props) {
   return (
@@ -105,7 +105,7 @@ function GroupPanel({
             </View>
             <View style={s.totalRow}>
               <Text style={[s.groupTotal, { color: textColor }]}>
-                ${fmtAmount(groupTotal)}
+                {fmtAmount(groupTotal)}
               </Text>
               <Animated.View style={{ transform: [{ rotate: chevRotate }] }}>
                 <Icon name="chevDown" size={14} color={color} stroke={2.2} />
@@ -170,11 +170,11 @@ function DetailRows({
                     <Text style={[s.check, { color }]}>✓{'  '}</Text>
                   )}
                   <Text style={[s.subSpent, { color: over ? OVER_DOT : textColor }]}>
-                    ${fmtAmount(sub.spent)}
+                    {fmtAmount(sub.spent)}
                   </Text>
                   {(!funded || over) && (
                     <Text style={[TYPE.caption, { fontSize: 11, lineHeight: 14, color: textTerColor }]}>
-                      {'  /  $'}{fmtAmount(sub.budget)}
+                      {'  /  '}{fmtAmount(sub.budget)}
                     </Text>
                   )}
                 </View>
@@ -240,7 +240,7 @@ function WantsChips({
               {sub.label}
             </Text>
             <Text style={[s.wantAmt, { color: textColor }]}>
-              ${fmtAmount(sub.spent)}
+              {fmtAmount(sub.spent)}
             </Text>
           </View>
         ))}

@@ -1,5 +1,6 @@
 import {
   canEditRecord,
+  createdByUserIdForUpdate,
   getActiveLedgerId,
   getCurrentUserId,
   getDb,
@@ -21,6 +22,7 @@ import type {
   Transaction,
   TransactionCursor,
   TransactionPage,
+  TransactionPageWithSummary,
   TransactionQuery,
   TransactionSortOrder,
   TransactionSummary,
@@ -51,6 +53,13 @@ interface TxRow {
   sync_status: Transaction['syncStatus'] | null;
   meta: string | null;
 }
+
+type TxRowWithSummary = TxRow & {
+  transaction_count: number;
+  expense_count: number;
+  expense_total: number | null;
+  expense_day_count: number;
+};
 
 const DEFAULT_SORT: TransactionSortOrder = 'date-desc';
 
@@ -239,6 +248,66 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     };
   }
 
+  listPageWithSummary(query: TransactionQuery): TransactionPageWithSummary {
+    const sort = query.sort ?? DEFAULT_SORT;
+    const limit = Math.max(1, Math.min(query.limit, 200));
+    const baseParts: string[] = [];
+    const baseParams: any[] = [];
+    baseParts.push(ledgerWhere());
+    baseParams.push(ledgerParam());
+    appendBaseWhere(baseParts, baseParams, query);
+
+    const cursorParts: string[] = [];
+    const cursorParams: any[] = [];
+    appendCursorWhere(cursorParts, cursorParams, sort, query.cursor);
+    const cursorWhere = cursorParts.length > 0 ? `WHERE ${cursorParts.join(' AND ')}` : '';
+
+    const rows = getDb()
+      .getAllSync<TxRowWithSummary>(
+        `WITH filtered AS (
+           SELECT * FROM transactions ${whereSql(baseParts)}
+         ),
+         summary AS (
+           SELECT
+             COUNT(*) AS transaction_count,
+             SUM(CASE WHEN type != 'income' THEN 1 ELSE 0 END) AS expense_count,
+             COALESCE(SUM(CASE WHEN type != 'income' THEN amount ELSE 0 END), 0) AS expense_total,
+             COUNT(DISTINCT CASE WHEN type != 'income' THEN date(occurred_at) END) AS expense_day_count
+           FROM filtered
+         ),
+         page AS (
+           SELECT * FROM filtered ${cursorWhere} ORDER BY ${orderBy(sort)} LIMIT ?
+         )
+         SELECT page.*, summary.transaction_count, summary.expense_count, summary.expense_total, summary.expense_day_count
+         FROM page CROSS JOIN summary`,
+        ...baseParams,
+        ...cursorParams,
+        limit + 1,
+      );
+
+    if (rows.length === 0) {
+      return {
+        rows: [],
+        nextCursor: undefined,
+        summary: this.getSummary(query),
+      };
+    }
+
+    const hasMore = rows.length > limit;
+    const pageRows = (hasMore ? rows.slice(0, limit) : rows).map(txFromRow);
+    const first = rows[0];
+    return {
+      rows: pageRows,
+      nextCursor: hasMore && pageRows.length > 0 ? cursorFromTx(pageRows[pageRows.length - 1]) : undefined,
+      summary: {
+        transactionCount: first.transaction_count ?? 0,
+        expenseCount: first.expense_count ?? 0,
+        expenseTotal: first.expense_total ?? 0,
+        expenseDayCount: first.expense_day_count ?? 0,
+      },
+    };
+  }
+
   getSummary(query: TransactionSummaryQuery): TransactionSummary {
     const parts: string[] = [];
     const params: any[] = [];
@@ -394,7 +463,7 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
       normalized.recurring ? 1 : 0,
       normalized.recurringRuleId ?? current.recurringRuleId ?? null,
       normalized.visibility ?? current.visibility ?? 'shared',
-      normalized.createdByUserId ?? current.createdByUserId ?? 'local',
+      createdByUserIdForUpdate(current.createdByUserId, normalized.createdByUserId),
       sync.updatedByUserId,
       sync.updatedAt,
       normalized.cloudRecordName ?? current.cloudRecordName ?? null,

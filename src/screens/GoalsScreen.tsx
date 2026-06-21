@@ -56,9 +56,10 @@ import BottomSheet, {
 import { Easing as ReEasing } from 'react-native-reanimated';
 
 import { CAUTION_AMBER, GROUP_COLORS, ON_GROUP_ICON, OVER_DOT, Theme, cautionText } from '../theme';
+import { getActiveCurrency } from '../currency';
 import { useTheme } from '../ThemeProvider';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
-import { makeP, makeScrim, deriveFloor } from '../wallpaperPalette';
+import { MEDIA, MEDIA_INK, makeP, makeScrim, deriveFloor } from '../wallpaperPalette';
 import { SheetPrimaryButton, ProgressBar, Money, FIELD_CARD, FIELD_ROW } from '../components/shared';
 import { GlassCard } from '../components/GlassCard';
 import { MerchantMark } from '../components/MerchantMark';
@@ -70,6 +71,7 @@ import {
   EXIT_FLOAT_STYLE,
   EXIT_BTN_SIZE,
   GlassCircleButton,
+  glassTintForTheme,
   SUPPORTS_GLASS,
 } from '../components/GlassButton';
 import { TYPE } from '../typography';
@@ -191,6 +193,10 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
   const pWallpaper = makeP(true);
   const scrim = makeScrim(theme.dark);
   const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
+  const headerIconColor = theme.dark ? MEDIA.text : MEDIA_INK;
+  const headerGlassTint = glassTintForTheme(theme.dark);
+  const headerFallbackBg = theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
+  const headerFallbackBorder = theme.dark ? 'rgba(235,239,242,0.16)' : 'rgba(14,12,24,0.10)';
   const goalsBehind = goals.filter(goal => statusFor(goal).tone === 'caution').length;
   const goalSavedTotal = goals.reduce((sum, goal) => sum + goal.saved, 0);
   const monthlyPlanTotal = goals.reduce((sum, goal) => sum + (goal.monthlyContribution ?? 0), 0);
@@ -381,13 +387,29 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
             />
 
             <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-              <ScreenExitButton
-                variant="back"
-                onPress={onClose}
-                tint={pWallpaper.text}
-                fallbackBg="rgba(8,6,20,0.45)"
-                accessibilityLabel="Back"
-              />
+              {SUPPORTS_GLASS ? (
+                <GlassCircleButton
+                  onPress={onClose}
+                  systemImage="chevron.left"
+                  size={EXIT_BTN_SIZE}
+                  iconSize={20}
+                  iconColor={headerIconColor}
+                  glassTint={headerGlassTint}
+                  accessibilityLabel="Back"
+                />
+              ) : (
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back"
+                  style={[
+                    styles.headerAdd,
+                    { backgroundColor: headerFallbackBg, borderColor: headerFallbackBorder },
+                  ]}
+                >
+                  <Icon name="chevL" size={22} color={headerIconColor} stroke={2} />
+                </Pressable>
+              )}
               <Text style={[styles.headerTitle, { color: pWallpaper.text }]}>Goals</Text>
               {SUPPORTS_GLASS ? (
                 <GlassCircleButton
@@ -395,7 +417,8 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
                   systemImage="plus"
                   size={EXIT_BTN_SIZE}
                   iconSize={18}
-                  iconColor={pWallpaper.text}
+                  iconColor={headerIconColor}
+                  glassTint={headerGlassTint}
                   accessibilityLabel="Add goal"
                 />
               ) : (
@@ -405,10 +428,10 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
                   accessibilityLabel="Add goal"
                   style={[
                     styles.headerAdd,
-                    { backgroundColor: 'rgba(8,6,20,0.40)', borderColor: pWallpaper.hairline },
+                    { backgroundColor: headerFallbackBg, borderColor: headerFallbackBorder },
                   ]}
                 >
-                  <Icon name="plus" size={17} color={pWallpaper.text} stroke={2} />
+                  <Icon name="plus" size={17} color={headerIconColor} stroke={2} />
                 </Pressable>
               )}
             </View>
@@ -426,18 +449,6 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
                 <EmptyGoals theme={theme} tint={teal} p={p} onAdd={() => setFormGoalOpen(true)} />
               ) : (
                 <>
-                  {goals.length > 0 && (
-                    <GoalSummary
-                      theme={theme}
-                      p={p}
-                      activeCount={goals.length}
-                      savedTotal={goalSavedTotal}
-                      monthlyPlan={monthlyPlanTotal}
-                      behindCount={goalsBehind}
-                      tint={teal}
-                      caution={caution}
-                    />
-                  )}
                   {goals.length === 0 && (
                     <EmptyActiveGoals theme={theme} p={p} onAdd={() => setFormGoalOpen(true)} />
                   )}
@@ -587,6 +598,43 @@ function GoalCardShell({
   );
 }
 
+function goalFooterLine(goal: Goal, p: ReturnType<typeof makeP>) {
+  const remaining = goalRemaining(goal);
+  const monthly = goal.monthlyContribution;
+
+  if (goal.status === 'archived') {
+    return {
+      line: goal.archivedAt
+        ? `Archived ${contributionDateLabel(goal.archivedAt)}`
+        : 'Archived',
+      color: p.textTer,
+    };
+  }
+
+  if (remaining <= 0) {
+    return { line: null, color: p.textSec };
+  }
+
+  if (goal.deadline) {
+    return {
+      line: `Target ${deadlineLabel(goal.deadline)}`,
+      color: p.textTer,
+    };
+  }
+
+  if (monthly && monthly > 0) {
+    return {
+      line: `${money0(monthly)}/mo planned`,
+      color: p.textSec,
+    };
+  }
+
+  return {
+    line: 'Add a target date and monthly amount',
+    color: p.textTer,
+  };
+}
+
 function NativeGoalCard({
   goal,
   p,
@@ -611,29 +659,7 @@ function NativeGoalCard({
   const status = statusFor(goal);
   const statusColor =
     status.tone === 'caution' ? caution : status.tone === 'good' ? goalTint : p.textTer;
-
-  const monthly = goal.monthlyContribution;
-  let footerLine: string | null = null;
-  let footerLineColor = p.textSec;
-
-  if (goal.status === 'archived') {
-    footerLine = goal.archivedAt
-      ? `Archived ${contributionDateLabel(goal.archivedAt)}`
-      : 'Archived';
-    footerLineColor = p.textTer;
-  } else if (remaining > 0) {
-    if (monthly && monthly > 0) {
-      footerLine = goal.deadline
-        ? `${money0(monthly)}/mo · ${deadlineLabel(goal.deadline)}`
-        : `${money0(monthly)}/mo`;
-    } else if (goal.deadline) {
-      footerLine = `Target ${deadlineLabel(goal.deadline)}`;
-      footerLineColor = p.textTer;
-    } else {
-      footerLine = 'Add a target date and monthly amount';
-      footerLineColor = p.textTer;
-    }
-  }
+  const footer = goalFooterLine(goal, p);
 
   const hostStyle: StyleProp<ViewStyle> = [{ width: '100%' }, style];
   const symbol = ICON_SF_SYMBOL[goal.icon] ?? GOAL_FALLBACK_SYMBOL;
@@ -763,16 +789,16 @@ function NativeGoalCard({
               </SwiftText>
             </HStack>
 
-            {footerLine ? (
+            {footer.line ? (
               <SwiftText
                 modifiers={[
                   font({ size: 12 }),
-                  foregroundStyle(footerLineColor),
+                  foregroundStyle(footer.color),
                   lineLimit(1),
                   truncationMode('tail'),
                 ]}
               >
-                {footerLine}
+                {footer.line}
               </SwiftText>
             ) : null}
           </VStack>
@@ -798,34 +824,7 @@ function GoalCard({
   const status = statusFor(goal);
   const statusColor =
     status.tone === 'caution' ? caution : status.tone === 'good' ? tint : p.textTer;
-
-  const monthly = goal.monthlyContribution;
-  const proj = monthly && remaining > 0 ? projectedFinishDate(goal) : null;
-  const delta = proj ? monthDeltaVsDeadline(goal) : null;
-
-  // Single-line footer: factual rate + deadline. Status (on track / behind) lives
-  // in the badge above — no need to repeat pace signals here.
-  let footerLine: string | null = null;
-  let footerLineColor = p.textSec;
-
-  if (goal.status === 'archived') {
-    footerLine = goal.archivedAt
-      ? `Archived ${contributionDateLabel(goal.archivedAt)}`
-      : 'Archived';
-    footerLineColor = p.textTer;
-  } else if (remaining > 0) {
-    if (monthly && monthly > 0) {
-      footerLine = goal.deadline
-        ? `${money0(monthly)}/mo · ${deadlineLabel(goal.deadline)}`
-        : `${money0(monthly)}/mo`;
-    } else if (goal.deadline) {
-      footerLine = `Target ${deadlineLabel(goal.deadline)}`;
-      footerLineColor = p.textTer;
-    } else {
-      footerLine = 'Add a target date and monthly amount';
-      footerLineColor = p.textTer;
-    }
-  }
+  const footer = goalFooterLine(goal, p);
 
   return (
     <View>
@@ -859,9 +858,9 @@ function GoalCard({
         </Text>
       </View>
 
-      {footerLine ? (
-        <Text style={[TYPE.caption, { color: footerLineColor, marginTop: SPACE.sm }]} numberOfLines={1}>
-          {footerLine}
+      {footer.line ? (
+        <Text style={[TYPE.caption, { color: footer.color, marginTop: SPACE.sm }]} numberOfLines={1}>
+          {footer.line}
         </Text>
       ) : null}
     </View>
@@ -882,38 +881,42 @@ function GoalTimeline({
   if (goal.saved >= goal.target) return null;
 
   const pct = goalProgressPct(goal);
+  const status = statusFor(goal);
   const proj = projectedFinishDate(goal);
   const delta = proj && goal.deadline ? monthDeltaVsDeadline(goal) : null;
   const isLate = delta !== null && delta > 0;
-  const barColor = isLate ? caution : tint;
+  const progressColor = isLate ? caution : tint;
+  const finishColor = isLate ? caution : theme.textSec;
+  const isAhead = status.label === 'Ahead of target';
+  const finishLabel = proj ? `Est. ${proj.label}` : null;
+  const remaining = goalRemaining(goal);
+  const toGoLabel = remaining > 0 ? `${money0(remaining)} to go` : 'Complete';
 
   if (!proj && !goal.deadline) return null;
 
-  // Estimated finish: only annotate when behind (not when ahead).
-  let finishLabel: string | null = null;
-  if (proj) {
-    if (isLate) {
-      const n = delta!;
-      finishLabel = `Est. ${proj.label} · ${n} ${n === 1 ? 'month' : 'months'} behind`;
-    } else {
-      finishLabel = `Est. ${proj.label}`;
-    }
-  }
-
   return (
     <View style={styles.timelineWrap}>
-      <Text style={[TYPE.labelSm, { color: theme.textTer, marginBottom: SPACE.sm }]}>
-        SAVINGS PROGRESS
-      </Text>
-      <ProgressBar pct={pct} color={barColor} trackColor={theme.hairline} height={8} />
-      <View style={[styles.timelineLabelRow, { marginTop: SPACE.sm }]}>
+      <View style={styles.timelineTopRow}>
         {finishLabel ? (
-          <Text style={[TYPE.captionEm, { color: barColor, flex: 1 }]} numberOfLines={1}>
-            {finishLabel}
+          <Text style={[TYPE.captionEm, { color: finishColor, flex: 1 }]} numberOfLines={1}>
+            {finishLabel}{isLate ? ` · ${delta!} ${delta === 1 ? 'month' : 'months'} behind` : ''}
           </Text>
         ) : <View style={{ flex: 1 }} />}
+        {isAhead ? (
+          <Text style={[TYPE.captionEm, { color: theme.text, textAlign: 'right' }]} numberOfLines={1}>
+            Ahead of target
+          </Text>
+        ) : <View style={{ width: 1 }} />}
+      </View>
+      <ProgressBar pct={pct} color={progressColor} trackColor={theme.hairline} height={8} />
+      <View style={[styles.timelineLabelRow, { marginTop: SPACE.sm }]}>
+        <Text style={[TYPE.caption, { color: theme.textSec, flex: 1 }]} numberOfLines={1}>
+          <Text style={[TYPE.captionEm, { color: theme.text }]}>Saved {money0(goal.saved)}</Text>
+          {' · '}
+          <Text style={[TYPE.captionEm, { color: theme.text }]}>{toGoLabel}</Text>
+        </Text>
         {goal.deadline && (
-          <Text style={[TYPE.caption, { color: theme.textTer }]}>
+          <Text style={[TYPE.caption, { color: theme.textSec }]}>
             Target {deadlineLabel(goal.deadline)}
           </Text>
         )}
@@ -1007,7 +1010,7 @@ function GoalSummary({
           <View style={[styles.summaryStatusPill, { backgroundColor: `${behindCount > 0 ? caution : tint}1F` }]}>
             <View style={[styles.summaryStatusDot, { backgroundColor: behindCount > 0 ? caution : tint }]} />
             <Text style={[TYPE.captionEm, { color: behindCount > 0 ? caution : tint }]}>
-              {behindCount > 0 ? `${behindCount} behind` : 'On track'}
+              {behindCount > 0 ? `${behindCount} behind` : 'On target'}
             </Text>
           </View>
         </View>
@@ -1041,7 +1044,7 @@ function NativeGoalSummary({
   caution: string;
 }) {
   const statusColor = behindCount > 0 ? caution : goalTint;
-  const statusLabel = behindCount > 0 ? `${behindCount} behind` : 'On track';
+  const statusLabel = behindCount > 0 ? `${behindCount} behind` : 'On target';
   const glassTint = dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
 
   return (
@@ -1276,8 +1279,6 @@ function GoalDetailSheet({
     />
   );
   const status = goal ? statusFor(goal) : null;
-  const statusColor =
-    status?.tone === 'caution' ? caution : status?.tone === 'good' ? tint : theme.textTer;
   const isArchived = goal?.status === 'archived';
 
   return (
@@ -1363,27 +1364,15 @@ function GoalDetailSheet({
               {goal.label}
             </Text>
             <View style={styles.sheetStatusRow}>
-              <View style={[styles.sheetStatusDot, { backgroundColor: statusColor }]} />
-              <Text style={[TYPE.bodySm, { color: theme.textSec }]}>
-                {status?.label}
-                {status?.subtext ? `  ·  ${status.subtext}` : ''}
-              </Text>
+              {status?.label !== 'Ahead of target' ? (
+                <Text style={[TYPE.bodySmEm, { color: theme.text }]} numberOfLines={1}>
+                  {status?.label}
+                </Text>
+              ) : null}
             </View>
           </View>
 
           <GoalTimeline goal={goal} tint={tint} caution={caution} theme={theme} />
-
-          <View style={[styles.detailStatGrid, { borderColor: theme.hairline }]}>
-            <DetailStat label="Saved" value={money0(goal.saved)} color={theme.text} labelColor={theme.textTer} />
-            <DetailStat
-              label="To go"
-              value={money0(Math.max(0, goal.target - goal.saved))}
-              color={theme.text}
-              labelColor={theme.textTer}
-            />
-          </View>
-
-          {!isArchived && <DeltaCallout goal={goal} tint={tint} caution={caution} theme={theme} />}
 
           {isArchived ? (
             <SheetPrimaryButton
@@ -1403,7 +1392,7 @@ function GoalDetailSheet({
 
           {goal.contributions.length > 0 && (
             <>
-              <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: SPACE.xl, marginBottom: SPACE.sm }]}>
+              <Text style={[TYPE.labelLg, { color: theme.textSec, marginTop: SPACE.xl, marginBottom: SPACE.sm }]}>
                 ACTIVITY
               </Text>
               <View style={[styles.activityCard, { backgroundColor: theme.chipBg }]}>
@@ -1423,58 +1412,6 @@ function GoalDetailSheet({
         </BottomSheetScrollView>
       )}
     </BottomSheet>
-  );
-}
-
-function DeltaCallout({
-  goal,
-  tint,
-  caution,
-  theme,
-}: {
-  goal: Goal;
-  tint: string;
-  caution: string;
-  theme: Theme;
-}) {
-  if (!goal.monthlyContribution || !goal.deadline) return null;
-  const needed = suggestedMonthly(goal.target, goal.saved, goal.deadline);
-  const deficit = needed - goal.monthlyContribution;
-  if (Math.abs(deficit) < 1) return null;
-  const isDeficit = deficit > 0;
-  const monthsAhead = isDeficit ? null : Math.abs(monthDeltaVsDeadline(goal) ?? 0);
-  return (
-    <View
-      style={[
-        styles.deltaCallout,
-        { backgroundColor: isDeficit ? `${caution}18` : `${tint}18` },
-      ]}
-    >
-      <Text style={[TYPE.bodySm, { color: isDeficit ? caution : tint }]}>
-        {isDeficit
-          ? `${money0(Math.ceil(deficit))}/mo more to stay on track.`
-          : `${monthsAhead} ${monthsAhead === 1 ? 'month' : 'months'} ahead of target.`}
-      </Text>
-    </View>
-  );
-}
-
-function DetailStat({
-  label,
-  value,
-  color,
-  labelColor,
-}: {
-  label: string;
-  value: string;
-  color: string;
-  labelColor: string;
-}) {
-  return (
-    <View style={styles.detailStat}>
-      <Text style={[TYPE.labelSm, { color: labelColor }]}>{label}</Text>
-      <Text style={[TYPE.subsectionTitle, { color }]}>{value}</Text>
-    </View>
   );
 }
 
@@ -1559,7 +1496,8 @@ function GoalAmountField({
   theme: Theme;
   last?: boolean;
 }) {
-  const raw = value.replace(/[$,\s]/g, '');
+  const symbol = getActiveCurrency().symbol;
+  const raw = value.replace(/[^\d.]/g, '');
   const num = Number(raw);
   const hasValue = !!value;
   const sep = !last ? { borderBottomColor: theme.sep, borderBottomWidth: StyleSheet.hairlineWidth } : {};
@@ -1575,14 +1513,14 @@ function GoalAmountField({
       {active ? (
         <View style={[styles.numFieldWrap, { borderBottomColor: theme.accent.dot }]}>
           <Text style={[styles.numFieldText, { color: theme.text }]}>
-            <Text style={{ opacity: 0.55 }}>$</Text>{formatGoalDraft(value || '0')}
+            <Text style={{ opacity: 0.55 }}>{symbol}</Text>{formatGoalDraft(value || '0')}
           </Text>
           <EditCaret color={theme.accent.dot} />
         </View>
       ) : (
         <View style={[styles.numFieldWrap, { borderBottomColor: theme.hairline }]}>
           <Text style={[styles.numFieldText, { color: hasValue ? theme.text : theme.hairline }]}>
-            <Text style={{ opacity: 0.55 }}>$</Text>{hasValue ? fmtAmt(isNaN(num) ? 0 : num) : '0'}
+            <Text style={{ opacity: 0.55 }}>{symbol}</Text>{hasValue ? fmtAmt(isNaN(num) ? 0 : num) : '0'}
           </Text>
           <View style={styles.numFieldCaretSpacer} />
         </View>
@@ -2156,7 +2094,7 @@ function AmountField({
     >
       <Text style={[TYPE.body, { color: active ? theme.accent.dot : theme.textSec }]}>{label}</Text>
       <Text style={[TYPE.body, styles.fieldInput, { color: value ? theme.text : theme.textTer }]}>
-        <Text style={{ color: theme.textSec }}>$</Text>
+        <Text style={{ color: theme.textSec }}>{getActiveCurrency().symbol}</Text>
         {value || placeholder}
       </Text>
     </Pressable>
@@ -2332,29 +2270,23 @@ const styles = StyleSheet.create({
     marginTop: SPACE.lg,
     marginBottom: SPACE.sm,
   },
+  timelineTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    gap: SPACE.sm,
+    marginBottom: SPACE.sm,
+  },
   timelineLabelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginTop: SPACE.xs,
   },
-  // Detail sheet
-  deltaCallout: {
-    borderRadius: RADIUS.chip,
-    paddingHorizontal: SPACE.lg,
-    paddingVertical: SPACE.md,
-    marginTop: SPACE.md,
-  },
   sheetStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACE.xs,
     marginTop: SPACE.xs,
-  },
-  sheetStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
   },
   // Shared sheet
   emptyWrap: {
@@ -2409,19 +2341,6 @@ const styles = StyleSheet.create({
   sheetModalContainer: {
     zIndex: 900,
     elevation: 900,
-  },
-  detailStatGrid: {
-    borderWidth: 1,
-    borderRadius: RADIUS.field,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: SPACE.lg,
-    overflow: 'hidden',
-  },
-  detailStat: {
-    width: '50%',
-    padding: SPACE.lg,
-    gap: SPACE.xs,
   },
   sheetSecondary: {
     minHeight: 48,

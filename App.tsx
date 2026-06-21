@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   View,
+  Alert,
   Animated,
   StyleSheet,
   StatusBar,
@@ -18,6 +19,7 @@ import { useAppFonts, patchTextWithInter } from './src/fonts';
 import { RepositoryProvider, useRepositories, useRepositoryList } from './src/repositories/RepositoryProvider';
 import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
 import { FirstRunPrompt } from './src/components/FirstRunPrompt';
+import { AppLockGate } from './src/components/AppLockGate';
 import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
 
@@ -31,6 +33,8 @@ import { ActivityScreen, type ActivityHandle } from './src/screens/ActivityScree
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { NotificationSettingsScreen } from './src/screens/NotificationSettingsScreen';
+import { SharingSettingsScreen } from './src/screens/SharingSettingsScreen';
 import { GoalsScreen } from './src/screens/GoalsScreen';
 import { TabBar } from './src/components/TabBar';
 import { Drawer } from './src/components/Drawer';
@@ -39,6 +43,14 @@ import {
   TxSheetMount, type TxSheetHandle,
   BillSheetMount, type BillSheetHandle,
 } from './src/components/sheetMounts';
+import { useLocalNotificationScheduler } from './src/notifications/scheduler';
+import {
+  hasPendingActiveLedgerChanges,
+  resetActiveLedgerSyncState,
+  syncActiveLedger,
+  zoneNameForLedger,
+} from './src/sync/syncActiveLedger';
+import CloudKitSyncModule from './modules/cloudkit-sync/src/CloudKitSyncModule';
 import type { AppSession, Bill, Ledger, LedgerMember, Transaction } from './src/repositories/types';
 
 type Screen = 'home' | 'insights' | 'activity' | 'budget';
@@ -79,9 +91,26 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
 
 export function DashboardApp() {
   const { theme, dark, metaFlag, setMetaFlag } = useTheme();
-  const { transactionsRepo, devDataRepo, incomeRepo, sessionRepo } = useRepositories();
+  const {
+    transactionsRepo,
+    devDataRepo,
+    incomeRepo,
+    billsRepo,
+    budgetsRepo,
+    categoriesRepo,
+    recurringRulesRepo,
+    attachmentsRepo,
+    settingsRepo,
+    sessionRepo,
+  } = useRepositories();
+  const transactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
+  const budgets = useRepositoryList(budgetsRepo);
+  const categories = useRepositoryList(categoriesRepo);
+  const recurringRules = useRepositoryList(recurringRulesRepo);
+  const settings = useRepositoryList(settingsRepo)[0];
   const { showToast } = useAppFeedback();
+  const iCloudSyncEnabled = metaFlag('icloudSync');
 
   // Show the income prompt once: on first open when no income has been set and
   // the prompt hasn't been dismissed before. We wait for repos to settle (at
@@ -96,6 +125,9 @@ export function DashboardApp() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
+  const [sharingSettingsOpen, setSharingSettingsOpen] = useState(false);
+  const [sharingInviteNoticeToken, setSharingInviteNoticeToken] = useState(0);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [goalContributeToken, setGoalContributeToken] = useState(0);
   const [pendingBudgetEditCategoryId, setPendingBudgetEditCategoryId] = useState<string | undefined>(undefined);
@@ -112,6 +144,8 @@ export function DashboardApp() {
   const [session, setSession] = useState<AppSession>(() => sessionRepo.getSession());
   const [ledgerMembers, setLedgerMembers] = useState<LedgerMember[]>(() => sessionRepo.listMembers());
   const [ledgers, setLedgers] = useState<Ledger[]>(() => sessionRepo.listLedgers());
+  const cloudSyncInFlightRef = useRef<ReturnType<typeof syncActiveLedger> | null>(null);
+  const cloudSyncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshSessionState = useCallback(() => {
     const nextSession = sessionRepo.getSession();
@@ -120,7 +154,110 @@ export function DashboardApp() {
     setLedgers(sessionRepo.listLedgers());
   }, [sessionRepo]);
 
+  const refreshAfterSync = useCallback(() => {
+    transactionsRepo.refresh?.();
+    incomeRepo.refresh?.();
+    billsRepo.refresh?.();
+    budgetsRepo.refresh?.();
+    categoriesRepo.refresh?.();
+    recurringRulesRepo.refresh?.();
+    attachmentsRepo.refresh?.();
+    sessionRepo.refresh?.();
+    refreshSessionState();
+  }, [attachmentsRepo, billsRepo, budgetsRepo, categoriesRepo, incomeRepo, recurringRulesRepo, refreshSessionState, sessionRepo, transactionsRepo]);
+
   useEffect(() => sessionRepo.subscribe(refreshSessionState), [refreshSessionState, sessionRepo]);
+
+  const runCloudKitSync = useCallback(async (announce = false) => {
+    if (cloudSyncInFlightRef.current) return cloudSyncInFlightRef.current;
+
+    const task = syncActiveLedger({ nativeModule: CloudKitSyncModule })
+      .then(result => {
+        if (result.status === 'paused') {
+          if (announce) showToast(`iCloud sync paused: ${result.reason ?? 'unavailable'}`);
+          return result;
+        }
+        refreshAfterSync();
+        if (announce) {
+          const changes = result.pulledRecords + result.pushedRecords;
+          showToast(changes > 0 ? `iCloud synced ${changes} changes` : 'iCloud is up to date');
+        }
+        return result;
+      })
+      .finally(() => {
+        cloudSyncInFlightRef.current = null;
+      });
+
+    cloudSyncInFlightRef.current = task;
+    return task;
+  }, [refreshAfterSync, showToast]);
+
+  const scheduleCloudKitPush = useCallback(() => {
+    if (!iCloudSyncEnabled) return;
+    if (cloudSyncDebounceRef.current) {
+      clearTimeout(cloudSyncDebounceRef.current);
+    }
+
+    cloudSyncDebounceRef.current = setTimeout(() => {
+      cloudSyncDebounceRef.current = null;
+      if (cloudSyncInFlightRef.current) {
+        scheduleCloudKitPush();
+        return;
+      }
+      if (!hasPendingActiveLedgerChanges()) return;
+      runCloudKitSync(false).catch(() => {
+        showToast('iCloud sync could not run');
+      });
+    }, 900);
+  }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
+
+  useEffect(() => {
+    if (!iCloudSyncEnabled) return;
+    runCloudKitSync(false).catch(() => {
+      showToast('iCloud sync could not run');
+    });
+  }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
+
+  useEffect(() => {
+    if (!iCloudSyncEnabled) return;
+    const unsubscribers = [
+      transactionsRepo.subscribe(scheduleCloudKitPush),
+      incomeRepo.subscribe(scheduleCloudKitPush),
+      billsRepo.subscribe(scheduleCloudKitPush),
+      budgetsRepo.subscribe(scheduleCloudKitPush),
+      categoriesRepo.subscribe(scheduleCloudKitPush),
+      recurringRulesRepo.subscribe(scheduleCloudKitPush),
+      attachmentsRepo.subscribe(scheduleCloudKitPush),
+      sessionRepo.subscribe(scheduleCloudKitPush),
+    ];
+    return () => {
+      unsubscribers.forEach(unsubscribe => unsubscribe());
+      if (cloudSyncDebounceRef.current) {
+        clearTimeout(cloudSyncDebounceRef.current);
+        cloudSyncDebounceRef.current = null;
+      }
+    };
+  }, [
+    attachmentsRepo,
+    billsRepo,
+    budgetsRepo,
+    categoriesRepo,
+    iCloudSyncEnabled,
+    incomeRepo,
+    recurringRulesRepo,
+    scheduleCloudKitPush,
+    sessionRepo,
+    transactionsRepo,
+  ]);
+
+  useLocalNotificationScheduler({
+    settings,
+    transactions,
+    budgets,
+    categories,
+    recurringRules,
+    incomes,
+  });
 
   // The inline budget keypad asks us to hide the floating tab bar so the pad has
   // the bottom of the screen to itself (the pad mirrors the system keyboard slot).
@@ -198,6 +335,49 @@ export function DashboardApp() {
     showToast(enabled ? 'Sample data reloaded' : 'Sample data cleared');
   }, [devDataRepo, refreshSessionState, showToast]);
 
+  const handleResetSyncedSampleData = useCallback(async () => {
+    const zoneName = zoneNameForLedger(session.activeLedgerId);
+    try {
+      if (!CloudKitSyncModule.resetZone) {
+        showToast('CloudKit reset is unavailable in this build');
+        return;
+      }
+      if (cloudSyncDebounceRef.current) {
+        clearTimeout(cloudSyncDebounceRef.current);
+        cloudSyncDebounceRef.current = null;
+      }
+      if (cloudSyncInFlightRef.current) {
+        await cloudSyncInFlightRef.current.catch(() => undefined);
+      }
+      await CloudKitSyncModule.resetZone(zoneName);
+      resetActiveLedgerSyncState();
+      devDataRepo.setSeedDataEnabled(true);
+      refreshSessionState();
+      const result = await runCloudKitSync(true);
+      if (result.status === 'paused') return;
+      showToast('Fresh sample data synced');
+    } catch {
+      showToast('Sample data reset failed');
+    }
+  }, [devDataRepo, refreshSessionState, runCloudKitSync, session.activeLedgerId, showToast]);
+
+  const confirmResetSyncedSampleData = useCallback(() => {
+    Alert.alert(
+      'Reset synced sample data?',
+      'This deletes the active iCloud test zone, reloads clean local sample data, and uploads fresh records with the current sync metadata.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            handleResetSyncedSampleData();
+          },
+        },
+      ],
+    );
+  }, [handleResetSyncedSampleData]);
+
   const handleCurrentUserChange = useCallback((userId: string) => {
     sessionRepo.setCurrentUserId(userId);
     const member = ledgerMembers.find(item => item.userId === userId);
@@ -210,6 +390,34 @@ export function DashboardApp() {
     sessionRepo.updateMember(member.id, { allowOthersToEditMyItems });
     showToast(allowOthersToEditMyItems ? 'Others can edit your items' : 'Only you can edit your items');
   }, [ledgerMembers, session.currentUserId, sessionRepo, showToast]);
+  const handleICloudSyncChange = useCallback((enabled: boolean) => {
+    setMetaFlag('icloudSync', enabled);
+    if (!enabled) {
+      showToast('iCloud sync off');
+      return;
+    }
+    runCloudKitSync(true).then(result => {
+      if (result.status === 'paused') {
+        setMetaFlag('icloudSync', false);
+      }
+    }).catch(() => {
+      setMetaFlag('icloudSync', false);
+      showToast('iCloud sync could not be enabled');
+    });
+  }, [runCloudKitSync, setMetaFlag, showToast]);
+
+  const handleManualCloudRefresh = useCallback(async () => {
+    if (!iCloudSyncEnabled) {
+      showToast('iCloud sync is off');
+      return;
+    }
+    try {
+      const result = await runCloudKitSync(true);
+      if (result.status === 'paused') return;
+    } catch {
+      showToast('iCloud refresh failed');
+    }
+  }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
@@ -325,6 +533,15 @@ export function DashboardApp() {
   const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const openNotificationSettings = useCallback(() => setNotificationSettingsOpen(true), []);
+  const closeNotificationSettings = useCallback(() => setNotificationSettingsOpen(false), []);
+  const openSharingSettings = useCallback((intent?: 'overview' | 'members' | 'invite') => {
+    setSharingSettingsOpen(true);
+    if (intent === 'invite') {
+      setSharingInviteNoticeToken(token => token + 1);
+    }
+  }, []);
+  const closeSharingSettings = useCallback(() => setSharingSettingsOpen(false), []);
   const closeGoals = useCallback(() => setGoalsOpen(false), []);
   const openIncomeFromSettings = useCallback(() => router.push('/income'), []);
   const closeInsight = useCallback(() => setInsightTarget(null), []);
@@ -349,9 +566,11 @@ export function DashboardApp() {
       onPrepareTx={prepareTx}
       onDeleteTx={handleDeleteTx}
       onOpenBill={openBill}
+      onRefreshSync={handleManualCloudRefresh}
       morphResetToken={morphResetToken}
     />
   ), [
+    handleManualCloudRefresh,
     handleDeleteTx,
     morphResetToken,
     navigateToActivity,
@@ -389,8 +608,9 @@ export function DashboardApp() {
       filterToken={activityFilterToken}
       onNavSkeletonReady={handleActivityNavSkeletonReady}
       pendingDeleteId={pendingDeleteId}
+      onRefreshSync={handleManualCloudRefresh}
     />
-  ), [activityFilter, activityFilterToken, handleActivityNavSkeletonReady, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
+  ), [activityFilter, activityFilterToken, handleActivityNavSkeletonReady, handleManualCloudRefresh, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen
@@ -518,9 +738,30 @@ export function DashboardApp() {
           visible={settingsOpen}
           onClose={closeSettings}
           onOpenAppearance={openTheme}
+          onOpenNotifications={openNotificationSettings}
           onOpenIncome={openIncomeFromSettings}
+          onOpenSharing={openSharingSettings}
+          onICloudSyncChange={handleICloudSyncChange}
+          onResetSyncedSampleData={confirmResetSyncedSampleData}
           activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
           memberCount={ledgerMembers.length}
+        />
+
+        <NotificationSettingsScreen
+          theme={theme}
+          visible={notificationSettingsOpen}
+          onClose={closeNotificationSettings}
+        />
+
+        <SharingSettingsScreen
+          theme={theme}
+          visible={sharingSettingsOpen}
+          onClose={closeSharingSettings}
+          activeLedgerName={ledgers.find(ledger => ledger.id === session.activeLedgerId)?.name}
+          currentUserId={session.currentUserId}
+          ledgerMembers={ledgerMembers}
+          inviteNoticeToken={sharingInviteNoticeToken}
+          onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
         />
 
         <ThemeScreen
@@ -537,6 +778,7 @@ export function DashboardApp() {
           onSeeAll={navigateToActivity}
         />
 
+        <AppLockGate />
       </View>
       </BottomSheetModalProvider>
     </>

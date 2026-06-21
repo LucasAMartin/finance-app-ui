@@ -16,9 +16,10 @@ import {
   setCurrentUserId,
   setDevSeedDataEnabled,
   subscribeSession,
+  updateLedger as updateLedgerRow,
   updateLedgerMember,
 } from './db';
-import type { DevDataRepo, LedgerMember, RepoListener, Repositories, SessionRepo } from '../types';
+import type { DevDataRepo, Ledger, LedgerMember, RepoListener, Repositories, SessionRepo } from '../types';
 
 class SQLiteDevDataRepo implements DevDataRepo {
   private listeners = new Set<RepoListener>();
@@ -63,6 +64,13 @@ class SQLiteSessionRepo implements SessionRepo {
     return listLedgers();
   }
 
+  updateLedger(id: string, patch: Partial<Omit<Ledger, 'id'>>) {
+    const ledger = updateLedgerRow(id, patch);
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
+    return ledger;
+  }
+
   listMembers(ledgerId?: string) {
     return listLedgerMembers(ledgerId);
   }
@@ -76,6 +84,11 @@ class SQLiteSessionRepo implements SessionRepo {
 
   canEdit(createdByUserId?: string, ledgerId?: string): boolean {
     return canEditRecord(createdByUserId, ledgerId);
+  }
+
+  refresh(): void {
+    this.onSessionChanged();
+    this.listeners.forEach(listener => listener());
   }
 
   subscribe(listener: RepoListener) {

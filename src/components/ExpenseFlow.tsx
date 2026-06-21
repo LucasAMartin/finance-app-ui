@@ -7,6 +7,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../theme';
+import { getActiveCurrency } from '../currency';
 import { Icon } from './Icon';
 import { GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
@@ -44,7 +45,7 @@ type Mode = 'idle' | 'listening' | 'manual';
 
 const GROUP_META: Record<GroupKey, { label: string; icon: string }> = {
   needs: { label: 'Needs', icon: 'home' },
-  wants: { label: 'Wants', icon: 'sparkle' },
+  wants: { label: 'Wants', icon: 'tag' },
   savings: { label: 'Savings', icon: 'wallet' },
 };
 const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
@@ -423,7 +424,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 accessibilityLabel="Edit amount"
               >
                 <View style={S.manualAmountRow}>
-                  <Text style={[S.manualAmountSign, { color: canSave ? theme.textSec : theme.textTer }]}>$</Text>
+                  <Text style={[S.manualAmountSign, { color: canSave ? theme.textSec : theme.textTer }]}>{getActiveCurrency().symbol}</Text>
                   <AmountText
                     value={manualAmt || '0'}
                     color={canSave ? theme.text : theme.textTer}

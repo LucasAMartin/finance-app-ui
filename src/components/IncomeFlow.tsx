@@ -6,6 +6,7 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, OVER_DOT } from '../theme';
+import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Icon } from './Icon';
 import { SheetPrimaryButton, FIELD_CARD, FIELD_ROW } from './shared';
 import { TYPE } from '../typography';
@@ -76,9 +77,9 @@ const defaultDate = (): Date => {
 };
 const monthLabel = (key: string) =>
   new Date(`${key}-15`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-const fmtMoney = (n: number) => Math.round(n).toLocaleString();
+const fmtMoney = (n: number) => formatActiveCurrencyAmount(n, 0);
 const parseAmountDraft = (text: string): number | null => {
-  const n = parseFloat(text.replace(/[$,]/g, ''));
+  const n = parseFloat(text.replace(/[^\d.]/g, ''));
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
@@ -279,14 +280,14 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
           </View>
           <Text style={[TYPE.labelLg, { color: theme.textTer, marginTop: 12 }]}>Monthly income</Text>
           <Text style={[TYPE.headline, { color: theme.text, marginTop: 2 }]}>
-            ${fmtMoney(totalMonthlyIncome + oneTimeTotal)}
+            {fmtMoney(totalMonthlyIncome + oneTimeTotal)}
           </Text>
           <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
             {monthLabel(CURRENT_MONTH)}
           </Text>
           {oneTimeTotal > 0 && (
             <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2, textAlign: 'center' }]}>
-              Includes ${fmtMoney(oneTimeTotal)} one-time this month
+              Includes {fmtMoney(oneTimeTotal)} one-time this month
             </Text>
           )}
         </View>
@@ -370,7 +371,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
                 <Text style={[S.amountValue, { color: amountValue !== null ? theme.text : theme.textTer }]}>
-                  <Text style={{ color: theme.textSec }}>$</Text>{draft}
+                  <Text style={{ color: theme.textSec }}>{getActiveCurrency().symbol}</Text>{draft}
                 </Text>
               </Pressable>
               <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, sep, !canEditIncome && S.lockedFields]}>
@@ -558,7 +559,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
                 <Text style={[S.amountValue, { color: amountValue !== null ? theme.text : theme.textTer }]}>
-                  <Text style={{ color: theme.textSec }}>$</Text>{draft}
+                  <Text style={{ color: theme.textSec }}>{getActiveCurrency().symbol}</Text>{draft}
                 </Text>
               </Pressable>
               <View pointerEvents={canEditIncome ? 'auto' : 'none'} style={[S.fieldRow, !canEditIncome && S.lockedFields]}>

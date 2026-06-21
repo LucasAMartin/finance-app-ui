@@ -19,6 +19,7 @@ interface GlassCardProps {
   onPress?: () => void;
   cornerRadius?: number;
   style?: StyleProp<ViewStyle>;
+  contentStyle?: StyleProp<ViewStyle>;
   children: React.ReactNode;
   accessibilityRole?: string;
   accessibilityLabel?: string;
@@ -37,6 +38,7 @@ export function GlassCard({
   onPress,
   cornerRadius = RADIUS.card,
   style,
+  contentStyle,
   children,
   accessibilityRole,
   accessibilityLabel,
@@ -51,7 +53,7 @@ export function GlassCard({
         accessibilityRole={accessibilityRole as any}
         accessibilityLabel={accessibilityLabel}
       >
-        <View style={CARD_PAD}>{children}</View>
+        <View style={[CARD_PAD, contentStyle]}>{children}</View>
       </NativeGlassCard>
     );
   }
@@ -65,10 +67,10 @@ export function GlassCard({
         accessibilityLabel={accessibilityLabel}
         style={({ pressed }) => [style, pressed && { opacity: 0.72 }]}
       >
-        <SectionCard dark={dark}>{children}</SectionCard>
+        <SectionCard dark={dark} contentStyle={contentStyle}>{children}</SectionCard>
       </Pressable>
     );
   }
 
-  return <SectionCard dark={dark} style={style}>{children}</SectionCard>;
+  return <SectionCard dark={dark} style={style} contentStyle={contentStyle}>{children}</SectionCard>;
 }

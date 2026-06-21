@@ -1,5 +1,6 @@
 import {
   canEditRecord,
+  createdByUserIdForUpdate,
   getCurrentUserId,
   getDb,
   json,
@@ -112,7 +113,7 @@ export class SQLiteCategoriesRepo extends SQLiteRepository<Category> {
       next.defaultBudget,
       next.sortOrder,
       next.archived ? 1 : 0,
-      next.createdByUserId ?? 'local',
+      createdByUserIdForUpdate(current.createdByUserId, next.createdByUserId),
       sync.updatedByUserId,
       sync.updatedAt,
       next.cloudRecordName ?? null,

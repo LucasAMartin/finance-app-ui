@@ -9,11 +9,12 @@ interface SectionCardProps {
   children: React.ReactNode;
   dark: boolean;
   style?: StyleProp<ViewStyle>;
+  contentStyle?: StyleProp<ViewStyle>;
   /** Remove all inner padding — use for flush/edge-to-edge content (e.g. embedded calendar). */
   noPad?: boolean;
 }
 
-export function SectionCard({ children, dark, style, noPad }: SectionCardProps) {
+export function SectionCard({ children, dark, style, contentStyle, noPad }: SectionCardProps) {
   const borderColor = dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
   return (
     <BlurView
@@ -21,7 +22,7 @@ export function SectionCard({ children, dark, style, noPad }: SectionCardProps) 
       tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
       style={[cardStyle, style]}
     >
-      <View style={[borderStyle, noPad && flushStyle, { borderColor }]}>
+      <View style={[borderStyle, noPad && flushStyle, contentStyle, { borderColor }]}>
         {children}
       </View>
     </BlurView>

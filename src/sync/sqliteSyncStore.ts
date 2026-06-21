@@ -266,7 +266,7 @@ export class SQLiteSyncStore implements SyncRecordStore {
         : `${adapter.ledgerColumn ?? 'ledger_id'} = ?`;
       return this.database
         .getAllSync<SyncRow>(
-          `SELECT * FROM ${adapter.tableName} WHERE ${ledgerSql} AND sync_status = 'pending'`,
+          `SELECT * FROM ${adapter.tableName} WHERE ${ledgerSql} AND sync_status IN ('pending', 'local')`,
           ledgerId,
         )
         .map(row => rowToRecord(adapter, row));

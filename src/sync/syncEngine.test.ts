@@ -252,6 +252,65 @@ test('sync uses latest updatedAt for ordinary edit conflicts', async () => {
   assert.equal(adapter.getRemote('tx-shared')?.fields.amount, 20);
 });
 
+test('sync resolves offline same-record edits to the newer updatedAt without duplicates', async () => {
+  const adapter = new FakeCloudKitSyncAdapter();
+  const remote = adapter.seed(baseRecord('tx-offline', 'transaction', '2026-06-01T10:00:00.000Z', {
+    amount: 10,
+    merchant: 'Original Market',
+  }));
+  const deviceA = new MemorySyncStore('alex');
+  const deviceB = new MemorySyncStore('partner');
+  deviceA.put(remote, 'synced');
+  deviceB.put(remote, 'synced');
+
+  // Device A is offline and edits first.
+  deviceA.put({
+    ...remote,
+    fields: { ...remote.fields, amount: 20, merchant: 'Offline A' },
+    updatedAt: '2026-06-01T10:01:00.000Z',
+    syncStatus: 'pending',
+  });
+
+  // Device B stays online, edits later, and pushes.
+  deviceB.put({
+    ...remote,
+    fields: { ...remote.fields, amount: 30, merchant: 'Online B' },
+    updatedAt: '2026-06-01T10:02:00.000Z',
+    updatedByUserId: 'partner',
+    syncStatus: 'pending',
+  });
+  assert.equal((await sync(adapter, deviceB)).pushedRecords, 1);
+
+  const result = await sync(adapter, deviceA);
+
+  assert.equal(result.pulledRecords, 1);
+  assert.equal(result.pushedRecords, 0);
+  assert.equal(result.conflicts, 0);
+  assert.equal(deviceA.getRecord('tx-offline')?.fields.amount, 30);
+  assert.equal(deviceA.getRecord('tx-offline')?.fields.merchant, 'Online B');
+  assert.equal(deviceA.getRecord('tx-offline')?.syncStatus, 'synced');
+  assert.equal(deviceA.records.size, 1);
+  assert.equal(adapter.getRemote('tx-offline')?.fields.amount, 30);
+});
+
+test('sync carries ledger currency metadata to another device', async () => {
+  const adapter = new FakeCloudKitSyncAdapter();
+  const deviceA = new MemorySyncStore('alex');
+  const deviceB = new MemorySyncStore('partner');
+
+  deviceA.put(baseRecord('ledger-default', 'ledger', '2026-06-01T10:00:00.000Z', {
+    name: 'Shared finances',
+    ownerUserId: 'alex',
+    active: true,
+    meta: { currencyCode: 'JPY' },
+  }));
+
+  assert.equal((await sync(adapter, deviceA)).pushedRecords, 1);
+  assert.equal((await sync(adapter, deviceB)).pulledRecords, 1);
+  assert.deepEqual(deviceB.getRecord('ledger-default')?.fields.meta, { currencyCode: 'JPY' });
+  assert.equal(deviceB.getRecord('ledger-default')?.syncStatus, 'synced');
+});
+
 test('sync lets a newer remote tombstone beat a stale local update', async () => {
   const adapter = new FakeCloudKitSyncAdapter();
   const deleted = adapter.seed({
@@ -336,6 +395,25 @@ test('sync applies newer remote snapshots during pull before stale local pushes'
   assert.equal(result.pulledRecords, 1);
   assert.equal(device.getRecord('tx-conflict')?.fields.amount, 100);
   assert.equal(device.getRecord('tx-conflict')?.syncStatus, 'synced');
+});
+
+test('sync lets remote records replace local first-run placeholders', async () => {
+  const adapter = new FakeCloudKitSyncAdapter();
+  adapter.seed(baseRecord('ledger-default', 'ledger', '2026-06-01T10:00:00.000Z', {
+    name: 'Remote ledger',
+    ownerUserId: 'alex',
+  }));
+  const device = new MemorySyncStore('alex');
+  device.put(baseRecord('ledger-default', 'ledger', '2026-06-12T10:00:00.000Z', {
+    name: 'Local placeholder',
+    ownerUserId: 'alex',
+  }), 'local');
+
+  const result = await sync(adapter, device);
+
+  assert.equal(result.pulledRecords, 1);
+  assert.equal(device.getRecord('ledger-default')?.fields.name, 'Remote ledger');
+  assert.equal(device.getRecord('ledger-default')?.syncStatus, 'synced');
 });
 
 test('sync pauses cleanly when CloudKit is unavailable and keeps local pending records', async () => {

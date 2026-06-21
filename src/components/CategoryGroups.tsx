@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Theme, getCardStyle, OVER_DOT, GROUP_COLORS } from '../theme';
+import { formatActiveCurrencyAmount } from '../currency';
 import { TYPE } from '../typography';
 import type { SpendGroup } from '../repositories/types';
 import { Icon } from './Icon';
@@ -90,7 +91,7 @@ function GroupRow({
           <View style={styles.groupTopRow}>
             <Text style={[TYPE.body, { fontSize: 16, fontWeight: '700', letterSpacing: -0.4, color }]}>{group.label}</Text>
             <Text style={[TYPE.body, { color: theme.text }]}>
-              ${groupTotal.toLocaleString()}
+              {formatActiveCurrencyAmount(groupTotal, 0)}
             </Text>
           </View>
           <View style={[styles.track, { backgroundColor: theme.hairline }]}>
@@ -118,10 +119,10 @@ function GroupRow({
                   <View style={styles.subTopRow}>
                     <Text style={[TYPE.bodySmEm, { color: theme.text }]}>{sub.label}</Text>
                     <Text style={[TYPE.captionEm, { color: theme.text }]}>
-                      ${sub.spent.toLocaleString()}
+                      {formatActiveCurrencyAmount(sub.spent, 0)}
                       <Text style={[TYPE.captionEm, { color: theme.textSec }]}>
-                        {' / $'}
-                        {sub.budget.toLocaleString()}
+                        {' / '}
+                        {formatActiveCurrencyAmount(sub.budget, 0)}
                       </Text>
                     </Text>
                   </View>

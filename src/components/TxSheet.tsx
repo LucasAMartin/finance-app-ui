@@ -12,6 +12,7 @@ import Animated, { Easing as ReEasing, useAnimatedReaction, useSharedValue, runO
 import { Button as SwiftButton, DatePicker, Host, Menu } from '@expo/ui/swift-ui';
 import { datePickerStyle, environment } from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 
 // Compact (~0.48 of the screen) and expanded (near-full) snap points, mirroring
 // the old SwiftUI `{ fraction: 0.48 }` and `.large` detents. Index 0 = compact,
@@ -260,7 +261,7 @@ export function TxSheet({
 
   const saveEdit = () => {
     if (!t || !canEditTx) return;
-    const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
+    const amount = parseFloat(editAmt.replace(/[^\d.]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
     const nextMerchant = editMerchant.trim() || t.merchant;
     transactionsRepo.update(t.id, {
@@ -628,9 +629,9 @@ function CompactSummary({
           <Text style={[S.usageLabel, { color: theme.textSec }]}>{categoryLabel} this month</Text>
           <Text style={[S.usageAmount, { color: theme.textSec }]}>
             <Text style={[TYPE.bodySmEm, { color: theme.text }]}>
-              {ready ? `$${catTotal.toFixed(0)}` : '...'}
+              {ready ? formatActiveCurrencyAmount(catTotal, 0) : '...'}
             </Text>
-            {' of $'}{catBudget}
+            {' of '}{formatActiveCurrencyAmount(catBudget, 0)}
           </Text>
         </View>
         <View style={[S.bar, { backgroundColor: theme.hairline }]}>
@@ -692,7 +693,7 @@ function EditSection({
           <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
           <View style={S.amountDisplay}>
             <Text numberOfLines={1} style={[S.amountValue, { color: editAmt ? theme.text : theme.textTer }]}>
-              <Text style={{ color: theme.textSec }}>$</Text>{editAmt || '0.00'}
+              <Text style={{ color: theme.textSec }}>{getActiveCurrency().symbol}</Text>{editAmt || '0.00'}
             </Text>
           </View>
         </Pressable>

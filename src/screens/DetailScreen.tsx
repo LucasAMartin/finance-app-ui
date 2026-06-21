@@ -49,7 +49,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
 
   const saveEdit = () => {
     if (!canEdit) return;
-    const amount = parseFloat(amountDraft.replace(/[$,\s]/g, ''));
+    const amount = parseFloat(amountDraft.replace(/[^\d.]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
     transactionsRepo.update(currentTx.id, {
       amount,

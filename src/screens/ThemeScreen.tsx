@@ -3,48 +3,60 @@ import {
   View,
   Text,
   Image,
-  ImageBackground,
   Pressable,
-  ScrollView,
+  ScrollView as RNScrollView,
   StyleSheet,
   Animated,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import {
+  Button as SwiftButton,
+  GlassEffectContainer,
+  Host,
+  LazyHStack,
+  ScrollView as SwiftScrollView,
+  Text as SwiftText,
+} from '@expo/ui/swift-ui';
+import {
+  buttonStyle,
+  font,
+  foregroundStyle,
+  glassEffect,
+  padding,
+  scrollIndicators,
+} from '@expo/ui/swift-ui/modifiers';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
-import { CardStyle, Theme, makeTheme } from '../theme';
+import { Theme, makeTheme } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import {
   CUSTOM_WALLPAPER_ID,
+  DEFAULT_WALLPAPER_ID,
   WALLPAPER_TABS,
+  customWallpaperId,
+  customWallpaperUriFromId,
   findTabForWallpaper,
   Wallpaper,
 } from '../wallpapers';
-import { MEDIA, DARK_TEXT_SHADOW } from '../wallpaperPalette';
 import { RADIUS } from '../radius';
 import { Icon } from '../components/Icon';
-import { ScreenExitButton } from '../components/GlassButton';
+import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 import { TYPE } from '../typography';
 
-const { width: SCREEN_W } = Dimensions.get('window');
-
+const UPLOAD_TAB_ID = 'upload';
 const GRID_COLS = 3;
 const GRID_HPAD = 16;
 const GRID_GAP = 10;
-const TILE_W = (SCREEN_W - GRID_HPAD * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
-const TILE_H = TILE_W * (19.5 / 9);
-const APPEARANCE_OPTIONS: Array<{ label: string; dark: boolean }> = [
-  { label: 'Dark Mode', dark: true },
-  { label: 'Light Mode', dark: false },
-];
-const SEGMENT_BG_DARK = MEDIA.trackBg;
-const SEGMENT_BG_LIGHT = MEDIA.trackBg;
-const SEGMENT_TEXT = MEDIA.textSec;
+const RAIL_H = 52;
+
+type LocalWallpaper = Wallpaper & { customUri?: string };
+type ThemeTab = {
+  id: string;
+  label: string;
+  items: LocalWallpaper[];
+};
 
 interface Props {
   theme: Theme;
@@ -55,37 +67,51 @@ interface Props {
 export function ThemeScreen({ theme, visible, onClose }: Props) {
   const {
     dark,
-    setDark,
     accentKey,
     cardStyle,
     wallpaperId: currentId,
-    setWallpaperId,
+    applyAppearance,
     customWallpaperUri: currentCustomUri,
-    setCustomWallpaperUri,
+    customWallpaperUris,
+    addCustomWallpaperUri,
+    removeCustomWallpaperUri,
   } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
+  const tileW = (screenW - GRID_HPAD * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
+  const tileH = tileW * (19.5 / 9);
+  const [previewDark, setPreviewDark] = useState<boolean>(dark);
+  const screenTheme = useMemo(
+    () => (previewDark === dark ? theme : makeTheme(previewDark, accentKey, cardStyle)),
+    [accentKey, cardStyle, dark, previewDark, theme],
+  );
 
-  const initialTab = currentId === CUSTOM_WALLPAPER_ID
-    ? WALLPAPER_TABS[0].id
-    : findTabForWallpaper(currentId).id;
+  const currentResolvedId = currentId === CUSTOM_WALLPAPER_ID && currentCustomUri
+    ? customWallpaperId(currentCustomUri)
+    : currentId;
+
+  const initialTab = customWallpaperUriFromId(currentResolvedId)
+    ? UPLOAD_TAB_ID
+    : findTabForWallpaper(currentResolvedId).id;
 
   // Local selection state — only commit to context on Apply.
-  const [pendingDark, setPendingDark] = useState<boolean>(dark);
-  const [pendingId, setPendingId] = useState<string>(currentId);
-  const [customUri, setCustomUri] = useState<string | undefined>(currentCustomUri);
+  const [pendingId, setPendingId] = useState<string>(currentResolvedId);
   const [tabId, setTabId] = useState<string>(initialTab);
 
   // Reset local state every time the screen is opened.
   const wasVisible = React.useRef(visible);
   React.useEffect(() => {
     if (visible && !wasVisible.current) {
-      setPendingDark(dark);
-      setPendingId(currentId);
-      setCustomUri(currentCustomUri);
-      setTabId(currentId === CUSTOM_WALLPAPER_ID ? WALLPAPER_TABS[0].id : findTabForWallpaper(currentId).id);
+      setPreviewDark(dark);
+      setPendingId(currentResolvedId);
+      setTabId(customWallpaperUriFromId(currentResolvedId) ? UPLOAD_TAB_ID : findTabForWallpaper(currentResolvedId).id);
     }
     wasVisible.current = visible;
-  }, [visible, dark, accentKey, currentId, currentCustomUri]);
+  }, [visible, dark, currentResolvedId]);
+
+  React.useEffect(() => {
+    if (!visible) setPreviewDark(dark);
+  }, [dark, visible]);
 
   // Slide-up + fade animation.
   const anim = React.useRef(new Animated.Value(0)).current;
@@ -99,26 +125,27 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
 
-  const activeTab =
-    WALLPAPER_TABS.find(t => t.id === tabId) ?? WALLPAPER_TABS[0];
-  const tabIdx = Math.max(0, WALLPAPER_TABS.findIndex(t => t.id === activeTab.id));
+  const uploadItems = useMemo(
+    () => customWallpaperUris.map((uri, idx) => ({
+      id: customWallpaperId(uri),
+      name: `Upload ${idx + 1}`,
+      source: { uri },
+      customUri: uri,
+    })),
+    [customWallpaperUris],
+  );
+  const tabs = useMemo<ThemeTab[]>(
+    () => [
+      { id: UPLOAD_TAB_ID, label: 'Upload', items: uploadItems },
+      ...WALLPAPER_TABS,
+    ],
+    [uploadItems],
+  );
+  const activeTab = tabs.find(t => t.id === tabId) ?? tabs[0];
 
-  // Preview source for the page background — switches as user picks.
-  const previewSource = useMemo((): number | { uri: string } => {
-    if (pendingId === CUSTOM_WALLPAPER_ID && customUri) return { uri: customUri };
-    for (const tab of WALLPAPER_TABS) {
-      const found = tab.items.find(w => w.id === pendingId);
-      if (found) return found.source as number;
-    }
-    return WALLPAPER_TABS[0].items[0].source as number;
-  }, [pendingId, customUri]);
-
-  const dirty =
-    pendingId !== currentId ||
-    pendingDark !== dark ||
-    (pendingId === CUSTOM_WALLPAPER_ID && customUri !== currentCustomUri);
-
-  const appearanceIdx = Math.max(0, APPEARANCE_OPTIONS.findIndex(opt => opt.dark === pendingDark));
+  const wallpaperDirty = pendingId !== currentResolvedId;
+  const modeDirty = previewDark !== dark;
+  const dirty = wallpaperDirty || modeDirty;
 
   const handleSelect = (w: Wallpaper) => {
     if (w.id === pendingId) return;
@@ -137,26 +164,45 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     if (result.canceled) return;
     const uri = result.assets[0].uri;
     Haptics.selectionAsync().catch(() => {});
-    setCustomUri(uri);
-    setPendingId(CUSTOM_WALLPAPER_ID);
+    addCustomWallpaperUri(uri);
+    setTabId(UPLOAD_TAB_ID);
+    setPendingId(customWallpaperId(uri));
   };
 
   const handleApply = () => {
-    if (pendingDark !== dark) setDark(pendingDark);
-    if (pendingId !== currentId) setWallpaperId(pendingId);
-    if (pendingId === CUSTOM_WALLPAPER_ID && customUri && customUri !== currentCustomUri) {
-      setCustomWallpaperUri(customUri);
-    }
     if (dirty) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
-    onClose();
+    if (dirty) {
+      applyAppearance({
+        dark: modeDirty ? previewDark : undefined,
+        wallpaperId: wallpaperDirty ? pendingId : undefined,
+      });
+    }
+    requestAnimationFrame(onClose);
   };
 
-  const scrimTop    = theme.dark ? 'rgba(8,6,20,0.68)' : 'rgba(8,6,20,0.48)';
-  const scrimMid    = theme.dark ? 'rgba(8,6,20,0.50)' : 'rgba(8,6,20,0.44)';
-  const scrimLower  = theme.dark ? 'rgba(8,6,20,0.78)' : 'rgba(8,6,20,0.38)';
-  const scrimBottom = theme.dark ? 'rgba(8,6,20,0.92)' : 'rgba(8,6,20,0.18)';
+  const handleToggleMode = () => {
+    const nextDark = !previewDark;
+    Haptics.selectionAsync().catch(() => {});
+    setPreviewDark(nextDark);
+  };
+
+  const handleDeleteCustom = (uri: string) => {
+    const id = customWallpaperId(uri);
+    const nextUris = customWallpaperUris.filter(item => item !== uri);
+    Haptics.selectionAsync().catch(() => {});
+    removeCustomWallpaperUri(uri);
+    if (pendingId === id) {
+      const nextId = currentResolvedId === id
+        ? (nextUris[0] ? customWallpaperId(nextUris[0]) : DEFAULT_WALLPAPER_ID)
+        : currentResolvedId;
+      setPendingId(nextId);
+      if (!customWallpaperUriFromId(nextId)) {
+        setTabId(findTabForWallpaper(nextId).id);
+      }
+    }
+  };
 
   return (
     <Animated.View
@@ -166,191 +212,293 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
         { zIndex: 80, opacity: anim, transform: [{ translateY }] },
       ]}
     >
-      <View style={[styles.root, { backgroundColor: theme.bg }]}>
-        <ImageBackground
-          source={previewSource}
-          resizeMode="cover"
-          style={StyleSheet.absoluteFill}
+      <View style={[styles.root, { backgroundColor: screenTheme.surface }]}>
+        <View
+          style={[
+            styles.headerWrap,
+            {
+              paddingTop: insets.top + 8,
+              backgroundColor: screenTheme.surface,
+              borderBottomColor: screenTheme.hairline,
+            },
+          ]}
         >
-          <LinearGradient
-            pointerEvents="none"
-            colors={[scrimTop, scrimMid, scrimLower, scrimBottom]}
-            locations={[0, 0.28, 0.6, 1]}
-            style={StyleSheet.absoluteFill}
+          <View style={styles.headerRow}>
+            <ScreenExitButton
+              variant="back"
+              onPress={onClose}
+              tint={screenTheme.text}
+              fallbackBg={screenTheme.chipBg}
+              accessibilityLabel="Back"
+            />
+            <Text style={[styles.headerTitle, { color: screenTheme.text }]}>
+              Appearance
+            </Text>
+            <ThemeModeButton theme={screenTheme} dark={previewDark} onPress={handleToggleMode} />
+          </View>
+        </View>
+
+        <RNScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{
+            paddingTop: insets.top + 64 + 20,
+            paddingBottom: insets.bottom + 110,
+          }}
+          showsVerticalScrollIndicator={false}
+        >
+          <ThemeCategoryRail
+            tabs={tabs}
+            selectedId={activeTab.id}
+            theme={screenTheme}
+            onSelect={(id) => {
+              Haptics.selectionAsync().catch(() => {});
+              setTabId(id);
+            }}
           />
 
-          {/* ─── Header ─────────────────────────────────────── */}
-          {/* Solid dark backdrop + dark frosted overlay = guaranteed contrast
-              for the white title/icons on ANY wallpaper, regardless of
-              whether BlurView renders frost or whether the iOS color scheme
-              differs from the in-app theme. */}
-          <View
-            style={[
-              styles.headerWrap,
+          <View style={styles.gridStack}>
+            {tabs.map(tab => {
+              const isActive = tab.id === activeTab.id;
+              return (
+                <View
+                  key={tab.id}
+                  style={[
+                    styles.grid,
+                    !isActive && styles.gridHidden,
+                  ]}
+                  pointerEvents={isActive ? 'auto' : 'none'}
+                >
+                  {tab.id === UPLOAD_TAB_ID && (
+                    <UploadTile
+                      theme={screenTheme}
+                      tileW={tileW}
+                      tileH={tileH}
+                      onPress={handleUpload}
+                    />
+                  )}
+                  {tab.items.map(w => {
+                    const selected = w.id === pendingId;
+                    const customUri = w.customUri;
+                    return (
+                      <Tile
+                        key={w.id}
+                        wallpaper={w}
+                        selected={selected}
+                        dark={screenTheme.dark}
+                        accentFill={screenTheme.accent.fill}
+                        accentInk={screenTheme.accent.ink}
+                        tileW={tileW}
+                        tileH={tileH}
+                        onPress={() => handleSelect(w)}
+                        onDelete={customUri ? () => handleDeleteCustom(customUri) : undefined}
+                      />
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </View>
+        </RNScrollView>
+
+        <View
+          style={[
+            styles.applyWrap,
+            {
+              paddingBottom: insets.bottom + 14,
+              paddingTop: 14,
+              backgroundColor: screenTheme.surface,
+              borderTopColor: screenTheme.hairline,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          <Pressable
+            onPress={handleApply}
+            accessibilityRole="button"
+            accessibilityLabel={dirty ? 'Apply selected appearance' : 'Close'}
+            style={({ pressed }) => [
+              styles.applyBtn,
               {
-                paddingTop: insets.top + 8,
-                backgroundColor: 'rgba(8,6,20,0.55)',
+                backgroundColor: screenTheme.accent.fill,
+                opacity: pressed ? 0.85 : 1,
               },
             ]}
           >
-            <BlurView
-              intensity={60}
-              tint="systemMaterialDark"
-              style={StyleSheet.absoluteFill}
-            />
-            <View
-              style={[
-                styles.headerDivider,
-                { backgroundColor: MEDIA.hairline },
-              ]}
-            />
-            <View style={styles.headerRow}>
-              <ScreenExitButton
-                variant="back"
-                onPress={onClose}
-                tint={MEDIA.text}
-                fallbackBg="rgba(8,6,20,0.45)"
-                accessibilityLabel="Back"
-              />
-              <Text style={[styles.headerTitle, { color: '#FFFFFF' }, DARK_TEXT_SHADOW]}>
-                Background
-              </Text>
-              <Pressable
-                onPress={handleUpload}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                style={[styles.headerIconBtn, { alignItems: 'flex-end' }]}
-                accessibilityLabel="Upload custom wallpaper"
-                accessibilityRole="button"
-              >
-                <Text style={[styles.uploadLink, { color: theme.accent.dot }, DARK_TEXT_SHADOW]}>
-                  Upload
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{
-              paddingTop: insets.top + 64 + 18,
-              paddingBottom: insets.bottom + 110,
-            }}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.segmentWrap}>
-              <View style={styles.segmentClip}>
-                <SegmentedControl
-                  values={APPEARANCE_OPTIONS.map(o => o.label)}
-                  selectedIndex={appearanceIdx}
-                  onChange={(e) => {
-                    const next = APPEARANCE_OPTIONS[e.nativeEvent.selectedSegmentIndex];
-                    if (next) setPendingDark(next.dark);
-                  }}
-                  tintColor={makeTheme(pendingDark, accentKey, cardStyle).accent.dot}
-                  appearance={pendingDark ? 'dark' : 'light'}
-                  backgroundColor={pendingDark ? SEGMENT_BG_DARK : SEGMENT_BG_LIGHT}
-                  fontStyle={{ color: SEGMENT_TEXT }}
-                  activeFontStyle={{ color: pendingDark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
-                />
-              </View>
-            </View>
-
-            {/* ─── Tab selector ────────────────────────────── */}
-            <View style={styles.segmentWrap}>
-              <View style={styles.segmentClip}>
-                <SegmentedControl
-                  values={WALLPAPER_TABS.map(t => t.label)}
-                  selectedIndex={tabIdx}
-                  onChange={(e) => {
-                    const next = WALLPAPER_TABS[e.nativeEvent.selectedSegmentIndex];
-                    if (next) setTabId(next.id);
-                  }}
-                  tintColor={makeTheme(pendingDark, accentKey, cardStyle).accent.dot}
-                  appearance={pendingDark ? 'dark' : 'light'}
-                  backgroundColor={pendingDark ? SEGMENT_BG_DARK : SEGMENT_BG_LIGHT}
-                  fontStyle={{ color: SEGMENT_TEXT }}
-                  activeFontStyle={{ color: pendingDark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
-                />
-              </View>
-            </View>
-
-            {/* ─── Grids (all mounted to avoid image pop-in) ─── */}
-            {/* Each tab's grid renders once on first mount; non-active tabs
-                are stacked invisibly so their <Image> components stay mounted
-                and decoded. Switching tabs becomes an instant opacity swap. */}
-            <View style={styles.gridStack}>
-              {WALLPAPER_TABS.map(tab => {
-                const isActive = tab.id === activeTab.id;
-                return (
-                  <View
-                    key={tab.id}
-                    style={[
-                      styles.grid,
-                      !isActive && styles.gridHidden,
-                    ]}
-                    pointerEvents={isActive ? 'auto' : 'none'}
-                  >
-                    {tab.items.map(w => {
-                      const selected = w.id === pendingId;
-                      return (
-                        <Tile
-                          key={w.id}
-                          wallpaper={w}
-                          selected={selected}
-                          dark={theme.dark}
-                          accentFill={theme.accent.dot}
-                          accentInk={theme.accent.ink}
-                          onPress={() => handleSelect(w)}
-                        />
-                      );
-                    })}
-                  </View>
-                );
-              })}
-            </View>
-          </ScrollView>
-
-          {/* ─── Apply button (sticky bottom) ──────────────── */}
-          <View
-            style={[
-              styles.applyWrap,
-              {
-                paddingBottom: insets.bottom + 14,
-                paddingTop: 16,
-              },
-            ]}
-            pointerEvents="box-none"
-          >
-            <LinearGradient
-              pointerEvents="none"
-              colors={[
-                'rgba(0,0,0,0)',
-                theme.dark ? 'rgba(8,6,20,0.55)' : 'rgba(8,6,20,0.18)',
-                theme.dark ? 'rgba(8,6,20,0.85)' : 'rgba(8,6,20,0.30)',
-              ]}
-              locations={[0, 0.5, 1]}
-              style={StyleSheet.absoluteFill}
-            />
-            <Pressable
-              onPress={handleApply}
-              accessibilityRole="button"
-              accessibilityLabel={dirty ? 'Apply selected background' : 'Close'}
-              style={({ pressed }) => [
-                styles.applyBtn,
-                {
-                  backgroundColor: theme.accent.fill,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-            >
-              <Text style={[styles.applyText, { color: theme.accent.ink }]}>
-                {dirty ? 'Apply' : 'Done'}
-              </Text>
-            </Pressable>
-          </View>
-        </ImageBackground>
+            <Text style={[styles.applyText, { color: screenTheme.accent.ink }]}>
+              {dirty ? 'Apply' : 'Done'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </Animated.View>
+  );
+}
+
+function ThemeModeButton({
+  theme,
+  dark,
+  onPress,
+}: {
+  theme: Theme;
+  dark: boolean;
+  onPress: () => void;
+}) {
+  const accessibilityLabel = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  const iconName = dark ? 'sun' : 'moon';
+  if (SUPPORTS_GLASS) {
+    return (
+      <View style={[styles.headerIconBtn, { alignItems: 'flex-end' }]}>
+        <GlassCircleButton
+          onPress={onPress}
+          systemImage={dark ? 'sun.max' : 'moon'}
+          size={40}
+          iconSize={18}
+          iconColor={theme.text}
+          glassTint={glassTintForTheme(theme.dark)}
+          colorScheme={theme.dark ? 'dark' : 'light'}
+          accessibilityLabel={accessibilityLabel}
+        />
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={[styles.headerIconBtn, { alignItems: 'flex-end' }]}
+    >
+      <View style={[styles.modeFallback, { backgroundColor: theme.chipBg }]}>
+        <Icon name={iconName} size={18} color={theme.text} stroke={1.8} />
+      </View>
+    </Pressable>
+  );
+}
+
+function ThemeCategoryRail({
+  tabs,
+  selectedId,
+  theme,
+  onSelect,
+}: {
+  tabs: ThemeTab[];
+  selectedId: string;
+  theme: Theme;
+  onSelect: (id: string) => void;
+}) {
+  if (SUPPORTS_GLASS) {
+    return (
+      <Host ignoreSafeArea="all" colorScheme={theme.dark ? 'dark' : 'light'} style={styles.railHost}>
+        <GlassEffectContainer>
+          <SwiftScrollView
+            axes="horizontal"
+            showsIndicators={false}
+            modifiers={[scrollIndicators('hidden', 'horizontal')]}
+          >
+            <LazyHStack spacing={10} alignment="center" modifiers={[padding({ horizontal: GRID_HPAD })]}>
+              {tabs.map(tab => {
+                const selected = tab.id === selectedId;
+                return (
+                  <SwiftButton
+                    key={tab.id}
+                    onPress={() => onSelect(tab.id)}
+                    modifiers={[
+                      buttonStyle('plain'),
+                      padding({ horizontal: selected ? 14 : 4, vertical: 8 }),
+                      ...(selected
+                        ? [glassEffect({
+                            glass: {
+                              variant: 'regular',
+                              interactive: true,
+                              tint: glassTintForTheme(theme.dark),
+                            },
+                            shape: 'capsule',
+                          })]
+                        : []),
+                    ]}
+                  >
+                    <SwiftText
+                      modifiers={[
+                        font({ size: 15, weight: selected ? 'semibold' : 'medium' }),
+                        foregroundStyle(selected ? theme.text : theme.textSec),
+                      ]}
+                    >
+                      {tab.label}
+                    </SwiftText>
+                  </SwiftButton>
+                );
+              })}
+            </LazyHStack>
+          </SwiftScrollView>
+        </GlassEffectContainer>
+      </Host>
+    );
+  }
+
+  return (
+    <RNScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.railFallbackContent}
+      style={styles.railFallback}
+    >
+      {tabs.map(tab => {
+        const selected = tab.id === selectedId;
+        return (
+          <Pressable
+            key={tab.id}
+            onPress={() => onSelect(tab.id)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            style={[
+              styles.railFallbackPill,
+              selected && { backgroundColor: theme.chipBg, borderColor: theme.hairline },
+            ]}
+          >
+            <Text style={[styles.railFallbackText, { color: selected ? theme.text : theme.textSec }]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </RNScrollView>
+  );
+}
+
+function UploadTile({
+  theme,
+  tileW,
+  tileH,
+  onPress,
+}: {
+  theme: Theme;
+  tileW: number;
+  tileH: number;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Upload wallpaper"
+      style={({ pressed }) => [
+        styles.tile,
+        styles.uploadTile,
+        {
+          width: tileW,
+          height: tileH,
+          borderColor: theme.hairline,
+          backgroundColor: theme.chipBg,
+          transform: [{ scale: pressed ? 0.97 : 1 }],
+        },
+      ]}
+    >
+      <View style={[styles.uploadGlyph, { backgroundColor: theme.surface2 }]}>
+        <Icon name="plus" size={22} color={theme.text} stroke={2} />
+      </View>
+      <Text style={[styles.uploadTileText, { color: theme.textSec }]}>Upload</Text>
+    </Pressable>
   );
 }
 
@@ -361,14 +509,20 @@ function Tile({
   dark,
   accentFill,
   accentInk,
+  tileW,
+  tileH,
   onPress,
+  onDelete,
 }: {
-  wallpaper: Wallpaper;
+  wallpaper: LocalWallpaper;
   selected: boolean;
   dark: boolean;
   accentFill: string;
   accentInk: string;
+  tileW: number;
+  tileH: number;
   onPress: () => void;
+  onDelete?: () => void;
 }) {
   const borderColor = dark ? 'rgba(235,225,255,0.20)' : 'rgba(14,12,24,0.10)';
   const borderWidth = StyleSheet.hairlineWidth;
@@ -378,20 +532,37 @@ function Tile({
       style={({ pressed }) => [
         styles.tile,
         {
+          width: tileW,
+          height: tileH,
           borderColor,
           borderWidth,
           transform: [{ scale: pressed ? 0.97 : 1 }],
         },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={wallpaper.name}
+      accessibilityLabel={`${wallpaper.name} wallpaper`}
       accessibilityState={{ selected }}
     >
-      <Image source={wallpaper.source} resizeMode="cover" style={styles.tileImage} />
+      <Image
+        source={wallpaper.source}
+        resizeMode="cover"
+        style={styles.tileImage}
+      />
       {selected && (
         <View style={[styles.checkBadge, { backgroundColor: accentFill }]}>
-          <Icon name="plus" size={14} color={accentInk} stroke={2.4} />
+          <Icon name="check" size={14} color={accentInk} stroke={2.4} />
         </View>
+      )}
+      {onDelete && (
+        <Pressable
+          onPress={onDelete}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${wallpaper.name}`}
+          style={[styles.deleteBadge, { backgroundColor: accentFill }]}
+        >
+          <Icon name="close" size={12} color={accentInk} stroke={2.4} />
+        </Pressable>
       )}
     </Pressable>
   );
@@ -409,13 +580,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     zIndex: 10,
     overflow: 'hidden',
-  },
-  headerDivider: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerRow: {
     flexDirection: 'row',
@@ -434,20 +599,36 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
   },
-  uploadLink: {
-    ...TYPE.body,
-    fontWeight: '600',
-    textAlign: 'right',
-    width: 60,
+  modeFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  segmentWrap: {
+  railHost: {
+    width: '100%',
+    height: RAIL_H,
+    marginBottom: 14,
+  },
+  railFallback: {
+    height: RAIL_H,
+    marginBottom: 14,
+  },
+  railFallbackContent: {
     paddingHorizontal: GRID_HPAD,
-    marginBottom: 20,
+    alignItems: 'center',
+    gap: 10,
   },
-  segmentClip: {
-    borderRadius: 14,
-    overflow: 'hidden',
+  railFallbackPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADIUS.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
+  },
+  railFallbackText: {
+    ...TYPE.bodySmEm,
   },
   gridStack: {
     position: 'relative',
@@ -466,13 +647,26 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   tile: {
-    width: TILE_W,
-    height: TILE_H,
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: 'rgba(14,12,24,0.25)',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  uploadTile: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    gap: 10,
+  },
+  uploadGlyph: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadTileText: {
+    ...TYPE.bodySmEm,
   },
   tileImage: {
     width: '100%',
@@ -488,6 +682,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  deleteBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   applyWrap: {
     position: 'absolute',
@@ -496,6 +700,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: 20,
     alignItems: 'stretch',
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   applyBtn: {
     height: 54,

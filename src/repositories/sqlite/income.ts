@@ -1,5 +1,6 @@
 import {
   canEditRecord,
+  createdByUserIdForUpdate,
   getCurrentUserId,
   getDb,
   json,
@@ -116,7 +117,7 @@ export class SQLiteIncomeRepo extends SQLiteRepository<Income> {
       next.startDate,
       next.endDate ?? null,
       next.receivedAt ?? null,
-      next.createdByUserId ?? 'local',
+      createdByUserIdForUpdate(current.createdByUserId, next.createdByUserId),
       sync.updatedByUserId,
       sync.updatedAt,
       next.cloudRecordName ?? null,

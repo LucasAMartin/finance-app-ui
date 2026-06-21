@@ -817,6 +817,27 @@ export function listLedgers(): Ledger[] {
   }));
 }
 
+export function updateLedger(id: string, patch: Partial<Omit<Ledger, 'id'>>): Ledger | undefined {
+  const current = getDb().getFirstSync<any>('SELECT * FROM ledgers WHERE id = ? AND deleted_at IS NULL', id);
+  if (!current) return undefined;
+  const now = new Date().toISOString();
+  getDb().runSync(
+    `UPDATE ledgers
+     SET name = ?, owner_user_id = ?, active = ?, updated_by_user_id = ?,
+         updated_at = ?, sync_status = 'pending', meta = ?
+     WHERE id = ?`,
+    patch.name ?? current.name,
+    patch.ownerUserId ?? current.owner_user_id,
+    patch.active !== undefined ? (patch.active ? 1 : 0) : current.active,
+    currentUserId,
+    now,
+    json(patch.meta ?? (current.meta ? JSON.parse(current.meta) : undefined)),
+    id,
+  );
+  sessionListeners.forEach(listener => listener());
+  return listLedgers().find(ledger => ledger.id === id);
+}
+
 export function listLedgerMembers(ledgerId = activeLedgerId): LedgerMember[] {
   return getDb().getAllSync<any>(
     'SELECT * FROM ledger_members WHERE ledger_id = ? AND deleted_at IS NULL ORDER BY role = ? DESC, display_name ASC',
@@ -873,7 +894,7 @@ export function updateLedgerMember(id: string, patch: Partial<Omit<LedgerMember,
 }
 
 export function canEditRecord(createdByUserId?: string | null, ledgerId = activeLedgerId): boolean {
-  if (!createdByUserId || createdByUserId === currentUserId) return true;
+  if (!createdByUserId || createdByUserId === 'local' || createdByUserId === currentUserId) return true;
   const member = getDb().getFirstSync<{ allow_others_to_edit_my_items: number; status: string }>(
     'SELECT allow_others_to_edit_my_items, status FROM ledger_members WHERE ledger_id = ? AND user_id = ? AND deleted_at IS NULL',
     ledgerId,
@@ -903,13 +924,19 @@ export function prepareCreateFields(input: SyncFields = {}): Required<Pick<SyncF
   };
 }
 
+export function createdByUserIdForUpdate(current?: string | null, next?: string | null): string {
+  if (current && current !== 'local') return current;
+  if (next && next !== 'local') return next;
+  return currentUserId;
+}
+
 export function prepareUpdateFields(
   input: SyncFields = {},
 ): Required<Pick<SyncFields, 'updatedByUserId' | 'updatedAt' | 'syncStatus'>> {
   return {
     updatedByUserId: input.updatedByUserId && input.updatedByUserId !== 'local' ? input.updatedByUserId : currentUserId,
-    updatedAt: input.updatedAt ?? new Date().toISOString(),
-    syncStatus: input.syncStatus ?? 'pending',
+    updatedAt: new Date().toISOString(),
+    syncStatus: 'pending',
   };
 }
 

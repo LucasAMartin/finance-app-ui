@@ -93,6 +93,29 @@ test('sqlite creates inject active ledger, current user ownership, timestamps, a
   assert.match(tx.updatedAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
 });
 
+test('sqlite legacy local owner rows stay editable and normalize on update', () => {
+  const repos = freshRepos();
+  repos.sessionRepo.setCurrentUserId('alex');
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Legacy Local',
+    cat: 'groceries',
+    amount: 18,
+    occurredAt: '2026-06-01T12:00:00.000Z',
+  });
+  getDb().runSync('UPDATE transactions SET created_by_user_id = ? WHERE id = ?', 'local', tx.id);
+  repos.transactionsRepo.refresh?.();
+
+  const legacy = repos.transactionsRepo.get(tx.id);
+  assert.equal(legacy?.createdByUserId, 'local');
+  assert.equal(repos.transactionsRepo.canEdit(legacy!), true);
+
+  const updated = repos.transactionsRepo.update(tx.id, { amount: 22 });
+  assert.equal(updated?.amount, 22);
+  assert.equal(updated?.createdByUserId, 'alex');
+  assert.equal(updated?.updatedByUserId, 'alex');
+  assert.equal(updated?.syncStatus, 'pending');
+});
+
 test('sqlite active ledger queries and summaries do not leak rows from another ledger', () => {
   const repos = freshRepos();
   clearDomainRows();

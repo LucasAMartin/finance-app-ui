@@ -107,6 +107,7 @@ import { Toast } from '../components/Toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
+import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText, ON_GROUP_ICON } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim, deriveFloor, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
 import { TYPE } from '../typography';
@@ -119,6 +120,7 @@ const GLASS_TINT_ACTIVE = 'rgba(255,255,255,0.18)';
 const NATIVE_ACTIVITY_ROW_HEIGHT = 64;
 const NATIVE_ACTIVITY_HEADER_HEIGHT = 27;
 const NATIVE_ACTIVITY_CARD_PAD_Y = LAYOUT.cardPadTop + LAYOUT.cardPadBottom;
+const NATIVE_FILTER_SUMMARY_HEIGHT = 58;
 
 const ACTIVITY_SF_SYMBOL: Record<string, SFSymbol> = {
   cart: 'cart',
@@ -240,7 +242,7 @@ function amountFilterActive(filter: AmountFilter): boolean {
 }
 
 function parseAmountDraft(value: string): number | undefined {
-  const n = parseFloat(value.replace(/[$,\s]/g, ''));
+  const n = parseFloat(value.replace(/[^\d.]/g, ''));
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
@@ -249,18 +251,31 @@ function formatAmountDraft(value?: number): string {
 }
 
 function formatMoneyPlain(value: number): string {
+  if (getActiveCurrency().decimals === 0) {
+    return Math.round(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
   return value % 1 === 0
     ? value.toLocaleString(undefined, { maximumFractionDigits: 0 })
     : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatMoneyWithCents(value: number): string {
+  if (getActiveCurrency().decimals === 0) {
+    return Math.round(Math.abs(value)).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  return Math.abs(value).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function amountFilterLabel(filter: AmountFilter): string {
   const bounds = amountBounds(filter);
   if (bounds.minAmount !== undefined && bounds.maxAmount !== undefined) {
-    return `$${formatMoneyPlain(bounds.minAmount)}-$${formatMoneyPlain(bounds.maxAmount)}`;
+    return `${formatActiveCurrencyAmount(bounds.minAmount, false)}-${formatActiveCurrencyAmount(bounds.maxAmount, false)}`;
   }
-  if (bounds.minAmount !== undefined) return `$${formatMoneyPlain(bounds.minAmount)}+`;
-  if (bounds.maxAmount !== undefined) return `Up to $${formatMoneyPlain(bounds.maxAmount)}`;
+  if (bounds.minAmount !== undefined) return `${formatActiveCurrencyAmount(bounds.minAmount, false)}+`;
+  if (bounds.maxAmount !== undefined) return `Up to ${formatActiveCurrencyAmount(bounds.maxAmount, false)}`;
   return 'Any amount';
 }
 
@@ -410,6 +425,54 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
   );
 }
 
+function NativeFilteredSummaryCapsule({
+  theme,
+  p,
+  expenseCount,
+  spendTotal,
+}: {
+  theme: Theme;
+  p: WallpaperP;
+  expenseCount: number;
+  spendTotal: number;
+}) {
+  const countLabel = `${expenseCount} ${expenseCount === 1 ? 'expense' : 'expenses'}`;
+  const totalLabel = `${formatActiveCurrencyAmount(spendTotal, true)} total`;
+  const glassTint = theme.dark ? 'rgba(20,22,26,0.42)' : 'rgba(255,255,255,0.66)';
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={S.filteredSummaryHost}
+    >
+      <GlassEffectContainer>
+        <HStack
+          alignment="center"
+          spacing={SPACE.md}
+          modifiers={[
+            padding({ leading: 18, trailing: 18 }),
+            frame({ height: NATIVE_FILTER_SUMMARY_HEIGHT, maxWidth: 10000, alignment: 'center' }),
+            glassEffect({
+              glass: { variant: 'regular', tint: glassTint },
+              shape: 'capsule',
+            }),
+            swiftAccessibilityLabel(`${countLabel}, ${totalLabel}`),
+          ]}
+        >
+          <SwiftText modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+            {countLabel}
+          </SwiftText>
+          <Spacer />
+          <SwiftText modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+            {totalLabel}
+          </SwiftText>
+        </HStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export type ActivityHandle = {
@@ -428,10 +491,11 @@ interface Props {
   onNavSkeletonReady?: (filterToken: number) => void;
   /** App-level optimistic delete: hide this row immediately before the repo commit lands. */
   pendingDeleteId?: string | null;
+  onRefreshSync?: () => Promise<void>;
 }
 
 export const ActivityScreen = React.forwardRef<ActivityHandle, Props>(
-function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken, onNavSkeletonReady, pendingDeleteId: externalPendingDeleteId }: Props, ref) {
+function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken, onNavSkeletonReady, pendingDeleteId: externalPendingDeleteId, onRefreshSync }: Props, ref) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
@@ -439,7 +503,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
   const insets = useSafeAreaInsets();
-  const { wallpaper, wallpaperFloorBase } = useTheme();
+  const { wallpaper, wallpaperFloorBase, currencyCode } = useTheme();
 
   const [query, setQuery]                   = useState('');
   const [immediateQuery, setImmediateQuery] = useState<string | null>(null);
@@ -685,11 +749,14 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     if (showSkeleton) setLoading(true);
     setLoadingMore(false);
     try {
-      const page = transactionsRepo.listPage(activityQuery);
+      const page = transactionsRepo.listPageWithSummary?.(activityQuery) ?? {
+        ...transactionsRepo.listPage(activityQuery),
+        summary: transactionsRepo.getSummary(transactionScope),
+      };
       if (loadKey !== latestActivityQueryKeyRef.current) return;
       setActivityRows(page.rows);
       setNextCursor(page.nextCursor);
-      setActivitySummary(transactionsRepo.getSummary(transactionScope));
+      setActivitySummary(page.summary);
       setLoadError(false);
     } catch {
       if (loadKey !== latestActivityQueryKeyRef.current) return;
@@ -731,9 +798,15 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadFirstActivityPage(false);
-    setRefreshing(false);
-  }, [loadFirstActivityPage]);
+    void (async () => {
+      try {
+        await onRefreshSync?.();
+        loadFirstActivityPage(false);
+      } finally {
+        setRefreshing(false);
+      }
+    })();
+  }, [loadFirstActivityPage, onRefreshSync]);
 
   const grouped = useMemo(() => {
     // Merge internal swipe-delete pending ID with the external App-level signal so
@@ -845,6 +918,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
         day={day}
         group={grouped[day]}
         theme={theme}
+        currencyCode={currencyCode}
         cats={cats}
         categories={categories}
         members={ledgerMembers}
@@ -882,6 +956,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     avgDaySpend,
     categories,
     cats,
+    currencyCode,
     grouped,
     handleDeleteTx,
     handleOpenTx,
@@ -1218,26 +1293,35 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
               ) : (
                 <>
                   {isFiltered && (
-                    <SectionCard dark={theme.dark}>
-                      <View
-                        accessibilityLiveRegion="polite"
-                        style={[S.summaryRow, S.summaryRowSolo]}
-                      >
-                        <Text style={[S.summaryLabel, { color: p.text }]}>
-                          {filteredExpenseCount} {filteredExpenseCount === 1 ? 'expense' : 'expenses'}
-                        </Text>
-                        <View style={S.summaryValueWrap}>
-                          <Money
-                            value={filteredSpendTotal}
-                            theme={theme}
-                            size={15}
-                            color={p.text}
-                            prefix="$"
-                          />
-                          <Text style={[S.summaryTotal, { color: p.text }]}> total</Text>
+                    SUPPORTS_GLASS ? (
+                      <NativeFilteredSummaryCapsule
+                        theme={theme}
+                        p={p}
+                        expenseCount={filteredExpenseCount}
+                        spendTotal={filteredSpendTotal}
+                      />
+                    ) : (
+                      <SectionCard dark={theme.dark}>
+                        <View
+                          accessibilityLiveRegion="polite"
+                          style={[S.summaryRow, S.summaryRowSolo]}
+                        >
+                          <Text style={[S.summaryLabel, { color: p.text }]}>
+                            {filteredExpenseCount} {filteredExpenseCount === 1 ? 'expense' : 'expenses'}
+                          </Text>
+                          <View style={S.summaryValueWrap}>
+                            <Money
+                              value={filteredSpendTotal}
+                              theme={theme}
+                              size={15}
+                              color={p.text}
+                              prefix="$"
+                            />
+                            <Text style={[S.summaryTotal, { color: p.text }]}> total</Text>
+                          </View>
                         </View>
-                      </View>
-                    </SectionCard>
+                      </SectionCard>
+                    )
                   )}
                 </>
               )
@@ -1372,12 +1456,6 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       setDraftRange(activeRange);
     }
   }, [activeRange?.startId, activeRange?.endId]);
-
-  useEffect(() => {
-    if (contentReady) return;
-    const task = InteractionManager.runAfterInteractions(() => setContentReady(true));
-    return () => task.cancel?.();
-  }, [contentReady]);
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) {
@@ -2276,12 +2354,8 @@ function FilterSheet({
             </View>
 
             {/* ── Amount range ────────────────────────────────── */}
-            <View style={[FS.groupEyebrow, { gap: 0, justifyContent: 'space-between' }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACE.sm }}>
-                <View style={[FS.groupDot, { backgroundColor: theme.textTer }]} />
-                <Text style={[FS.groupEyebrowText, { color: theme.textSec }]}>Amount</Text>
-              </View>
-              {hasAmountFilter && (
+            {hasAmountFilter && (
+              <View style={{ alignItems: 'flex-end', marginBottom: SPACE.sm }}>
                 <TouchableOpacity
                   onPress={clearAmountFilter}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -2290,9 +2364,9 @@ function FilterSheet({
                 >
                   <Text style={[FS.amountClear, { color: theme.accent.dot }]}>Clear</Text>
                 </TouchableOpacity>
-              )}
-            </View>
-            <View style={[FS.amountCard, { marginHorizontal: LAYOUT.cardPadX, backgroundColor: theme.chipBg }]}>
+              </View>
+            )}
+            <View style={[FS.amountCard, { marginHorizontal: LAYOUT.cardPadX, marginTop: SPACE.lg, backgroundColor: theme.chipBg }]}>
               <AmountRangeField
                 label="Min"
                 value={localMinDraft}
@@ -2491,6 +2565,7 @@ const NativeActivityDayGroup = React.memo(function NativeActivityDayGroup({
   day,
   group,
   theme,
+  currencyCode: _currencyCode,
   cats,
   categories,
   members,
@@ -2505,6 +2580,7 @@ const NativeActivityDayGroup = React.memo(function NativeActivityDayGroup({
   day: string;
   group: { txs: Transaction[]; total: number };
   theme: Theme;
+  currencyCode: string;
   cats: Record<string, { label: string; icon: string; budget: number }>;
   categories: Category[];
   members: LedgerMember[];
@@ -2546,7 +2622,7 @@ const NativeActivityDayGroup = React.memo(function NativeActivityDayGroup({
       id: tx.id,
       title,
       meta,
-      amountText: `${isIncome ? '+' : '-'}$${tx.amount.toFixed(2)}`,
+      amountText: `${isIncome ? '+' : '-'}${formatActiveCurrencyAmount(tx.amount, true)}`,
       amountColor: isIncome ? incomeColor : p.textSec,
       symbol: ACTIVITY_SF_SYMBOL[isGoalContribution ? 'target' : cat?.icon ?? ''] ?? ACTIVITY_FALLBACK_SYMBOL,
       iconColor: groupColor,
@@ -2554,7 +2630,7 @@ const NativeActivityDayGroup = React.memo(function NativeActivityDayGroup({
       logoBgColor: logo?.bgColor,
       recurring: !!tx.recurring,
       goalContribution: isGoalContribution,
-      accessibilityLabel: `${title}, ${meta}, ${isIncome ? '+' : '-'}$${tx.amount.toFixed(2)}`,
+      accessibilityLabel: `${title}, ${meta}, ${isIncome ? '+' : '-'}${formatActiveCurrencyAmount(tx.amount, true)}`,
       accessibilityHint: canDelete ? 'Swipe left to delete' : undefined,
       onOpen: () => {
         onPrepare?.(tx);
@@ -3109,6 +3185,10 @@ const S = StyleSheet.create({
   filterStripScroll: {
     flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingRight: SPACE.xs,
   },
+  filteredSummaryHost: {
+    width: '100%',
+    height: NATIVE_FILTER_SUMMARY_HEIGHT,
+  },
   emptyClear: {
     marginTop: SPACE.lg, paddingHorizontal: LAYOUT.cardPadX, paddingVertical: LAYOUT.rowPadY,
     borderRadius: RADIUS.full,
@@ -3372,7 +3452,7 @@ const FS = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: LAYOUT.screenGutter,
-    paddingVertical: 11, // off-grid by design — tighter than rowPadY for form fields
+    paddingVertical: SPACE.lg,
   },
   amountFieldLabel: {
     ...TYPE.labelPlain,

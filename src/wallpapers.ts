@@ -10,6 +10,20 @@ export interface Wallpaper {
 }
 
 export const CUSTOM_WALLPAPER_ID = 'custom';
+export const CUSTOM_WALLPAPER_PREFIX = `${CUSTOM_WALLPAPER_ID}:`;
+
+export function customWallpaperId(uri: string): string {
+  return `${CUSTOM_WALLPAPER_PREFIX}${encodeURIComponent(uri)}`;
+}
+
+export function customWallpaperUriFromId(id: string): string | undefined {
+  if (!id.startsWith(CUSTOM_WALLPAPER_PREFIX)) return undefined;
+  try {
+    return decodeURIComponent(id.slice(CUSTOM_WALLPAPER_PREFIX.length));
+  } catch {
+    return undefined;
+  }
+}
 
 export interface WallpaperTab {
   id: string;

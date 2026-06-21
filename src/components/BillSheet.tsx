@@ -20,6 +20,7 @@ import * as Haptics from 'expo-haptics';
 import { DatePicker, Host } from '@expo/ui/swift-ui';
 import { datePickerStyle, environment, tint } from '@expo/ui/swift-ui/modifiers';
 import { Theme } from '../theme';
+import { getActiveCurrency } from '../currency';
 import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap } from '../repositories/categoryUtils';
 import { memberDisplayName } from '../repositories/memberLabels';
@@ -237,7 +238,7 @@ export function BillSheet({
 
   const handlePay = useCallback(() => {
     if (!b || !canEditBill) return;
-    const amount = parseFloat(editAmt.replace(/[$,\s]/g, ''));
+    const amount = parseFloat(editAmt.replace(/[^\d.]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) return;
 
     transactionsRepo.create({
@@ -401,7 +402,7 @@ export function BillSheet({
               >
                 <Text style={[S.fieldLabel, { color: theme.textSec }]}>Amount</Text>
                 <Text style={[S.amountValue, { color: editAmt ? theme.text : theme.textTer }]}>
-                  <Text style={{ color: theme.textSec }}>$</Text>{editAmt || '0.00'}
+                  <Text style={{ color: theme.textSec }}>{getActiveCurrency().symbol}</Text>{editAmt || '0.00'}
                 </Text>
               </Pressable>
 

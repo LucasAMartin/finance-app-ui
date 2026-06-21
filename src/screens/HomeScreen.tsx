@@ -11,6 +11,7 @@ import {
   Animated,
   Dimensions,
   Easing,
+  InteractionManager,
   LayoutAnimation,
 } from 'react-native';
 import { MenuView } from '@react-native-menu/menu';
@@ -65,6 +66,7 @@ import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../reposit
 import { appendMemberLabel } from '../repositories/memberLabels';
 import type { Bill, Category, LedgerMember, SpendGroup, Transaction, TransactionCursor } from '../repositories/types';
 import { advanceDueDate, monthBudgets, monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
+import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Icon } from '../components/Icon';
 import { Money } from '../components/shared';
 import { GlassCircleButton, GlassCircleIcon, SUPPORTS_GLASS } from '../components/GlassButton';
@@ -178,10 +180,14 @@ function IconBtn({
 }
 
 function HeroAmount({ value, prefix, color, shadow }: { value: number; prefix: string; color: string; shadow?: object }) {
+  const currency = getActiveCurrency();
   const abs = Math.abs(value);
-  const whole = Math.floor(abs).toLocaleString();
-  const frac = Math.round((abs - Math.floor(abs)) * 100).toString().padStart(2, '0');
-  const display = `${prefix}${whole}.${frac}`;
+  const rounded = currency.decimals === 0 ? Math.round(abs) : abs;
+  const whole = Math.floor(rounded).toLocaleString();
+  const symbolPrefix = prefix.replace('$', currency.symbol);
+  const display = currency.decimals === 0
+    ? `${symbolPrefix}${whole}`
+    : `${symbolPrefix}${whole}.${Math.round((rounded - Math.floor(rounded)) * 100).toString().padStart(2, '0')}`;
   return (
     <Text
       style={[styles.heroAmount, { color }, shadow]}
@@ -349,9 +355,11 @@ const QuickAction = React.forwardRef<View, {
 // Dark: heavy dark frost (intensity 70). Light: light frost (intensity 35)
 // — barely opaque so the vivid wallpaper bleeds through.
 
-// All amounts on the home screen read as dollars-and-cents, e.g. $1,234.00 / $1,234.50.
 const fmtAmount = (n: number) =>
-  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  n.toLocaleString('en-US', {
+    minimumFractionDigits: getActiveCurrency().decimals,
+    maximumFractionDigits: getActiveCurrency().decimals,
+  });
 
 interface NativeUpcomingBillItem {
   id: string;
@@ -416,10 +424,11 @@ interface Props {
   onPrepareTx?: (tx: Transaction) => void;
   onDeleteTx: (tx: Transaction) => void;
   onOpenBill: (bill: Bill) => void;
+  onRefreshSync?: () => Promise<void>;
   morphResetToken?: number;
 }
 
-export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onContributeGoal, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, morphResetToken = 0 }: Props) {
+export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, onAddManual, onLogIncome, onOpenTheme, onContributeGoal, onOpenTx, onPrepareTx, onDeleteTx, onOpenBill, onRefreshSync, morphResetToken = 0 }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   const { showToast } = useAppFeedback();
   // Morph sources — all measured at press time from the circle (radius 28).
@@ -438,7 +447,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   const ledgerMembers = useLedgerMembers();
   const cats = useMemo(() => categoryMap(categories), [categories]);
   const upcomingBills = useMemo(() => upcomingBillsFromRecurring(recurringRules, categories), [recurringRules, categories]);
-  const { wallpaper, wallpaperFloorBase } = useTheme();
+  const { wallpaper, wallpaperFloorBase, currencyCode } = useTheme();
   const insets = useSafeAreaInsets();
   // pWallpaper: hero, header, quick-actions — always on the wallpaper, always white.
   // p: card interiors — adaptive (dark text in light mode reads on light frosted glass).
@@ -510,15 +519,14 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
     () => homeActivityGroups.flatMap(group => group.txs),
     [homeActivityGroups],
   );
-  const merchantLogos = useMerchantLogoMap(homeActivityLogoTxs, SUPPORTS_GLASS);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const merchantLogos = useMerchantLogoMap(homeActivityLogoTxs, SUPPORTS_GLASS && !loading);
 
   const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets, categories, selectedMonthKey), [transactions, budgets, categories, selectedMonthKey]);
   const income = useMemo(() => monthlyIncome(incomes, selectedMonthKey), [incomes, selectedMonthKey]);
   const visibleUpcomingBills = selectedIsCurrentMonth ? upcomingBills : [];
   const mb = visibleMonthBudgets[monthIdx] ?? visibleMonthBudgets[0];
-
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   const openSwipeRef = useRef<Swipeable | null>(null);
 
@@ -571,7 +579,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
 
   const nativeUpcomingBills = useMemo<NativeUpcomingBillItem[]>(() => (
     visibleUpcomingBills.map(bill => {
-      const amountText = `${bill.estimate ? '~' : ''}$${fmtAmount(bill.amount)}`;
+      const amountText = `${bill.estimate ? '~' : ''}${formatActiveCurrencyAmount(bill.amount, true)}`;
       const ruleId = bill.id.startsWith('bill-') ? bill.id.slice(5) : bill.id;
       const rule = recurringRules.find(item => item.id === ruleId);
       const canMarkPaid = !rule || sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId);
@@ -596,7 +604,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
         onPaid: canMarkPaid ? () => markBillPaid(bill) : undefined,
       };
     })
-  ), [categories, markBillPaid, onOpenBill, p.textSec, recurringRules, sessionRepo, theme.dark, visibleUpcomingBills]);
+  ), [categories, currencyCode, markBillPaid, onOpenBill, p.textSec, recurringRules, sessionRepo, theme.dark, visibleUpcomingBills]);
 
   const nativeHomeActivityGroups = useMemo<NativeHomeActivityGroup[]>(() => (
     homeActivityGroups.map(group => ({
@@ -612,12 +620,12 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           merchant: tx.merchant,
           meta,
           time: tx.time,
-          amountText: `$${fmtAmount(tx.amount)}`,
+          amountText: formatActiveCurrencyAmount(tx.amount, true),
           symbol: CATEGORY_SF_SYMBOL[cat?.icon ?? ''] ?? UPCOMING_FALLBACK_SYMBOL,
           iconColor: categoryGroupColor(tx.cat, categories, theme.dark),
           logoUrl: logo?.logoUrl,
           logoBgColor: logo?.bgColor,
-          accessibilityLabel: `${tx.merchant}, ${meta}, ${tx.time}, $${fmtAmount(tx.amount)}`,
+          accessibilityLabel: `${tx.merchant}, ${meta}, ${tx.time}, ${formatActiveCurrencyAmount(tx.amount, true)}`,
           accessibilityHint: canDelete ? 'Swipe left to delete' : undefined,
           onOpen: () => {
             onPrepareTx?.(tx);
@@ -632,7 +640,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
         };
       }),
     }))
-  ), [cats, categories, homeActivityGroups, ledgerMembers, merchantLogos, onDeleteTx, onOpenTx, onPrepareTx, theme.dark, transactionsRepo]);
+  ), [cats, categories, currencyCode, homeActivityGroups, ledgerMembers, merchantLogos, onDeleteTx, onOpenTx, onPrepareTx, theme.dark, transactionsRepo]);
 
   const handleEditTheme = () => {
     onOpenTheme();
@@ -718,16 +726,44 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
   useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 1100);
-    return () => clearTimeout(t);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setLoading(false);
+    };
+    const task = InteractionManager.runAfterInteractions(finish);
+    const fallback = setTimeout(finish, 450);
+    return () => {
+      settled = true;
+      task.cancel();
+      clearTimeout(fallback);
+    };
   }, []);
 
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setLoading(true);
-    setTimeout(() => { setLoading(false); setRefreshing(false); }, 1100);
-  }, []);
+    void (async () => {
+      try {
+        await onRefreshSync?.();
+      } finally {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          setLoading(false);
+          setRefreshing(false);
+        };
+        const task = InteractionManager.runAfterInteractions(finish);
+        setTimeout(() => {
+          task.cancel();
+          finish();
+        }, 450);
+      }
+    })();
+  }, [onRefreshSync]);
 
   const hasIncome = mb.budget > 0;
   const rawPct = hasIncome ? mb.spent / mb.budget : 0;
@@ -943,11 +979,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           <View style={styles.sectionStack}>
 
             {/* Spending */}
-            {SUPPORTS_GLASS ? (
+            {SUPPORTS_GLASS && !loading ? (
               <NativeSpendingSection
                 theme={theme}
                 p={p}
-                loading={loading}
+                loading={false}
                 groups={visibleSpendGroups}
                 income={income}
               />
@@ -965,11 +1001,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             )}
 
             {/* Upcoming */}
-            {SUPPORTS_GLASS ? (
+            {SUPPORTS_GLASS && !loading ? (
               <NativeUpcomingSection
                 dark={theme.dark}
                 p={p}
-                loading={loading}
+                loading={false}
                 bills={nativeUpcomingBills}
               />
             ) : (
@@ -984,8 +1020,8 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                     <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
                       No recurring bills tracked. Mark an expense as repeating to add one.
                     </Text>
-                  ) : visibleUpcomingBills.map((b, i) => {
-	                  const amountStr = `${b.estimate ? '~' : ''}$${fmtAmount(b.amount)}`;
+                    ) : visibleUpcomingBills.map((b, i) => {
+	                  const amountStr = `${b.estimate ? '~' : ''}${formatActiveCurrencyAmount(b.amount, true)}`;
 	                  const a11y = `${b.name}, due ${b.dueDate}, in ${b.daysUntil} days, ${amountStr}`;
 	                  const billIconColor = categoryGroupColor(b.cat, categories, theme.dark);
                     const ruleId = b.id.startsWith('bill-') ? b.id.slice(5) : b.id;
@@ -1041,12 +1077,12 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             )}
 
             {/* Activity */}
-            {SUPPORTS_GLASS ? (
+            {SUPPORTS_GLASS && !loading ? (
               <NativeHomeActivitySection
                 dark={theme.dark}
                 p={p}
                 accent={theme.accent.dot}
-                loading={loading}
+                loading={false}
                 groups={nativeHomeActivityGroups}
                 onSeeAll={openSelectedMonthActivity}
               />
@@ -1240,7 +1276,7 @@ function NativeSpendGroupPanel({
       <SwiftButton
         onPress={onToggle}
         modifiers={[
-          swiftAccessibilityLabel(`${group.label}, $${fmtAmount(groupTotal)}, ${statusText}`),
+          swiftAccessibilityLabel(`${group.label}, ${formatActiveCurrencyAmount(groupTotal, true)}, ${statusText}`),
           swiftAccessibilityHint(open ? 'Collapse spending group' : 'Expand spending group'),
         ]}
       >
@@ -1272,7 +1308,7 @@ function NativeSpendGroupPanel({
                 lineLimit(1),
               ]}
             >
-              ${fmtAmount(groupTotal)}
+              {formatActiveCurrencyAmount(groupTotal, true)}
             </SwiftText>
             <SwiftImage
               systemName={open ? 'chevron.up' : 'chevron.down'}
@@ -1390,7 +1426,7 @@ function NativeDetailSpendRows({
                     lineLimit(1),
                   ]}
                 >
-                  ${fmtAmount(sub.spent)}
+                  {formatActiveCurrencyAmount(sub.spent, true)}
                 </SwiftText>
                 {(!funded || over) ? (
                   <SwiftText
@@ -1400,7 +1436,7 @@ function NativeDetailSpendRows({
                       lineLimit(1),
                     ]}
                   >
-                    / ${fmtAmount(sub.budget)}
+                    / {formatActiveCurrencyAmount(sub.budget, true)}
                   </SwiftText>
                 ) : null}
               </HStack>
@@ -1469,7 +1505,7 @@ function NativeWantsRows({
                 lineLimit(1),
               ]}
             >
-              ${fmtAmount(sub.spent)}
+              {formatActiveCurrencyAmount(sub.spent, true)}
             </SwiftText>
           </HStack>
           {index < group.subs.length - 1 ? (
@@ -2247,7 +2283,7 @@ const TxRow = React.memo(function TxRow({
 }) {
   const cat = cats[tx.cat];
   const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
-  const a11yLabel = `${tx.merchant}, ${meta}, ${tx.time}, $${fmtAmount(tx.amount)}`;
+  const a11yLabel = `${tx.merchant}, ${meta}, ${tx.time}, ${formatActiveCurrencyAmount(tx.amount, true)}`;
   return (
     <GHTouchableOpacity
       onPressIn={onPrepare}
