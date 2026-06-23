@@ -265,11 +265,15 @@ export function ProfileScreen({
                     {member?.allowOthersToEditMyItems ? 'Others can edit my items' : 'Only I can edit my items'}
                   </SwiftText>
                 </LabeledContent>
-                <SwiftButton label="iCloud & Sharing Settings" onPress={openSharingAndClose} />
+                <SwiftButton
+                  label="iCloud & Sharing Settings"
+                  systemImage="person.2.badge.gearshape"
+                  onPress={openSharingAndClose}
+                />
               </SwiftSection>
               {profileImageDataUri && (
                 <SwiftSection>
-                  <SwiftButton label="Remove Photo" role="destructive" onPress={removePhoto} />
+                  <SwiftButton label="Remove Photo" systemImage="trash" role="destructive" onPress={removePhoto} />
                 </SwiftSection>
               )}
             </SwiftForm>

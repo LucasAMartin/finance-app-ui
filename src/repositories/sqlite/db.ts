@@ -1021,7 +1021,7 @@ export function bindLedgerToCloudIdentity(input: {
 
   getDb().runSync(
     `UPDATE ledger_members
-     SET deleted_at = ?, updated_by_user_id = ?, updated_at = ?, sync_status = 'pending'
+     SET deleted_at = ?, updated_by_user_id = ?, updated_at = ?, sync_status = 'synced'
      WHERE ledger_id = ?
        AND user_id IN (?, ?)
        AND user_id <> ?

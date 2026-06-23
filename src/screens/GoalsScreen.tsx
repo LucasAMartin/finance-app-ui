@@ -7,10 +7,10 @@ import {
   StyleSheet,
   Animated,
   Easing,
-  ImageBackground,
   Pressable,
   TextInput,
   Keyboard,
+  ImageBackground,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -378,7 +378,13 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
     >
       <View style={[styles.root, { backgroundColor: floorColor }]}>
         <BottomSheetModalProvider>
-          <ImageBackground source={wallpaper.source} resizeMode="cover" style={StyleSheet.absoluteFill}>
+          <ImageBackground
+            source={wallpaper.source}
+            defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+            fadeDuration={0}
+            resizeMode="cover"
+            style={StyleSheet.absoluteFill}
+          >
             <LinearGradient
               pointerEvents="none"
               colors={[scrim.top, scrim.mid, scrim.lower, scrim.bottom]}

@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Alert,
   Animated,
   AppState,
+  ImageBackground,
   StyleSheet,
   StatusBar,
   Dimensions,
@@ -14,6 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { router, useFocusEffect } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 
 import { ThemeProvider, useTheme } from './src/ThemeProvider';
 import { useAppFonts, patchTextWithInter } from './src/fonts';
@@ -21,6 +23,7 @@ import { RepositoryProvider, useRepositories, useRepositoryList } from './src/re
 import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
 import { FirstRunPrompt } from './src/components/FirstRunPrompt';
 import { AppLockGate } from './src/components/AppLockGate';
+import { formatMoney } from './src/selectors/format';
 import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
 
@@ -47,23 +50,34 @@ import {
 } from './src/components/sheetMounts';
 import { useLocalNotificationScheduler } from './src/notifications/scheduler';
 import {
+  activeLedgerSyncDiagnostics,
+  cloudKitRouteForActiveLedger,
   hasPendingActiveLedgerChanges,
+  listActiveLedgerSyncConflicts,
   resetActiveLedgerSyncState,
+  resolveActiveLedgerSyncConflict,
   syncActiveLedger,
   zoneNameForLedger,
 } from './src/sync/syncActiveLedger';
+import {
+  CLOUD_SYNC_OFF,
+  type CloudSyncConflictItem,
+  type CloudSyncConflictResolution,
+  type CloudSyncUiState,
+} from './src/sync/cloudSyncStatus';
 import CloudKitSyncModule from './modules/cloudkit-sync/src/CloudKitSyncModule';
 import type { NativeCloudKitAcceptedShare } from './src/sync/nativeCloudKitAdapter';
+import type { StoredSyncConflict } from './src/sync/sqliteSyncStore';
 import type { AppSession, Bill, Ledger, LedgerMember, Transaction } from './src/repositories/types';
 
-type Screen = 'home' | 'insights' | 'activity' | 'budget';
+type Screen = 'home' | 'insights' | 'insightDetail' | 'activity' | 'budget';
 
 patchTextWithInter();
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(300, SCREEN_W * 0.82);
 
-const ALL_SCREENS: Screen[] = ['home', 'insights', 'budget', 'activity'];
+const ALL_SCREENS: Screen[] = ['home', 'insights', 'insightDetail', 'budget', 'activity'];
 
 const FADE_DURATION = 180;
 
@@ -120,7 +134,7 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
 });
 
 export function DashboardApp() {
-  const { theme, dark, metaFlag, setMetaFlag } = useTheme();
+  const { theme, dark, wallpaper, metaFlag, setMetaFlag } = useTheme();
   const {
     transactionsRepo,
     devDataRepo,
@@ -160,14 +174,13 @@ export function DashboardApp() {
   const [sharingSettingsOpen, setSharingSettingsOpen] = useState(false);
   const [sharingInviteNoticeToken, setSharingInviteNoticeToken] = useState(0);
   const [sharingInviteBusy, setSharingInviteBusy] = useState(false);
+  const [cloudSyncState, setCloudSyncState] = useState<CloudSyncUiState>(CLOUD_SYNC_OFF);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [goalContributeToken, setGoalContributeToken] = useState(0);
   const [pendingBudgetEditCategoryId, setPendingBudgetEditCategoryId] = useState<string | undefined>(undefined);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
   const [activityFilterToken, setActivityFilterToken] = useState(0);
   const activityFilterTokenRef = useRef(0);
-  const [pendingFilteredActivityNavToken, setPendingFilteredActivityNavToken] = useState<number | null>(null);
-  const [readyFilteredActivityNavToken, setReadyFilteredActivityNavToken] = useState<number | null>(null);
   const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
   const [morphResetToken, setMorphResetToken] = useState(0);
   // Optimistic delete: store the ID of a transaction that should be hidden from
@@ -178,11 +191,19 @@ export function DashboardApp() {
   const [ledgers, setLedgers] = useState<Ledger[]>(() => sessionRepo.listLedgers());
   const cloudSyncInFlightRef = useRef<ReturnType<typeof syncActiveLedger> | null>(null);
   const cloudSyncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const insightOpenTokenRef = useRef(0);
+  const insightClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const insightOpenFrameRef = useRef<number | null>(null);
+  const [rootWallpaperReady, setRootWallpaperReady] = useState(false);
   const activeLedger = ledgers.find(ledger => ledger.id === session.activeLedgerId);
   const activeLedgerMeta = activeLedger?.meta ?? {};
   const currentMember = ledgerMembers.find(member => member.userId === session.currentUserId);
   const activeLedgerIsSharedParticipant = activeLedgerMeta.cloudDatabaseScope === 'shared';
   const canInviteToActiveLedger = !activeLedgerIsSharedParticipant && currentMember?.role === 'owner';
+  const cloudConflictItems = useMemo(
+    () => listActiveLedgerSyncConflicts().map(syncConflictToUiItem),
+    [cloudSyncState, session.activeLedgerId],
+  );
 
   const refreshSessionState = useCallback(() => {
     const nextSession = sessionRepo.getSession();
@@ -203,7 +224,31 @@ export function DashboardApp() {
     refreshSessionState();
   }, [attachmentsRepo, billsRepo, budgetsRepo, categoriesRepo, incomeRepo, recurringRulesRepo, refreshSessionState, sessionRepo, transactionsRepo]);
 
+  const refreshCloudDiagnostics = useCallback((patch?: Partial<CloudSyncUiState>) => {
+    const diagnostics = activeLedgerSyncDiagnostics();
+    setCloudSyncState(current => ({
+      ...current,
+      ...patch,
+      pendingRecords: diagnostics.pendingRecords,
+      conflictedRecords: diagnostics.conflictedRecords,
+    }));
+  }, []);
+
   useEffect(() => sessionRepo.subscribe(refreshSessionState), [refreshSessionState, sessionRepo]);
+
+  useEffect(() => () => {
+    if (insightClearTimerRef.current) clearTimeout(insightClearTimerRef.current);
+    if (insightOpenFrameRef.current !== null) cancelAnimationFrame(insightOpenFrameRef.current);
+  }, []);
+
+  useEffect(() => {
+    setRootWallpaperReady(false);
+  }, [wallpaper.id]);
+
+  useEffect(() => {
+    if (!rootWallpaperReady) return;
+    SplashScreen.hideAsync().catch(() => {});
+  }, [rootWallpaperReady]);
 
   const runCloudKitSync = useCallback(async (announce = false) => {
     if (cloudSyncInFlightRef.current) return cloudSyncInFlightRef.current;
@@ -211,12 +256,25 @@ export function DashboardApp() {
     const task = syncActiveLedger({ nativeModule: CloudKitSyncModule })
       .then(result => {
         if (result.status === 'paused') {
+          refreshCloudDiagnostics({
+            label: 'Paused',
+            detail: result.reason ? `iCloud sync paused: ${result.reason}` : 'iCloud sync is paused',
+          });
           if (announce) showToast(`iCloud sync paused: ${result.reason ?? 'unavailable'}`);
           return result;
         }
         refreshAfterSync();
+        const changes = result.pulledRecords + result.pushedRecords;
+        refreshCloudDiagnostics({
+          label: result.conflicts > 0 ? 'Review needed' : 'Synced',
+          detail: result.conflicts > 0
+            ? `${result.conflicts} sync conflict${result.conflicts === 1 ? '' : 's'} need attention`
+            : changes > 0
+              ? `Synced ${changes} change${changes === 1 ? '' : 's'}`
+              : 'iCloud is up to date',
+          lastSyncedAt: new Date().toISOString(),
+        });
         if (announce) {
-          const changes = result.pulledRecords + result.pushedRecords;
           showToast(changes > 0 ? `iCloud synced ${changes} changes` : 'iCloud is up to date');
         }
         return result;
@@ -227,7 +285,7 @@ export function DashboardApp() {
 
     cloudSyncInFlightRef.current = task;
     return task;
-  }, [refreshAfterSync, showToast]);
+  }, [refreshAfterSync, refreshCloudDiagnostics, showToast]);
 
   const scheduleCloudKitPush = useCallback(() => {
     if (!iCloudSyncEnabled) return;
@@ -244,18 +302,30 @@ export function DashboardApp() {
       if (!hasPendingActiveLedgerChanges()) return;
       runCloudKitSync(false).catch(error => {
         console.warn('CloudKit background sync failed', error);
+        refreshCloudDiagnostics({
+          label: 'Failed',
+          detail: cloudKitToast('iCloud sync failed', error),
+        });
         showToast(cloudKitToast('iCloud sync failed', error));
       });
     }, 900);
-  }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
+  }, [iCloudSyncEnabled, refreshCloudDiagnostics, runCloudKitSync, showToast]);
 
   useEffect(() => {
     if (!iCloudSyncEnabled) return;
+    refreshCloudDiagnostics({
+      label: 'Checking',
+      detail: 'Checking iCloud for changes...',
+    });
     runCloudKitSync(false).catch(error => {
       console.warn('CloudKit initial sync failed', error);
+      refreshCloudDiagnostics({
+        label: 'Failed',
+        detail: cloudKitToast('iCloud sync failed', error),
+      });
       showToast(cloudKitToast('iCloud sync failed', error));
     });
-  }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
+  }, [iCloudSyncEnabled, refreshCloudDiagnostics, runCloudKitSync, showToast]);
 
   useEffect(() => {
     if (!iCloudSyncEnabled) return;
@@ -287,6 +357,86 @@ export function DashboardApp() {
     scheduleCloudKitPush,
     sessionRepo,
     transactionsRepo,
+  ]);
+
+  const ensureCloudKitSubscriptions = useCallback(async () => {
+    if (!iCloudSyncEnabled || !CloudKitSyncModule.ensureSubscriptions) return;
+    const route = cloudKitRouteForActiveLedger(session.activeLedgerId);
+    try {
+      await CloudKitSyncModule.ensureSubscriptions(
+        route.zoneName,
+        route.databaseScope,
+        route.ownerName,
+      );
+    } catch (error) {
+      console.warn('CloudKit subscription setup failed', error);
+      refreshCloudDiagnostics({
+        label: 'Limited',
+        detail: cloudKitToast('iCloud subscriptions failed', error),
+      });
+    }
+  }, [iCloudSyncEnabled, refreshCloudDiagnostics, session.activeLedgerId]);
+
+  const consumeRemoteCloudKitChanges = useCallback(async () => {
+    if (!iCloudSyncEnabled || !CloudKitSyncModule.consumeRemoteNotifications) return;
+    try {
+      const changes = await CloudKitSyncModule.consumeRemoteNotifications();
+      if (changes.length === 0) return;
+      refreshCloudDiagnostics({
+        label: 'Checking',
+        detail: 'iCloud changes received...',
+      });
+      await runCloudKitSync(false);
+    } catch (error) {
+      console.warn('CloudKit remote-change sync failed', error);
+      refreshCloudDiagnostics({
+        label: 'Failed',
+        detail: cloudKitToast('iCloud refresh failed', error),
+      });
+    }
+  }, [iCloudSyncEnabled, refreshCloudDiagnostics, runCloudKitSync]);
+
+  const verifyCloudKitAccount = useCallback(async () => {
+    if (!iCloudSyncEnabled) return;
+    try {
+      const identity = await CloudKitSyncModule.getCurrentUser();
+      if (!identity.available) {
+        refreshCloudDiagnostics({
+          label: 'Paused',
+          detail: `iCloud sync paused: ${identity.reason}`,
+        });
+        return;
+      }
+      const expectedCloudUserId = typeof currentMember?.meta?.cloudKitUserId === 'string'
+        ? currentMember.meta.cloudKitUserId
+        : undefined;
+      if (expectedCloudUserId && expectedCloudUserId !== identity.userId) {
+        setMetaFlag('icloudSync', false);
+        setCloudSyncState({
+          ...CLOUD_SYNC_OFF,
+          label: 'Paused',
+          detail: 'iCloud account changed. Turn sync on again to reconnect this ledger.',
+        });
+        showToast('iCloud account changed. Sync paused.');
+      }
+    } catch (error) {
+      refreshCloudDiagnostics({
+        label: 'Paused',
+        detail: cloudKitToast('iCloud account check failed', error),
+      });
+    }
+  }, [currentMember?.meta, iCloudSyncEnabled, refreshCloudDiagnostics, setMetaFlag, showToast]);
+
+  useEffect(() => {
+    if (!iCloudSyncEnabled) return;
+    ensureCloudKitSubscriptions();
+    consumeRemoteCloudKitChanges();
+    verifyCloudKitAccount();
+  }, [
+    consumeRemoteCloudKitChanges,
+    ensureCloudKitSubscriptions,
+    iCloudSyncEnabled,
+    verifyCloudKitAccount,
   ]);
 
   useLocalNotificationScheduler({
@@ -362,18 +512,6 @@ export function DashboardApp() {
     });
   }, [ledgerMembers, showToast, transactionsRepo]);
 
-  const sampleDataEnabled = useSyncExternalStore(
-    useCallback((listener) => devDataRepo.subscribe(listener), [devDataRepo]),
-    useCallback(() => devDataRepo.isSeedDataEnabled(), [devDataRepo]),
-    useCallback(() => devDataRepo.isSeedDataEnabled(), [devDataRepo]),
-  );
-
-  const handleSampleDataEnabledChange = useCallback((enabled: boolean) => {
-    devDataRepo.setSeedDataEnabled(enabled);
-    refreshSessionState();
-    showToast(enabled ? 'Sample data reloaded' : 'Sample data cleared');
-  }, [devDataRepo, refreshSessionState, showToast]);
-
   const handleResetSyncedSampleData = useCallback(async () => {
     const zoneName = zoneNameForLedger(session.activeLedgerId);
     try {
@@ -391,6 +529,19 @@ export function DashboardApp() {
       await CloudKitSyncModule.resetZone(zoneName);
       resetActiveLedgerSyncState();
       devDataRepo.setSeedDataEnabled(true);
+      const currentCloudUser = await CloudKitSyncModule.getCurrentUser();
+      if (currentCloudUser.available) {
+        sessionRepo.bindCloudIdentity({
+          ledgerId: session.activeLedgerId,
+          userId: currentCloudUser.userId,
+          displayName: currentMember?.displayName ?? 'You',
+          role: 'owner',
+          allowOthersToEditMyItems: currentMember?.allowOthersToEditMyItems ?? true,
+          claimAsOwner: true,
+          meta: { ...(currentMember?.meta ?? {}), cloudKitUserId: currentCloudUser.userId },
+        });
+        sessionRepo.setCurrentUserId(currentCloudUser.userId);
+      }
       const resetAt = new Date().toISOString();
       const resetId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const ledger = sessionRepo.listLedgers().find(item => item.id === session.activeLedgerId);
@@ -408,7 +559,7 @@ export function DashboardApp() {
     } catch {
       showToast('Sample data reset failed');
     }
-  }, [devDataRepo, refreshSessionState, runCloudKitSync, session.activeLedgerId, showToast]);
+  }, [currentMember, devDataRepo, refreshSessionState, runCloudKitSync, session.activeLedgerId, sessionRepo, showToast]);
 
   const confirmResetSyncedSampleData = useCallback(() => {
     Alert.alert(
@@ -426,12 +577,6 @@ export function DashboardApp() {
       ],
     );
   }, [handleResetSyncedSampleData]);
-
-  const handleCurrentUserChange = useCallback((userId: string) => {
-    sessionRepo.setCurrentUserId(userId);
-    const member = ledgerMembers.find(item => item.userId === userId);
-    showToast(`Viewing as ${member?.displayName ?? userId}`);
-  }, [ledgerMembers, sessionRepo, showToast]);
 
   const handleCurrentMemberEditLockChange = useCallback((allowOthersToEditMyItems: boolean) => {
     const member = ledgerMembers.find(item => item.userId === session.currentUserId);
@@ -479,13 +624,22 @@ export function DashboardApp() {
   const handleICloudSyncChange = useCallback((enabled: boolean) => {
     setMetaFlag('icloudSync', enabled);
     if (!enabled) {
+      setCloudSyncState(CLOUD_SYNC_OFF);
       showToast('iCloud sync off');
       return;
     }
+    refreshCloudDiagnostics({
+      label: 'Checking',
+      detail: 'Checking iCloud account...',
+    });
     bindActiveLedgerToICloudUser(!activeLedgerIsSharedParticipant && currentMember?.role === 'owner')
       .then(identity => {
         if (!identity.available) {
           setMetaFlag('icloudSync', false);
+          refreshCloudDiagnostics({
+            label: 'Paused',
+            detail: `iCloud sync paused: ${identity.reason}`,
+          });
           showToast(`iCloud sync paused: ${identity.reason}`);
           return undefined;
         }
@@ -499,12 +653,17 @@ export function DashboardApp() {
       .catch(error => {
         setMetaFlag('icloudSync', false);
         console.warn('CloudKit enable sync failed', error);
+        refreshCloudDiagnostics({
+          label: 'Failed',
+          detail: cloudKitToast('iCloud sync failed', error),
+        });
         showToast(cloudKitToast('iCloud sync failed', error));
       });
   }, [
     activeLedgerIsSharedParticipant,
     bindActiveLedgerToICloudUser,
     currentMember?.role,
+    refreshCloudDiagnostics,
     runCloudKitSync,
     setMetaFlag,
     showToast,
@@ -520,9 +679,65 @@ export function DashboardApp() {
       if (result.status === 'paused') return;
     } catch (error) {
       console.warn('CloudKit manual refresh failed', error);
+      refreshCloudDiagnostics({
+        label: 'Failed',
+        detail: cloudKitToast('iCloud refresh failed', error),
+      });
       showToast(cloudKitToast('iCloud refresh failed', error));
     }
-  }, [iCloudSyncEnabled, runCloudKitSync, showToast]);
+  }, [iCloudSyncEnabled, refreshCloudDiagnostics, runCloudKitSync, showToast]);
+
+  const handleResolveCloudConflict = useCallback((recordName: string, resolution: CloudSyncConflictResolution) => {
+    const conflict = listActiveLedgerSyncConflicts().find(item => item.local.recordName === recordName);
+    if (!conflict) {
+      refreshCloudDiagnostics();
+      showToast('That change was already resolved');
+      return;
+    }
+    if (resolution === 'discardLocal' && conflict.reason !== 'permission-denied') {
+      refreshCloudDiagnostics();
+      showToast('That change needs a version choice');
+      return;
+    }
+    if (resolution === 'remote' && !conflict.remote) {
+      refreshCloudDiagnostics();
+      showToast('No iCloud version is available for this change');
+      return;
+    }
+    if (resolution === 'local' && conflict.reason === 'permission-denied') {
+      refreshCloudDiagnostics();
+      showToast('This item is locked by another member');
+      return;
+    }
+    const resolved = resolveActiveLedgerSyncConflict(recordName, resolution);
+    if (!resolved) {
+      refreshCloudDiagnostics();
+      showToast('Could not resolve that conflict');
+      return;
+    }
+    refreshAfterSync();
+    refreshCloudDiagnostics({
+      label: resolution === 'local' || resolution === 'discardLocal' ? 'Checking' : 'Resolved',
+      detail: resolution === 'local'
+        ? 'Retrying your version...'
+        : resolution === 'discardLocal'
+          ? 'Refreshing the shared version...'
+          : 'Kept the iCloud version',
+    });
+    if ((resolution === 'local' || resolution === 'discardLocal') && iCloudSyncEnabled) {
+      if (resolution === 'discardLocal') resetActiveLedgerSyncState();
+      runCloudKitSync(true).catch(error => {
+        console.warn('CloudKit conflict retry failed', error);
+        refreshCloudDiagnostics({
+          label: 'Failed',
+          detail: cloudKitToast('iCloud sync failed', error),
+        });
+        showToast(cloudKitToast('iCloud sync failed', error));
+      });
+    } else {
+      showToast(resolution === 'local' ? 'Kept this device' : resolution === 'discardLocal' ? 'Refreshing from iCloud' : 'Kept iCloud');
+    }
+  }, [iCloudSyncEnabled, refreshAfterSync, refreshCloudDiagnostics, runCloudKitSync, showToast]);
 
   const acceptedShareConsumeInFlightRef = useRef(false);
   const consumeAcceptedCloudKitShares = useCallback(async () => {
@@ -592,6 +807,8 @@ export function DashboardApp() {
 
   useEffect(() => {
     consumeAcceptedCloudKitShares();
+    consumeRemoteCloudKitChanges();
+    verifyCloudKitAccount();
     const retryTimers = [
       setTimeout(consumeAcceptedCloudKitShares, 1200),
       setTimeout(consumeAcceptedCloudKitShares, 3500),
@@ -599,13 +816,21 @@ export function DashboardApp() {
     const subscription = AppState.addEventListener('change', state => {
       if (state === 'active') {
         consumeAcceptedCloudKitShares();
+        ensureCloudKitSubscriptions();
+        consumeRemoteCloudKitChanges();
+        verifyCloudKitAccount();
       }
     });
     return () => {
       retryTimers.forEach(clearTimeout);
       subscription.remove();
     };
-  }, [consumeAcceptedCloudKitShares]);
+  }, [
+    consumeAcceptedCloudKitShares,
+    consumeRemoteCloudKitChanges,
+    ensureCloudKitSubscriptions,
+    verifyCloudKitAccount,
+  ]);
 
   const handlePresentLedgerShare = useCallback(async () => {
     if (sharingInviteBusy) return;
@@ -664,6 +889,99 @@ export function DashboardApp() {
     showToast,
   ]);
 
+  const handleLeaveSharedLedger = useCallback(() => {
+    if (!activeLedgerIsSharedParticipant) {
+      if (!canInviteToActiveLedger) {
+        showToast('Only the ledger owner can stop sharing');
+        return;
+      }
+      if (!CloudKitSyncModule.stopSharingLedger) {
+        showToast('Stopping iCloud sharing is unavailable in this build');
+        return;
+      }
+      Alert.alert(
+        'Stop sharing this ledger?',
+        'This removes iCloud sharing access for other people. Your own iCloud sync can continue privately.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Stop Sharing',
+            style: 'destructive',
+            onPress: () => {
+              setSharingInviteBusy(true);
+              CloudKitSyncModule.stopSharingLedger?.(session.activeLedgerId)
+                .then(result => {
+                  const ledger = sessionRepo.listLedgers().find(item => item.id === session.activeLedgerId);
+                  const nextMeta = { ...(ledger?.meta ?? {}) };
+                  delete nextMeta.cloudShareRecordName;
+                  delete nextMeta.cloudShareUrl;
+                  ledgerMembers
+                    .filter(member => member.userId !== session.currentUserId)
+                    .forEach(member => {
+                      sessionRepo.updateMember(member.id, { status: 'removed' });
+                    });
+                  sessionRepo.updateLedgerLocalMeta(session.activeLedgerId, nextMeta);
+                  refreshSessionState();
+                  showToast(result.stopped ? 'iCloud sharing stopped' : 'No active iCloud share found');
+                  if (iCloudSyncEnabled) {
+                    runCloudKitSync(false).catch(error => {
+                      console.warn('CloudKit post-stop-sharing sync failed', error);
+                    });
+                  }
+                })
+                .catch(error => {
+                  console.warn('CloudKit stop sharing failed', error);
+                  showToast(cloudKitToast('Could not stop iCloud sharing', error));
+                })
+                .finally(() => setSharingInviteBusy(false));
+            },
+          },
+        ],
+      );
+      return;
+    }
+    Alert.alert(
+      'Leave shared ledger?',
+      'This disconnects this device from the shared iCloud ledger and turns iCloud sync off here. Your local copy stays on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: () => {
+            resetActiveLedgerSyncState();
+            const ledger = sessionRepo.listLedgers().find(item => item.id === session.activeLedgerId);
+            const nextMeta = { ...(ledger?.meta ?? {}) };
+            delete nextMeta.cloudDatabaseScope;
+            delete nextMeta.cloudOwnerName;
+            delete nextMeta.cloudZoneName;
+            delete nextMeta.cloudShareRecordName;
+            delete nextMeta.cloudShareUrl;
+            delete nextMeta.cloudShareAcceptedAt;
+            delete nextMeta.cloudParticipantPermission;
+            sessionRepo.updateLedgerLocalMeta(session.activeLedgerId, nextMeta);
+            setMetaFlag('icloudSync', false);
+            setCloudSyncState(CLOUD_SYNC_OFF);
+            refreshSessionState();
+            showToast('Shared ledger disconnected');
+          },
+        },
+      ],
+    );
+  }, [
+    activeLedgerIsSharedParticipant,
+    canInviteToActiveLedger,
+    iCloudSyncEnabled,
+    ledgerMembers,
+    refreshSessionState,
+    runCloudKitSync,
+    session.activeLedgerId,
+    session.currentUserId,
+    sessionRepo,
+    setMetaFlag,
+    showToast,
+  ]);
+
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
 
@@ -672,6 +990,7 @@ export function DashboardApp() {
   const OP = useRef<Record<Screen, Animated.Value>>({
     home:     new Animated.Value(1),
     insights: new Animated.Value(0),
+    insightDetail: new Animated.Value(0),
     budget:   new Animated.Value(0),
     activity: new Animated.Value(0),
   }).current;
@@ -736,28 +1055,10 @@ export function DashboardApp() {
       setActivityFilterToken(nextToken);
       if (activeRef.current !== 'activity') {
         OP.activity.setValue(0);
-        setReadyFilteredActivityNavToken(null);
-        setPendingFilteredActivityNavToken(nextToken);
-        return;
       }
     }
     navigate('activity');
   }, [OP, navigate]);
-
-  const handleActivityNavSkeletonReady = useCallback((token: number) => {
-    setReadyFilteredActivityNavToken(token);
-  }, []);
-
-  // Filtered Activity entries wait for the destination screen to confirm that a
-  // skeleton frame has committed. Only then does the native opacity animation
-  // reveal Activity, so stale all-transaction rows never become visible.
-  useLayoutEffect(() => {
-    if (pendingFilteredActivityNavToken === null) return;
-    if (readyFilteredActivityNavToken !== pendingFilteredActivityNavToken) return;
-    setPendingFilteredActivityNavToken(null);
-    setReadyFilteredActivityNavToken(null);
-    navigate('activity');
-  }, [navigate, pendingFilteredActivityNavToken, readyFilteredActivityNavToken]);
 
   const handleDrawerNav = useCallback((id: string) => {
     closeDrawer();
@@ -779,7 +1080,26 @@ export function DashboardApp() {
     setGoalContributeToken(token => token + 1);
   }, []);
   const openBudgetIncome = useCallback((_node: View) => router.push('/income'), []);
-  const handleInsightTarget = useCallback((target: InsightDetailTarget | null) => setInsightTarget(target), []);
+  const handleInsightTarget = useCallback((target: InsightDetailTarget) => {
+    const token = insightOpenTokenRef.current + 1;
+    insightOpenTokenRef.current = token;
+    if (insightClearTimerRef.current) {
+      clearTimeout(insightClearTimerRef.current);
+      insightClearTimerRef.current = null;
+    }
+    if (insightOpenFrameRef.current !== null) {
+      cancelAnimationFrame(insightOpenFrameRef.current);
+      insightOpenFrameRef.current = null;
+    }
+    OP.insightDetail.setValue(0);
+    setInsightTarget(target);
+    handleOverlayOpenChange(true);
+    insightOpenFrameRef.current = requestAnimationFrame(() => {
+      insightOpenFrameRef.current = null;
+      if (insightOpenTokenRef.current !== token) return;
+      navigate('insightDetail');
+    });
+  }, [OP, handleOverlayOpenChange, navigate]);
   const closeTheme = useCallback(() => setThemeOpen(false), []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const closeProfile = useCallback(() => setProfileOpen(false), []);
@@ -794,7 +1114,34 @@ export function DashboardApp() {
   const closeSharingSettings = useCallback(() => setSharingSettingsOpen(false), []);
   const closeGoals = useCallback(() => setGoalsOpen(false), []);
   const openIncomeFromSettings = useCallback(() => router.push('/income'), []);
-  const closeInsight = useCallback(() => setInsightTarget(null), []);
+  const closeInsight = useCallback(() => {
+    insightOpenTokenRef.current += 1;
+    if (insightOpenFrameRef.current !== null) {
+      cancelAnimationFrame(insightOpenFrameRef.current);
+      insightOpenFrameRef.current = null;
+    }
+    navigate('insights');
+    handleOverlayOpenChange(false);
+    if (insightClearTimerRef.current) clearTimeout(insightClearTimerRef.current);
+    insightClearTimerRef.current = setTimeout(() => {
+      insightClearTimerRef.current = null;
+      setInsightTarget(null);
+    }, FADE_DURATION + 40);
+  }, [handleOverlayOpenChange, navigate]);
+  const handleInsightSeeAll = useCallback((filter: ActivityInitialFilter) => {
+    insightOpenTokenRef.current += 1;
+    if (insightOpenFrameRef.current !== null) {
+      cancelAnimationFrame(insightOpenFrameRef.current);
+      insightOpenFrameRef.current = null;
+    }
+    navigateToActivity(filter);
+    handleOverlayOpenChange(false);
+    if (insightClearTimerRef.current) clearTimeout(insightClearTimerRef.current);
+    insightClearTimerRef.current = setTimeout(() => {
+      insightClearTimerRef.current = null;
+      setInsightTarget(null);
+    }, FADE_DURATION + 40);
+  }, [handleOverlayOpenChange, navigateToActivity]);
   const handleTabPress = useCallback((id: string) => {
     if      (id === 'home')     navigate('home');
     else if (id === 'spending') navigate('insights');
@@ -846,6 +1193,15 @@ export function DashboardApp() {
     />
   ), [handleInsightTarget, navigateToActivity, openDrawer, screen, theme]);
 
+  const insightDetailScreen = useMemo(() => (
+    <InsightDetailScreen
+      theme={theme}
+      target={insightTarget}
+      onClose={closeInsight}
+      onSeeAll={handleInsightSeeAll}
+    />
+  ), [closeInsight, handleInsightSeeAll, insightTarget, theme]);
+
   const activityScreen = useMemo(() => (
     <MemoActivityScreen
       ref={activityRef}
@@ -856,11 +1212,10 @@ export function DashboardApp() {
       onOverlayOpenChange={handleOverlayOpenChange}
       initialFilter={activityFilter}
       filterToken={activityFilterToken}
-      onNavSkeletonReady={handleActivityNavSkeletonReady}
       pendingDeleteId={pendingDeleteId}
       onRefreshSync={handleManualCloudRefresh}
     />
-  ), [activityFilter, activityFilterToken, handleActivityNavSkeletonReady, handleManualCloudRefresh, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
+  ), [activityFilter, activityFilterToken, handleManualCloudRefresh, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen
@@ -887,13 +1242,31 @@ export function DashboardApp() {
           behind a react-native-screens native view. */}
       <BottomSheetModalProvider>
       <View style={[styles.root, { backgroundColor: theme.bg }]}>
+        <ImageBackground
+          key={wallpaper.id}
+          source={wallpaper.source}
+          defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+          fadeDuration={0}
+          onLoadEnd={() => setRootWallpaperReady(true)}
+          onError={() => setRootWallpaperReady(true)}
+          resizeMode="cover"
+          style={StyleSheet.absoluteFill}
+        />
 
+        <View
+          pointerEvents={rootWallpaperReady ? 'auto' : 'none'}
+          style={[StyleSheet.absoluteFill, { opacity: rootWallpaperReady ? 1 : 0 }]}
+        >
         <AnimatedScreen opacity={OP.home} active={screen === 'home'}>
           {homeScreen}
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.insights} active={screen === 'insights'}>
           {insightsScreen}
+        </AnimatedScreen>
+
+        <AnimatedScreen opacity={OP.insightDetail} active={screen === 'insightDetail'}>
+          {insightDetailScreen}
         </AnimatedScreen>
 
         <AnimatedScreen opacity={OP.activity} active={screen === 'activity'}>
@@ -905,7 +1278,6 @@ export function DashboardApp() {
         </AnimatedScreen>
 
         <Animated.View
-          pointerEvents="box-none"
           style={[
             StyleSheet.absoluteFill,
             {
@@ -913,10 +1285,11 @@ export function DashboardApp() {
               transform: [{ translateY: tabBarAnim.interpolate({ inputRange: [0, 1], outputRange: [120, 0] }) }],
             },
           ]}
+          pointerEvents={screen === 'insightDetail' ? 'none' : 'box-none'}
         >
           <TabBar
             theme={theme}
-            active={screen === 'insights' ? 'spending' : screen}
+            active={screen === 'insights' || screen === 'insightDetail' ? 'spending' : screen}
             onAdd={openVoiceExpense}
             onTabPress={handleTabPress}
           />
@@ -942,16 +1315,12 @@ export function DashboardApp() {
             theme={theme}
             width={DRAWER_WIDTH}
             progress={drawerAnim}
+            activeId={goalsOpen ? 'goals' : screen}
             onNavigate={handleDrawerNav}
             onClose={closeDrawer}
-            sampleDataEnabled={sampleDataEnabled}
-            onSampleDataEnabledChange={handleSampleDataEnabledChange}
-            activeLedgerName={activeLedger?.name}
             currentUserId={session.currentUserId}
             ledgerMembers={ledgerMembers}
             onOpenProfile={openProfile}
-            onCurrentUserChange={handleCurrentUserChange}
-            onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
           />
         </View>
 
@@ -994,6 +1363,8 @@ export function DashboardApp() {
           onOpenSharing={openSharingSettings}
           onICloudSyncChange={handleICloudSyncChange}
           onResetSyncedSampleData={confirmResetSyncedSampleData}
+          cloudSyncState={cloudSyncState}
+          onManualCloudRefresh={handleManualCloudRefresh}
           activeLedgerName={activeLedger?.name}
           memberCount={ledgerMembers.length}
         />
@@ -1026,7 +1397,12 @@ export function DashboardApp() {
           ledgerMembers={ledgerMembers}
           inviteNoticeToken={sharingInviteNoticeToken}
           inviteBusy={sharingInviteBusy}
+          cloudSyncState={cloudSyncState}
+          cloudConflicts={cloudConflictItems}
+          onManualCloudRefresh={handleManualCloudRefresh}
           onInviteSomeone={handlePresentLedgerShare}
+          onLeaveOrManageSharing={handleLeaveSharedLedger}
+          onResolveCloudConflict={handleResolveCloudConflict}
           onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
         />
 
@@ -1036,15 +1412,8 @@ export function DashboardApp() {
           onClose={closeTheme}
         />
 
-        <InsightDetailScreen
-          theme={theme}
-          target={insightTarget}
-          onOpenTx={openTx}
-          onClose={closeInsight}
-          onSeeAll={navigateToActivity}
-        />
-
         <AppLockGate />
+        </View>
       </View>
       </BottomSheetModalProvider>
     </>
@@ -1068,6 +1437,70 @@ export default function App() {
       </RepositoryProvider>
     </GestureHandlerRootView>
   );
+}
+
+function syncConflictToUiItem(conflict: StoredSyncConflict): CloudSyncConflictItem {
+  return {
+    recordName: conflict.local.recordName,
+    title: syncRecordTitle(conflict.local),
+    detail: syncConflictReasonLabel(conflict.reason),
+    reason: conflict.reason,
+    localLabel: syncRecordValueLabel(conflict.local),
+    remoteLabel: conflict.remote ? syncRecordValueLabel(conflict.remote) : undefined,
+    hasRemote: Boolean(conflict.remote),
+    canKeepLocal: conflict.reason !== 'permission-denied',
+    requiresDiscardLocal: conflict.reason === 'permission-denied',
+  };
+}
+
+function syncRecordTitle(record: StoredSyncConflict['local']): string {
+  const fields = record.fields;
+  if (record.recordType === 'transaction') return stringField(fields.merchant) ?? 'Transaction';
+  if (record.recordType === 'income') return stringField(fields.source) ?? 'Income';
+  if (record.recordType === 'budget') return stringField(fields.label) ?? stringField(fields.category) ?? 'Budget';
+  if (record.recordType === 'bill') return stringField(fields.name) ?? stringField(fields.merchant) ?? 'Bill';
+  if (record.recordType === 'category') return stringField(fields.label) ?? 'Category';
+  if (record.recordType === 'recurringRule') return stringField(fields.merchant) ?? 'Recurring item';
+  if (record.recordType === 'ledgerMember') return stringField(fields.displayName) ?? 'Member';
+  if (record.recordType === 'ledger') return stringField(fields.name) ?? 'Ledger';
+  return 'Attachment';
+}
+
+function syncRecordValueLabel(record: StoredSyncConflict['local']): string {
+  const amount = typeof record.fields.amount === 'number' ? formatMoney(record.fields.amount) : undefined;
+  const updated = shortDateTime(record.updatedAt);
+  if (amount) return `${amount} · ${updated}`;
+  if (record.deletedAt) return `Deleted · ${shortDateTime(record.deletedAt)}`;
+  return updated;
+}
+
+function syncConflictReasonLabel(reason: StoredSyncConflict['reason']): string {
+  switch (reason) {
+  case 'remote-newer':
+    return 'Changed in two places';
+  case 'deleted-remotely':
+    return 'Deleted in iCloud';
+  case 'permission-denied':
+    return 'Locked by another member';
+  default:
+    return 'Review this item';
+  }
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function shortDateTime(value?: string): string {
+  if (!value) return 'Unknown time';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Unknown time';
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 const styles = StyleSheet.create({

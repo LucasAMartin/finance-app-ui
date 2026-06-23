@@ -2021,7 +2021,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
   return (
     <DraftContext.Provider value={draftContextValue}>
-    <View style={{ flex: 1, backgroundColor: floorColor }}>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
 
       {/* Wallpaper + scrim — outside KAV so the keyboard never shifts it.
           Photo drifts up at half the scroll speed; container extends below the
@@ -2033,7 +2033,13 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
-        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+        <ImageBackground
+          source={wallpaper.source}
+          defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+          fadeDuration={0}
+          resizeMode="cover"
+          style={{ flex: 1 }}
+        />
       </Animated.View>
 
       {/* Scrim — fixed to the screen so its gradient stays tuned to screen height

@@ -1,5 +1,5 @@
 import { getSession, listLedgers } from '../repositories/sqlite/db';
-import { SQLiteSyncStore } from './sqliteSyncStore';
+import { SQLiteSyncStore, type StoredSyncConflict, type SyncConflictResolution } from './sqliteSyncStore';
 import {
   createNativeCloudKitSyncAdapter,
   type NativeCloudKitDatabaseRoute,
@@ -49,6 +49,38 @@ export function hasPendingActiveLedgerChanges(): boolean {
   return new SQLiteSyncStore()
     .listPendingRecords(session.activeLedgerId)
     .some(record => record.zoneName === route.zoneName);
+}
+
+export function activeLedgerSyncDiagnostics(): {
+  pendingRecords: number;
+  conflictedRecords: number;
+} {
+  const session = getSession();
+  const route = cloudKitRouteForActiveLedger(session.activeLedgerId);
+  const store = new SQLiteSyncStore();
+  return {
+    pendingRecords: store
+      .listPendingRecords(session.activeLedgerId)
+      .filter(record => record.zoneName === route.zoneName).length,
+    conflictedRecords: store
+      .listConflictedRecords(session.activeLedgerId)
+      .filter(record => record.zoneName === route.zoneName).length,
+  };
+}
+
+export function listActiveLedgerSyncConflicts(): StoredSyncConflict[] {
+  const session = getSession();
+  const route = cloudKitRouteForActiveLedger(session.activeLedgerId);
+  return new SQLiteSyncStore()
+    .listConflicts(session.activeLedgerId)
+    .filter(conflict => conflict.local.zoneName === route.zoneName);
+}
+
+export function resolveActiveLedgerSyncConflict(
+  recordName: string,
+  resolution: SyncConflictResolution,
+): boolean {
+  return new SQLiteSyncStore().resolveConflict(recordName, resolution);
 }
 
 export function resetActiveLedgerSyncState(): void {

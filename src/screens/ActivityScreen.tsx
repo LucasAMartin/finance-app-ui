@@ -106,6 +106,7 @@ import { Skeleton } from '../components/Skeleton';
 import { Toast } from '../components/Toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
+import { NativeTransactionSummaryCapsule } from '../components/NativeTransactionSummaryCapsule';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText, ON_GROUP_ICON } from '../theme';
@@ -120,7 +121,6 @@ const GLASS_TINT_ACTIVE = 'rgba(255,255,255,0.18)';
 const NATIVE_ACTIVITY_ROW_HEIGHT = 64;
 const NATIVE_ACTIVITY_HEADER_HEIGHT = 27;
 const NATIVE_ACTIVITY_CARD_PAD_Y = LAYOUT.cardPadTop + LAYOUT.cardPadBottom;
-const NATIVE_FILTER_SUMMARY_HEIGHT = 58;
 
 const ACTIVITY_SF_SYMBOL: Record<string, SFSymbol> = {
   cart: 'cart',
@@ -425,54 +425,6 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
   );
 }
 
-function NativeFilteredSummaryCapsule({
-  theme,
-  p,
-  expenseCount,
-  spendTotal,
-}: {
-  theme: Theme;
-  p: WallpaperP;
-  expenseCount: number;
-  spendTotal: number;
-}) {
-  const countLabel = `${expenseCount} ${expenseCount === 1 ? 'expense' : 'expenses'}`;
-  const totalLabel = `${formatActiveCurrencyAmount(spendTotal, true)} total`;
-  const glassTint = theme.dark ? 'rgba(20,22,26,0.42)' : 'rgba(255,255,255,0.66)';
-
-  return (
-    <Host
-      ignoreSafeArea="all"
-      colorScheme={theme.dark ? 'dark' : 'light'}
-      style={S.filteredSummaryHost}
-    >
-      <GlassEffectContainer>
-        <HStack
-          alignment="center"
-          spacing={SPACE.md}
-          modifiers={[
-            padding({ leading: 18, trailing: 18 }),
-            frame({ height: NATIVE_FILTER_SUMMARY_HEIGHT, maxWidth: 10000, alignment: 'center' }),
-            glassEffect({
-              glass: { variant: 'regular', tint: glassTint },
-              shape: 'capsule',
-            }),
-            swiftAccessibilityLabel(`${countLabel}, ${totalLabel}`),
-          ]}
-        >
-          <SwiftText modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
-            {countLabel}
-          </SwiftText>
-          <Spacer />
-          <SwiftText modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
-            {totalLabel}
-          </SwiftText>
-        </HStack>
-      </GlassEffectContainer>
-    </Host>
-  );
-}
-
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export type ActivityHandle = {
@@ -488,14 +440,13 @@ interface Props {
   onOverlayOpenChange?: (open: boolean) => void;
   initialFilter?: ActivityInitialFilter | null;
   filterToken?: number;
-  onNavSkeletonReady?: (filterToken: number) => void;
   /** App-level optimistic delete: hide this row immediately before the repo commit lands. */
   pendingDeleteId?: string | null;
   onRefreshSync?: () => Promise<void>;
 }
 
 export const ActivityScreen = React.forwardRef<ActivityHandle, Props>(
-function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken, onNavSkeletonReady, pendingDeleteId: externalPendingDeleteId, onRefreshSync }: Props, ref) {
+function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken, pendingDeleteId: externalPendingDeleteId, onRefreshSync }: Props, ref) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
@@ -636,15 +587,22 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
 
   const appliedTokenRef    = useRef<number | undefined>(undefined);
   const navAppliedRef      = useRef(false);
-  const reportedSkeletonTokenRef = useRef<number | undefined>(undefined);
   const [listInstanceKey, setListInstanceKey] = useState('activity-list-initial');
   const [navLoading, setNavLoading] = useState(false);
   const [navLoadToken, setNavLoadToken] = useState(0);
   const navLoadingTokenRef = useRef<number | null>(null);
+  const navLoadingStartedAtRef = useRef(0);
+  const navReleaseGenerationRef = useRef(0);
+  const navReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const beginNavLoading = useCallback((token?: number) => {
+    navReleaseGenerationRef.current += 1;
+    if (navReleaseTimerRef.current) {
+      clearTimeout(navReleaseTimerRef.current);
+      navReleaseTimerRef.current = null;
+    }
+    navLoadingStartedAtRef.current = Date.now();
     if (token !== undefined) {
-      reportedSkeletonTokenRef.current = undefined;
       setListInstanceKey(`activity-list-${token}`);
       navLoadingTokenRef.current = token;
       setNavLoadToken(token);
@@ -653,6 +611,29 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
       setNavLoadToken(token => token + 1);
     }
     setNavLoading(true);
+  }, []);
+
+  const releaseNavLoadingAfterPaint = useCallback(() => {
+    const releaseGeneration = navReleaseGenerationRef.current;
+    const elapsed = Date.now() - navLoadingStartedAtRef.current;
+    const delay = Math.max(180 - elapsed, 0);
+    if (navReleaseTimerRef.current) clearTimeout(navReleaseTimerRef.current);
+    navReleaseTimerRef.current = setTimeout(() => {
+      navReleaseTimerRef.current = null;
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => {
+          if (navReleaseGenerationRef.current !== releaseGeneration) return;
+          if (navLoadingTokenRef.current !== null) return;
+          setNavLoading(false);
+        });
+      });
+    }, delay);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (navReleaseTimerRef.current) clearTimeout(navReleaseTimerRef.current);
+    };
   }, []);
 
   const applyNavFilter = useCallback((filter: ActivityInitialFilter) => {
@@ -766,7 +747,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
       if (showSkeleton && currentLoad) setLoading(false);
       if (currentLoad && navLoadingTokenRef.current !== null) {
         navLoadingTokenRef.current = null;
-        setNavLoading(false);
+        releaseNavLoadingAfterPaint();
       }
       if (currentLoad && listFadePending.current) {
         listFadePending.current = false;
@@ -778,7 +759,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
         }).start();
       }
     }
-  }, [activityQuery, activityQueryKey, transactionScope, transactionsRepo, listOpacity]);
+  }, [activityQuery, activityQueryKey, transactionScope, transactionsRepo, listOpacity, releaseNavLoadingAfterPaint]);
 
   useEffect(() => {
     loadFirstActivityPage(true);
@@ -901,12 +882,6 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
 
   const hasUnappliedInitialFilter = Boolean(initialFilter && filterToken !== undefined && filterToken !== appliedTokenRef.current);
   const showNavSkeleton = navLoading || hasUnappliedInitialFilter;
-  useLayoutEffect(() => {
-    if (!showNavSkeleton || filterToken === undefined) return;
-    if (reportedSkeletonTokenRef.current === filterToken) return;
-    reportedSkeletonTokenRef.current = filterToken;
-    onNavSkeletonReady?.(filterToken);
-  }, [filterToken, onNavSkeletonReady, showNavSkeleton]);
   const activityDayKeys = useMemo(
     () => !loading && !showNavSkeleton && !loadError && selectedDay === null && dayKeys.length > 0 ? dayKeys : [],
     [dayKeys, loadError, loading, selectedDay, showNavSkeleton],
@@ -1001,7 +976,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     setCalViewMonth(from.getMonth());
   }, []);
   return (
-    <View style={{ flex: 1, backgroundColor: floorColor }}>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
           below the screen so the upward shift never reveals a gap. */}
       <Animated.View
@@ -1011,7 +986,13 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
-        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+        <ImageBackground
+          source={wallpaper.source}
+          defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+          fadeDuration={0}
+          resizeMode="cover"
+          style={{ flex: 1 }}
+        />
       </Animated.View>
 
       {/* Scrim — fixed to the screen so its gradient stays tuned to screen height
@@ -1294,11 +1275,11 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
                 <>
                   {isFiltered && (
                     SUPPORTS_GLASS ? (
-                      <NativeFilteredSummaryCapsule
+                      <NativeTransactionSummaryCapsule
                         theme={theme}
                         p={p}
-                        expenseCount={filteredExpenseCount}
-                        spendTotal={filteredSpendTotal}
+                        count={filteredExpenseCount}
+                        total={filteredSpendTotal}
                       />
                     ) : (
                       <SectionCard dark={theme.dark}>
@@ -3184,10 +3165,6 @@ const S = StyleSheet.create({
   },
   filterStripScroll: {
     flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingRight: SPACE.xs,
-  },
-  filteredSummaryHost: {
-    width: '100%',
-    height: NATIVE_FILTER_SUMMARY_HEIGHT,
   },
   emptyClear: {
     marginTop: SPACE.lg, paddingHorizontal: LAYOUT.cardPadX, paddingVertical: LAYOUT.rowPadY,

@@ -154,6 +154,13 @@ test('sqlite binding owner to iCloud hides fake members and rewrites local owner
   assert.equal(repos.sessionRepo.listLedgers()[0].ownerUserId, 'icloud-owner');
   assert.equal(repos.transactionsRepo.get(existing.id)?.createdByUserId, 'icloud-owner');
   assert.equal(next.createdByUserId, 'icloud-owner');
+  const hiddenFakeMembers = getDb().getAllSync<{ sync_status: string }>(
+    'SELECT sync_status FROM ledger_members WHERE user_id IN (?, ?) AND deleted_at IS NOT NULL ORDER BY user_id',
+    'alex',
+    'partner',
+  );
+  assert.ok(hiddenFakeMembers.length > 0);
+  assert.ok(hiddenFakeMembers.every(row => row.sync_status === 'synced'));
 
   repos.sessionRepo.setCurrentUserId('alex');
   assert.equal(repos.sessionRepo.getSession().currentUserId, 'icloud-owner');

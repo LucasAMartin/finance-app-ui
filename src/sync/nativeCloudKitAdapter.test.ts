@@ -8,7 +8,7 @@ import {
   type NativeCloudKitModule,
   type NativeCloudKitRecordPayload,
 } from './nativeCloudKitAdapter.ts';
-import { cloudKitRouteForActiveLedger, syncActiveLedger } from './syncActiveLedger.ts';
+import { activeLedgerSyncDiagnostics, cloudKitRouteForActiveLedger, syncActiveLedger } from './syncActiveLedger.ts';
 import type { SyncRecord } from './syncEngine.ts';
 
 const baseRecord: SyncRecord = {
@@ -140,6 +140,90 @@ test('syncActiveLedger clears stale CloudKit change tokens and retries once', as
     'SELECT change_token FROM sync_state WHERE zone_name = ?',
     'zone-ledger-default',
   )?.change_token, 'fresh-token');
+});
+
+test('activeLedgerSyncDiagnostics counts pending and conflicted records in the active zone', async () => {
+  const db = resetSQLiteDatabaseForTests();
+  [
+    'ledgers',
+    'ledger_members',
+    'transactions',
+    'incomes',
+    'categories',
+    'budgets',
+    'recurring_rules',
+    'bills',
+    'attachments',
+  ].forEach(table => {
+    db.runSync(`UPDATE ${table} SET sync_status = 'synced'`);
+  });
+  db.runSync(
+    `UPDATE ledgers
+     SET sync_status = 'synced', cloud_record_name = id, cloud_zone_name = ?, record_change_tag = 'ledger-tag'
+     WHERE id = ?`,
+    'zone-ledger-default',
+    'ledger-default',
+  );
+  db.runSync(
+    `UPDATE ledger_members
+     SET sync_status = 'synced', cloud_record_name = id, cloud_zone_name = ?, record_change_tag = 'member-tag'
+     WHERE ledger_id = ?`,
+    'zone-ledger-default',
+    'ledger-default',
+  );
+  db.runSync(
+    `INSERT INTO transactions (
+      id, merchant, category, amount, type, note, occurred_at, recurring,
+      visibility, created_by_user_id, updated_by_user_id, ledger_id, created_at,
+      updated_at, cloud_zone_name, sync_status, meta
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    'tx-pending-diagnostic',
+    'Pending Diagnostic',
+    'shopping',
+    10,
+    'expense',
+    '',
+    '2026-06-01T10:00:00.000Z',
+    0,
+    'shared',
+    'alex',
+    'alex',
+    'ledger-default',
+    '2026-06-01T10:00:00.000Z',
+    '2026-06-01T10:00:00.000Z',
+    'zone-ledger-default',
+    'pending',
+    null,
+  );
+  db.runSync(
+    `INSERT INTO transactions (
+      id, merchant, category, amount, type, note, occurred_at, recurring,
+      visibility, created_by_user_id, updated_by_user_id, ledger_id, created_at,
+      updated_at, cloud_zone_name, sync_status, meta
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    'tx-conflicted-diagnostic',
+    'Conflicted Diagnostic',
+    'shopping',
+    12,
+    'expense',
+    '',
+    '2026-06-01T11:00:00.000Z',
+    0,
+    'shared',
+    'alex',
+    'alex',
+    'ledger-default',
+    '2026-06-01T11:00:00.000Z',
+    '2026-06-01T11:00:00.000Z',
+    'zone-ledger-default',
+    'conflicted',
+    '{"syncConflictReason":"remote-newer"}',
+  );
+
+  assert.deepEqual(activeLedgerSyncDiagnostics(), {
+    pendingRecords: 1,
+    conflictedRecords: 1,
+  });
 });
 
 test('native CloudKit adapter forwards push payloads and maps accepted responses', async () => {

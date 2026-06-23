@@ -1745,9 +1745,10 @@ export function InsightsScreen({
   const trendAmount = trendScrubbing
     ? trend.values[trendScrubIdx] ?? trend.avg
     : trend.avg;
+  const trendCadence = TREND_CADENCE[timeframe].toLowerCase();
   const trendRightLabel = trendScrubbing
     ? trendScrubLabel(timeframe, trend.slots[trendScrubIdx], trendScrubIdx)
-    : `${TREND_CADENCE[timeframe]} average`;
+    : `Rolling ${trendCadence} avg`;
 
   // Active scrub point (null = released → show the period total).
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
@@ -1882,7 +1883,7 @@ export function InsightsScreen({
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: floorColor }}>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
           below the screen so the upward shift never reveals a gap. */}
       <Animated.View
@@ -1892,7 +1893,13 @@ export function InsightsScreen({
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
-        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+        <ImageBackground
+          source={wallpaper.source}
+          defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+          fadeDuration={0}
+          resizeMode="cover"
+          style={{ flex: 1 }}
+        />
       </Animated.View>
 
       {/* Scrim — fixed to the screen so its gradient stays tuned to screen height
@@ -1996,13 +2003,13 @@ export function InsightsScreen({
                   appearance={theme.dark ? 'dark' : 'light'}
                   backgroundColor={
                     theme.dark
-                      ? 'rgba(242,244,245,0.06)'
-                      : 'rgba(255,255,255,0.16)'
+                      ? 'rgba(3,5,8,0.48)'
+                      : 'rgba(255,255,255,0.58)'
                   }
                   fontStyle={{
                     color: theme.dark
-                      ? 'rgba(242,244,245,0.68)'
-                      : 'rgba(11,13,16,0.62)',
+                      ? 'rgba(242,244,245,0.76)'
+                      : 'rgba(11,13,16,0.72)',
                   }}
                   activeFontStyle={{
                     color: theme.accent.ink,
@@ -2139,7 +2146,7 @@ export function InsightsScreen({
                     onOpenInsight({
                       kind: 'trends',
                       title: 'Spending trends',
-                      subtitle: `Average ${TREND_CADENCE[timeframe]} spend`,
+                      subtitle: `Rolling ${trendCadence} average`,
                       icon: 'chart',
                     })
                   }

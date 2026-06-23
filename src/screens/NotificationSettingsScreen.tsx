@@ -238,13 +238,11 @@ export function NotificationSettingsScreen({ theme, visible, onClose }: Props) {
               <SwiftSection title="Bills" footer={<SwiftText>Quiet reminders before recurring bills are due.</SwiftText>}>
                 <SwiftToggle
                   label="Bill Reminders"
-                  systemImage="bell"
                   isOn={prefs.billReminders.enabled}
                   onIsOnChange={value => updateToggle('billReminders', value)}
                 />
                 <Picker
                   label="Remind"
-                  systemImage="calendar"
                   selection={prefs.billReminders.leadDays}
                   onSelectionChange={value => {
                     if (typeof value !== 'number') return;
@@ -269,13 +267,11 @@ export function NotificationSettingsScreen({ theme, visible, onClose }: Props) {
               <SwiftSection title="Budget" footer={<SwiftText>A restrained alert when a category is close to, or over, plan.</SwiftText>}>
                 <SwiftToggle
                   label="Budget Pace Check"
-                  systemImage="chart.bar"
                   isOn={prefs.budgetAlerts.enabled}
                   onIsOnChange={value => updateToggle('budgetAlerts', value)}
                 />
                 <Picker
                   label="Alert For"
-                  systemImage="exclamationmark.triangle"
                   selection={prefs.budgetAlerts.mode}
                   onSelectionChange={value => {
                     if (value !== 'near-and-over' && value !== 'over-only') return;
@@ -300,13 +296,11 @@ export function NotificationSettingsScreen({ theme, visible, onClose }: Props) {
               <SwiftSection title="Summary" footer={<SwiftText>A weekly check-in with spending, remaining income, and bills due soon.</SwiftText>}>
                 <SwiftToggle
                   label="Weekly Summary"
-                  systemImage="calendar"
                   isOn={prefs.weeklySummary.enabled}
                   onIsOnChange={value => updateToggle('weeklySummary', value)}
                 />
                 <Picker
                   label="Day"
-                  systemImage="calendar"
                   selection={prefs.weeklySummary.weekday}
                   onSelectionChange={value => {
                     if (typeof value !== 'number') return;
@@ -331,13 +325,11 @@ export function NotificationSettingsScreen({ theme, visible, onClose }: Props) {
               <SwiftSection title="Goals" footer={<SwiftText>A monthly prompt to review planned savings contributions.</SwiftText>}>
                 <SwiftToggle
                   label="Goal Contribution Reminder"
-                  systemImage="target"
                   isOn={prefs.goalReminders.enabled}
                   onIsOnChange={value => updateToggle('goalReminders', value)}
                 />
                 <Picker
                   label="Day"
-                  systemImage="calendar"
                   selection={prefs.goalReminders.dayOfMonth}
                   onSelectionChange={value => {
                     if (typeof value !== 'number') return;

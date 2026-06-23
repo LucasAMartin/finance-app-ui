@@ -545,6 +545,56 @@ test('SQLiteSyncStore marks push conflicts as conflicted in SQLite', async () =>
   );
   assert.equal(row?.sync_status, 'conflicted');
   assert.match(row?.meta ?? '', /remote-newer/);
+  assert.match(row?.meta ?? '', /remoteSyncRecord/);
+  assert.equal(store.listConflicts(LEDGER_ID).length, 1);
+});
+
+test('SQLiteSyncStore resolves a conflict by applying the remote record', async () => {
+  const { repos, store, db } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Conflict Local',
+    cat: 'shopping',
+    amount: 12,
+    occurredAt: '2026-06-01T10:00:00.000Z',
+  });
+
+  await syncWith(new PushConflictingAdapter(), store);
+  assert.equal(store.resolveConflict(tx.id, 'remote'), true);
+
+  const row = db.getFirstSync<{ merchant: string; amount: number; sync_status: string; meta: string | null }>(
+    'SELECT merchant, amount, sync_status, meta FROM transactions WHERE id = ?',
+    tx.id,
+  );
+  assert.equal(row?.merchant, 'Conflict Local');
+  assert.equal(row?.amount, 99);
+  assert.equal(row?.sync_status, 'synced');
+  assert.doesNotMatch(row?.meta ?? '', /syncConflictReason/);
+});
+
+test('SQLiteSyncStore resolves a conflict by keeping local changes for retry', async () => {
+  const { repos, store, db } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const tx = repos.transactionsRepo.create({
+    merchant: 'Conflict Local',
+    cat: 'shopping',
+    amount: 12,
+    occurredAt: '2026-06-01T10:00:00.000Z',
+  });
+
+  await syncWith(new PushConflictingAdapter(), store);
+  assert.equal(store.resolveConflict(tx.id, 'local'), true);
+
+  const row = db.getFirstSync<{ amount: number; sync_status: string; record_change_tag: string | null; meta: string | null }>(
+    'SELECT amount, sync_status, record_change_tag, meta FROM transactions WHERE id = ?',
+    tx.id,
+  );
+  assert.equal(row?.amount, 12);
+  assert.equal(row?.sync_status, 'pending');
+  assert.equal(row?.record_change_tag, 'remote-newer-tag');
+  assert.doesNotMatch(row?.meta ?? '', /syncConflictReason/);
 });
 
 test('SQLiteSyncStore applies remote edit locks before protected local edits are pushed', async () => {
@@ -596,4 +646,15 @@ test('SQLiteSyncStore applies remote edit locks before protected local edits are
   );
   assert.equal(row?.sync_status, 'conflicted');
   assert.match(row?.meta ?? '', /permission-denied/);
+  assert.equal(store.resolveConflict(tx.id, 'local'), false);
+  assert.equal(store.resolveConflict(tx.id, 'discardLocal'), true);
+
+  const resolvedRow = db.getFirstSync<{ sync_status: string; updated_at: string; deleted_at: string | null; meta: string | null }>(
+    'SELECT sync_status, updated_at, deleted_at, meta FROM transactions WHERE id = ?',
+    tx.id,
+  );
+  assert.equal(resolvedRow?.sync_status, 'synced');
+  assert.equal(resolvedRow?.updated_at, '1970-01-01T00:00:00.000Z');
+  assert.equal(resolvedRow?.deleted_at, null);
+  assert.doesNotMatch(resolvedRow?.meta ?? '', /syncConflictReason/);
 });

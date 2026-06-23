@@ -93,8 +93,48 @@ public class CloudKitSyncModule: Module {
       return result
     }
 
+    AsyncFunction("stopSharingLedger") { (ledgerId: String) async throws -> [String: Any] in
+      let zoneName = "zone-\(ledgerId)"
+      let shareID = self.zoneWideShareRecordID(zoneName: zoneName)
+      do {
+        _ = try await self.deleteRecord(shareID)
+        return [
+          "ledgerId": ledgerId,
+          "stopped": true
+        ]
+      } catch {
+        if self.isNotFound(error) {
+          return [
+            "ledgerId": ledgerId,
+            "stopped": false
+          ]
+        }
+        throw error
+      }
+    }
+
     AsyncFunction("consumeAcceptedShares") { () -> [[String: Any]] in
       CloudKitAcceptedShareStore.shared.consume()
+    }
+
+    AsyncFunction("ensureSubscriptions") { (zoneName: String, databaseScope: String, ownerName: String?) async throws -> [String: Any] in
+      let route = try self.databaseRoute(zoneName: zoneName, databaseScope: databaseScope, ownerName: ownerName)
+      if route.databaseScope == .privateScope {
+        try await self.ensureZone(route)
+      }
+      await MainActor.run {
+        UIApplication.shared.registerForRemoteNotifications()
+      }
+      _ = try await self.saveZoneSubscription(route)
+      return [
+        "zoneName": route.zoneName,
+        "databaseScope": route.databaseScope.stringValue,
+        "subscribed": true
+      ]
+    }
+
+    AsyncFunction("consumeRemoteNotifications") { () -> [[String: Any]] in
+      CloudKitRemoteChangeStore.shared.consume()
     }
   }
 
@@ -256,6 +296,54 @@ public class CloudKitSyncModule: Module {
     share[CKShare.SystemFieldKey.title] = title as NSString
     share.publicPermission = .none
     return try await saveShare(share)
+  }
+
+  private func subscriptionID(_ route: CloudKitDatabaseRoute) -> String {
+    let owner = route.zoneID.ownerName.replacingOccurrences(of: ":", with: "_")
+    return "finance-sync-\(route.databaseScope.stringValue)-\(owner)-\(route.zoneName)"
+  }
+
+  private func saveZoneSubscription(_ route: CloudKitDatabaseRoute) async throws -> CKSubscription {
+    let id = subscriptionID(route)
+    if let existing = try await fetchSubscriptionIfExists(id, in: route.database) {
+      return existing
+    }
+    let subscription = CKRecordZoneSubscription(zoneID: route.zoneID, subscriptionID: id)
+    let notificationInfo = CKSubscription.NotificationInfo()
+    notificationInfo.shouldSendContentAvailable = true
+    notificationInfo.shouldBadge = false
+    subscription.notificationInfo = notificationInfo
+    return try await saveSubscription(subscription, in: route.database)
+  }
+
+  private func fetchSubscriptionIfExists(_ subscriptionID: String, in database: CKDatabase) async throws -> CKSubscription? {
+    try await withCheckedThrowingContinuation { continuation in
+      database.fetch(withSubscriptionID: subscriptionID) { subscription, error in
+        if let error {
+          if self.isNotFound(error) {
+            continuation.resume(returning: nil)
+          } else {
+            continuation.resume(throwing: error)
+          }
+        } else {
+          continuation.resume(returning: subscription)
+        }
+      }
+    }
+  }
+
+  private func saveSubscription(_ subscription: CKSubscription, in database: CKDatabase) async throws -> CKSubscription {
+    try await withCheckedThrowingContinuation { continuation in
+      database.save(subscription) { saved, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else if let saved {
+          continuation.resume(returning: saved)
+        } else {
+          continuation.resume(throwing: CloudKitSyncError.missingSubscription)
+        }
+      }
+    }
   }
 
   private func saveShare(_ share: CKShare) async throws -> CKShare {
@@ -849,6 +937,60 @@ private struct CloudKitDatabaseRoute {
 private enum CloudKitDatabaseScope {
   case privateScope
   case sharedScope
+
+  var stringValue: String {
+    switch self {
+    case .privateScope:
+      return "private"
+    case .sharedScope:
+      return "shared"
+    }
+  }
+}
+
+private final class CloudKitRemoteChangeStore {
+  static let shared = CloudKitRemoteChangeStore()
+
+  private let userDefaultsKey = "CloudKitSyncRemoteChanges"
+  private let queue = DispatchQueue(label: "CloudKitSyncRemoteChangeStore")
+
+  private init() {}
+
+  func record(_ userInfo: [AnyHashable: Any]) -> Bool {
+    guard let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
+      return false
+    }
+
+    var payload: [String: Any] = [
+      "reason": "remote-change",
+      "subscriptionID": notification.subscriptionID ?? "",
+      "receivedAt": ISO8601DateFormatter().string(from: Date())
+    ]
+
+    if let zoneNotification = notification as? CKRecordZoneNotification,
+       let zoneID = zoneNotification.recordZoneID {
+      payload["zoneName"] = zoneID.zoneName
+      payload["ownerName"] = zoneID.ownerName
+    }
+
+    queue.sync {
+      var values = UserDefaults.standard.array(forKey: userDefaultsKey) as? [[String: Any]] ?? []
+      values.append(payload)
+      if values.count > 50 {
+        values = Array(values.suffix(50))
+      }
+      UserDefaults.standard.set(values, forKey: userDefaultsKey)
+    }
+    return true
+  }
+
+  func consume() -> [[String: Any]] {
+    queue.sync {
+      let values = UserDefaults.standard.array(forKey: userDefaultsKey) as? [[String: Any]] ?? []
+      UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+      return values
+    }
+  }
 }
 
 private final class CloudKitAcceptedShareStore {
@@ -1023,6 +1165,15 @@ public final class CloudKitSyncAppDelegateSubscriber: ExpoAppDelegateSubscriber 
   ) {
     CloudKitAcceptedShareStore.shared.accept(cloudKitShareMetadata)
   }
+
+  public func application(
+    _ application: UIApplication,
+    didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+    fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+  ) {
+    let recorded = CloudKitRemoteChangeStore.shared.record(userInfo)
+    completionHandler(recorded ? .newData : .noData)
+  }
 }
 
 private enum CloudKitSyncError: Error {
@@ -1033,4 +1184,5 @@ private enum CloudKitSyncError: Error {
   case missingPresenter
   case missingSharedOwner
   case missingAcceptedShare
+  case missingSubscription
 }

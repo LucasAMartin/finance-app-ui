@@ -1,11 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
   Dimensions,
-  Easing,
   FlatList,
   ImageBackground,
-  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -41,6 +38,7 @@ import {
   truncationMode,
 } from '@expo/ui/swift-ui/modifiers';
 import { SearchFilterBar } from '../components/SearchFilterBar';
+import { NativeTransactionSummaryCapsule } from '../components/NativeTransactionSummaryCapsule';
 import { GlassCircleIcon, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 
 import { formatActiveCurrencyAmount } from '../currency';
@@ -84,6 +82,7 @@ const CHART_W = SCREEN_W - CHART_PAD * 2;
 const CHART_H = 160;
 const DETAIL_CHART_INSET_Y = 20;
 const DETAIL_TX_LIMIT = 10;
+const LIST_SCRUB_DEBOUNCE_MS = 120;
 const NATIVE_DETAIL_DAY_PAD_X = 16;
 const NATIVE_DETAIL_DAY_PAD_TOP = 16;
 const NATIVE_DETAIL_DAY_PAD_BOTTOM = 4;
@@ -161,17 +160,11 @@ export interface InsightDetailTarget {
 interface Props {
   theme: Theme;
   target: InsightDetailTarget | null;
-  onOpenTx?: (tx: Transaction) => void;
   onClose: () => void;
   onSeeAll?: (filter: ActivityInitialFilter) => void;
-  /**
-   * Rendered as a native stack route (app/insight.tsx) rather than an in-app
-   * overlay. The route's push/pop handles entrance + the swipe-back gesture, so
-   * the screen skips its own slide-in/out and just sits in place.
-   */
 }
 
-export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll }: Props) {
+export function InsightDetailScreen({ theme, target, onClose, onSeeAll }: Props) {
   const { transactionsRepo, categoriesRepo, incomeRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const incomes = useRepositoryList(incomeRepo);
@@ -191,10 +184,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
   const cardBorder = theme.dark ? MEDIA.hairline : 'rgba(14,12,24,0.08)';
   const cardTint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
 
-  // Keep the last target mounted through the slide-out so content doesn't blank.
-  const last = useRef<InsightDetailTarget | null>(null);
-  if (target) last.current = target;
-  const t = last.current;
+  const t = target;
   const isSavingsDetail = t?.kind === 'savings';
   const isTrendsDetail = t?.kind === 'trends';
   const savingsTint = t?.accentColor ?? GROUP_COLORS.savings.dark;
@@ -202,21 +192,6 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
   // (the base ember reads too dark/saturated against it). Ember = spending up,
   // savings teal = spending down.
   const overTint = overText(true);
-
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: visible ? 1 : 0,
-      duration: visible ? 280 : 220,
-      useNativeDriver: true,
-      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
-    }).start();
-  }, [visible, anim]);
-
-  const translateX = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [SCREEN_W, 0],
-  });
 
   // ── Period state ──────────────────────────────────────────────────
   const [timeframe, setTimeframe] = useState<Timeframe>('1M');
@@ -240,6 +215,16 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
 
   // ── Search ────────────────────────────────────────────────────────
   const [query, setQuery] = useState('');
+  const emptyCountSingular = query
+    ? 'result'
+    : isSavingsDetail
+      ? 'transfer'
+      : 'transaction';
+  const emptyCountPlural = query
+    ? 'results'
+    : isSavingsDetail
+      ? 'transfers'
+      : 'transactions';
 
   // ── Repo change tracking ──────────────────────────────────────────
   const [repoVersion, setRepoVersion] = useState(0);
@@ -355,7 +340,7 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
     trendGrain === 'week' ? 'week' : trendGrain === 'month' ? 'month' : 'quarter';
   const grainAdj =
     trendGrain === 'week' ? 'Weekly' : trendGrain === 'month' ? 'Monthly' : 'Quarterly';
-  const trendWindowLabel = `Last ${trendValues.length} ${grainNoun}s`;
+  const trendWindowLabel = `Rolling ${trendValues.length} ${grainNoun}s`;
 
   const activeSeries = isSavingsDetail
     ? savedMetric.cumulativeSeries
@@ -364,11 +349,42 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
       : cumulativeSeries;
 
   // ── Scrub / tap selection ─────────────────────────────────────────
-  // scrubIdx is both the live scrub position (pan gesture) and the locked
-  // selection (tap toggle). For line charts it maps to a day/month offset from
-  // the period start; for trend bars it maps to a slot index.
+  // scrubIdx is the live chart/hero index. The transaction list intentionally
+  // follows on a short debounce so scrubbing stays fluid while heavier row
+  // queries settle after the user's finger pauses.
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
-  useEffect(() => setScrubIdx(null), [activeSeries]);
+  const [listScrubIdx, setListScrubIdx] = useState<number | null>(null);
+  const listScrubTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearListScrubTimer = useCallback(() => {
+    if (listScrubTimerRef.current) {
+      clearTimeout(listScrubTimerRef.current);
+      listScrubTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearListScrubTimer(), [clearListScrubTimer]);
+  useEffect(() => {
+    clearListScrubTimer();
+    setScrubIdx(null);
+    setListScrubIdx(null);
+  }, [activeSeries, clearListScrubTimer]);
+
+  const handleChartScrub = useCallback((idx: number | null) => {
+    setScrubIdx(idx);
+    clearListScrubTimer();
+    listScrubTimerRef.current = setTimeout(() => {
+      listScrubTimerRef.current = null;
+      setListScrubIdx(idx);
+    }, LIST_SCRUB_DEBOUNCE_MS);
+  }, [clearListScrubTimer]);
+
+  const handleChartTap = useCallback((idx: number) => {
+    clearListScrubTimer();
+    setScrubIdx(prev => {
+      const next = prev === idx ? null : idx;
+      setListScrubIdx(next);
+      return next;
+    });
+  }, [clearListScrubTimer]);
 
   // Fuller label for a scrubbed trend bar than its compact axis tick.
   const trendScrubLabel = (i: number): string => {
@@ -478,22 +494,22 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
 
   // Derive the date range for a locked spending/savings point.
   const selectedPointRange = useMemo<{ from: Date; to: Date } | null>(() => {
-    if (isTrendsDetail || scrubIdx === null) return null;
+    if (isTrendsDetail || listScrubIdx === null) return null;
     if (period === 'Year') {
       const year = ranges.current.from.getFullYear();
-      const from = new Date(year, scrubIdx, 1);
-      const to = new Date(year, scrubIdx + 1, 0, 23, 59, 59, 999);
+      const from = new Date(year, listScrubIdx, 1);
+      const to = new Date(year, listScrubIdx + 1, 0, 23, 59, 59, 999);
       return { from, to };
     }
-    const from = addDays(ranges.current.from, scrubIdx);
+    const from = addDays(ranges.current.from, listScrubIdx);
     from.setHours(0, 0, 0, 0);
-    const to = addDays(ranges.current.from, scrubIdx);
+    const to = addDays(ranges.current.from, listScrubIdx);
     to.setHours(23, 59, 59, 999);
     return { from, to };
-  }, [isTrendsDetail, scrubIdx, period, ranges]);
+  }, [isTrendsDetail, listScrubIdx, period, ranges]);
 
   const listSlot = isTrendsDetail
-    ? (scrubIdx !== null ? trendSlots[scrubIdx] : trendSlots[trendSlots.length - 1])
+    ? (listScrubIdx !== null ? trendSlots[listScrubIdx] : trendSlots[trendSlots.length - 1])
     : null;
 
   const listScope = useMemo<TransactionSummaryQuery>(() => {
@@ -516,18 +532,16 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
     };
   }, [selectedPointRange, listSlot, ranges, isSavingsDetail, savedMetric.categoryIds, query, searchCategoryIds]);
 
-  const [rows, setRows] = useState<Transaction[]>([]);
-  const merchantLogos = useMerchantLogoMap(rows, SUPPORTS_GLASS);
-
-  useEffect(() => {
-    if (!visible) return;
+  const rows = useMemo(() => {
+    if (!visible) return [];
     const page = transactionsRepo.listPage({
       ...listScope,
       sort: sortBy,
       limit: DETAIL_TX_LIMIT,
     });
-    setRows(page.rows);
+    return page.rows;
   }, [transactionsRepo, listScope, sortBy, visible, repoVersion]);
+  const merchantLogos = useMerchantLogoMap(rows, SUPPORTS_GLASS);
 
   const grouped = useMemo(() => {
     const g: Record<string, Transaction[]> = {};
@@ -544,27 +558,22 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
   const sortIdx = SORT_OPTIONS.findIndex(o => o.id === sortBy);
 
   return (
-    <Animated.View
-      pointerEvents={visible ? 'auto' : 'none'}
-      style={[
-        StyleSheet.absoluteFill,
-        { zIndex: 80, opacity: anim, transform: [{ translateX }] },
-      ]}
-    >
-      <View style={styles.root}>
-        <ImageBackground
-          source={wallpaper.source}
-          resizeMode="cover"
+    <View style={[styles.root, { backgroundColor: 'transparent' }]}>
+      <ImageBackground
+        source={wallpaper.source}
+        defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+        fadeDuration={0}
+        resizeMode="cover"
+        style={StyleSheet.absoluteFill}
+      >
+        <LinearGradient
+          pointerEvents="none"
+          colors={scrim}
+          locations={[0, 0.28, 0.6, 1]}
           style={StyleSheet.absoluteFill}
-        >
-          <LinearGradient
-            pointerEvents="none"
-            colors={scrim}
-            locations={[0, 0.28, 0.6, 1]}
-            style={StyleSheet.absoluteFill}
-          />
+        />
 
-          {/* ─── Header ───────────────────────────────────────────── */}
+        {/* ─── Header ───────────────────────────────────────────── */}
           <View
             style={[
               styles.headerWrap,
@@ -621,7 +630,6 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
                 theme={theme}
                 merchantLogos={merchantLogos}
                 currencyCode={currencyCode}
-                onOpenTx={onOpenTx}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -680,8 +688,8 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
                         height={CHART_H}
                         selectedIdx={scrubIdx}
                         partialIdx={trendPartialIdx}
-                        onScrub={setScrubIdx}
-                        onTap={(idx) => setScrubIdx(prev => prev === idx ? null : idx)}
+                        onScrub={handleChartScrub}
+                        onTap={handleChartTap}
                         barColor="rgba(147,197,253,0.68)"
                         selectedColor="rgba(147,197,253,1)"
                         labelColor={pW.textSec}
@@ -699,8 +707,8 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
                         strokeWidth={2.5}
                         verticalInset={DETAIL_CHART_INSET_Y}
                         selectedIdx={scrubIdx}
-                        onScrub={setScrubIdx}
-                        onTap={(idx) => setScrubIdx(prev => prev === idx ? null : idx)}
+                        onScrub={handleChartScrub}
+                        onTap={handleChartTap}
                       />
                     )}
                   </View>
@@ -745,13 +753,13 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
                     appearance={theme.dark ? 'dark' : 'light'}
                     backgroundColor={
                       theme.dark
-                        ? 'rgba(242,244,245,0.06)'
-                        : 'rgba(255,255,255,0.16)'
+                        ? 'rgba(3,5,8,0.48)'
+                        : 'rgba(255,255,255,0.58)'
                     }
                     fontStyle={{
                       color: theme.dark
-                        ? 'rgba(242,244,245,0.68)'
-                        : 'rgba(11,13,16,0.62)',
+                        ? 'rgba(242,244,245,0.76)'
+                        : 'rgba(11,13,16,0.72)',
                     }}
                     activeFontStyle={{
                       color: theme.accent.ink,
@@ -836,20 +844,32 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
               </View>
             }
             ListEmptyComponent={
-              <BlurView intensity={theme.dark ? 50 : 90} tint={cardTint} style={styles.dayCard}>
-                <View style={[styles.dayCardInner, { borderColor: cardBorder }]}>
-                  <View style={styles.emptyRow}>
-                    <Icon name="receipt" size={16} color={p.textTer} />
-                    <Text style={[TYPE.bodySm, { color: p.textTer }]}>
-                      {query
-                        ? 'No results'
-                        : isSavingsDetail
-                          ? 'No savings transfers'
-                          : 'No transactions'}
-                    </Text>
+              SUPPORTS_GLASS ? (
+                <NativeTransactionSummaryCapsule
+                  theme={theme}
+                  p={p}
+                  count={0}
+                  total={0}
+                  countSingular={emptyCountSingular}
+                  countPlural={emptyCountPlural}
+                  accessibilityLabel={`0 ${emptyCountPlural}, ${formatActiveCurrencyAmount(0, true)} total`}
+                />
+              ) : (
+                <BlurView intensity={theme.dark ? 50 : 90} tint={cardTint} style={styles.dayCard}>
+                  <View style={[styles.dayCardInner, { borderColor: cardBorder }]}>
+                    <View style={styles.emptyRow}>
+                      <Icon name="receipt" size={16} color={p.textTer} />
+                      <Text style={[TYPE.bodySm, { color: p.textTer }]}>
+                        {query
+                          ? 'No results'
+                          : isSavingsDetail
+                            ? 'No savings transfers'
+                            : 'No transactions'}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              </BlurView>
+                </BlurView>
+              )
             }
             ListFooterComponent={rows.length > 0 ? (
               <View style={styles.seeAllWrap}>
@@ -904,16 +924,15 @@ export function InsightDetailScreen({ theme, target, onOpenTx, onClose, onSeeAll
               </View>
             ) : null}
           />
-        </ImageBackground>
-      </View>
-    </Animated.View>
+      </ImageBackground>
+    </View>
   );
 }
 
 // ─── DetailDayGroup ───────────────────────────────────────────────────────────
 
 function DetailDayGroup({
-  day, txs, categories, cats, theme, merchantLogos, currencyCode, onOpenTx,
+  day, txs, categories, cats, theme, merchantLogos, currencyCode,
 }: {
   day: string;
   txs: Transaction[];
@@ -922,7 +941,6 @@ function DetailDayGroup({
   theme: Theme;
   merchantLogos: Map<string, MerchantLogo>;
   currencyCode: string;
-  onOpenTx?: (tx: Transaction) => void;
 }) {
   const p = makeP(theme.dark);
   const tint = theme.dark ? 'systemMaterialDark' : 'systemMaterialLight';
@@ -949,7 +967,6 @@ function DetailDayGroup({
         spendTotal={spendTotal}
         expenseCount={expenseCount}
         incomeColor={incomeColor}
-        onOpenTx={onOpenTx}
       />
     );
   }
@@ -969,13 +986,9 @@ function DetailDayGroup({
           const groupColor = categoryGroupColor(tx.cat, categories, theme.dark);
           const cat        = cats[tx.cat];
           const isIncome   = tx.type === 'income';
-          const open = () => onOpenTx?.(tx);
           return (
-            <Pressable
+            <View
               key={tx.id}
-              onPress={open}
-              disabled={!onOpenTx}
-              accessibilityRole={onOpenTx ? 'button' : undefined}
               accessibilityLabel={`${tx.merchant}, ${cat?.label ?? UNCATEGORIZED_LABEL}, ${isIncome ? '+' : '-'}${formatActiveCurrencyAmount(tx.amount, true)}`}
               style={[
                 styles.txRow,
@@ -1013,7 +1026,7 @@ function DetailDayGroup({
                 prefix={isIncome ? '+$' : '−$'}
                 color={isIncome ? incomeColor : p.text}
               />
-            </Pressable>
+            </View>
           );
         })}
       </View>
@@ -1033,7 +1046,6 @@ type NativeDetailTxItem = {
   logoBgColor?: string | null;
   recurring: boolean;
   accessibilityLabel: string;
-  onOpen: () => void;
 };
 
 function NativeDetailDayGroup({
@@ -1048,7 +1060,6 @@ function NativeDetailDayGroup({
   spendTotal,
   expenseCount,
   incomeColor,
-  onOpenTx,
 }: {
   label: string;
   txs: Transaction[];
@@ -1061,7 +1072,6 @@ function NativeDetailDayGroup({
   spendTotal: number;
   expenseCount: number;
   incomeColor: string;
-  onOpenTx?: (tx: Transaction) => void;
 }) {
   const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
   const summary =
@@ -1097,7 +1107,6 @@ function NativeDetailDayGroup({
       logoBgColor: logo?.bgColor,
       recurring: !!tx.recurring,
       accessibilityLabel: `${tx.merchant}, ${meta}, ${amountText}`,
-      onOpen: () => onOpenTx?.(tx),
     };
   });
 
@@ -1168,10 +1177,11 @@ function NativeDetailTxRow({
   last: boolean;
 }) {
   return (
-    <SwiftButton
-      onPress={item.onOpen}
+    <VStack
+      alignment="leading"
+      spacing={0}
       modifiers={[
-        buttonStyle('plain'),
+        frame({ maxWidth: 10000, alignment: 'leading' }),
         swiftAccessibilityLabel(item.accessibilityLabel),
       ]}
     >
@@ -1223,7 +1233,7 @@ function NativeDetailTxRow({
         </HStack>
         {!last ? <Rectangle modifiers={[frame({ height: 1, maxWidth: 10000 }), foregroundStyle(p.hairline)]} /> : null}
       </VStack>
-    </SwiftButton>
+    </VStack>
   );
 }
 

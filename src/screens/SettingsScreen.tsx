@@ -12,16 +12,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Button as SwiftButton,
   Form as SwiftForm,
+  HStack,
   Host,
+  Label,
   LabeledContent,
   Picker,
   Section as SwiftSection,
+  Spacer,
   Text as SwiftText,
   Toggle as SwiftToggle,
 } from '@expo/ui/swift-ui';
 import {
   background,
+  buttonStyle,
+  disabled,
   foregroundStyle,
+  frame,
   listStyle,
   pickerStyle,
   scrollContentBackground,
@@ -35,6 +41,8 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import { getNotificationPrefs, notificationSummary } from '../notifications/preferences';
 import { CURRENCY_OPTIONS } from '../currency';
 import { ScreenExitButton } from '../components/GlassButton';
+import { suppressNextAppLockPrompt } from '../components/AppLockGate';
+import type { CloudSyncUiState } from '../sync/cloudSyncStatus';
 import { TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 
@@ -48,6 +56,8 @@ interface Props {
   onOpenSharing: (intent?: 'overview' | 'members' | 'invite') => void;
   onICloudSyncChange: (enabled: boolean) => void;
   onResetSyncedSampleData?: () => void;
+  cloudSyncState: CloudSyncUiState;
+  onManualCloudRefresh: () => void;
   activeLedgerName?: string;
   memberCount: number;
 }
@@ -62,6 +72,8 @@ export function SettingsScreen({
   onOpenSharing,
   onICloudSyncChange,
   onResetSyncedSampleData,
+  cloudSyncState,
+  onManualCloudRefresh,
   activeLedgerName,
   memberCount,
 }: Props) {
@@ -84,6 +96,7 @@ export function SettingsScreen({
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
   const profileName = activeLedgerName ?? 'Shared ledger';
+  const [appLockUpdating, setAppLockUpdating] = React.useState(false);
 
   // Several rows below describe features whose native/backend half isn't built
   // yet (CloudKit sync, export, invites). They ship as real, persisted UI; this
@@ -102,11 +115,12 @@ export function SettingsScreen({
       setMetaFlag('appLock', false);
       return;
     }
+    if (appLockUpdating) return;
+    setAppLockUpdating(true);
     try {
-      const [hasHardware, enrolled, types] = await Promise.all([
+      const [hasHardware, enrolled] = await Promise.all([
         LocalAuthentication.hasHardwareAsync(),
         LocalAuthentication.isEnrolledAsync(),
-        LocalAuthentication.supportedAuthenticationTypesAsync(),
       ]);
       if (!hasHardware || !enrolled) {
         Alert.alert(
@@ -115,25 +129,27 @@ export function SettingsScreen({
         );
         return;
       }
-      if (!types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
-        Alert.alert(
-          'Face ID is unavailable',
-          'This device does not report Face ID as an available authentication method.',
-        );
-        return;
-      }
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Enable Face ID',
         cancelLabel: 'Cancel',
-        disableDeviceFallback: true,
-        fallbackLabel: '',
-        biometricsSecurityLevel: 'strong',
+        disableDeviceFallback: false,
+        fallbackLabel: 'Use Passcode',
       });
       if (result.success) {
+        suppressNextAppLockPrompt();
         setMetaFlag('appLock', true);
+        return;
       }
+      Alert.alert(
+        'Face ID was not enabled',
+        result.error === 'user_cancel'
+          ? 'Authentication was cancelled.'
+          : 'Face ID or passcode did not complete. Try again when you are ready.',
+      );
     } catch {
       Alert.alert('Face ID unavailable', 'The authentication prompt could not be opened.');
+    } finally {
+      setAppLockUpdating(false);
     }
   };
 
@@ -172,25 +188,32 @@ export function SettingsScreen({
                 tint(theme.accent.dot),
               ]}
             >
-              <SwiftSection>
-                <LabeledContent label="Appearance">
-                  <SwiftButton label={dark ? 'Dark' : 'Light'} onPress={onOpenAppearance} />
-                </LabeledContent>
-                <LabeledContent label="Notifications">
-                  <SwiftButton label={notificationSummary(notifications)} onPress={onOpenNotifications} />
-                </LabeledContent>
+              <SwiftSection title="General">
+                <SettingsActionRow
+                  label="Appearance"
+                  systemImage="paintpalette"
+                  value={dark ? 'Dark' : 'Light'}
+                  onPress={onOpenAppearance}
+                />
+                <SettingsActionRow
+                  label="Notifications"
+                  systemImage="bell.badge"
+                  value={notificationSummary(notifications)}
+                  onPress={onOpenNotifications}
+                />
               </SwiftSection>
 
-              <SwiftSection>
+              <SwiftSection title="Security">
                 <SwiftToggle
                   label="Require Face ID"
                   systemImage="faceid"
                   isOn={metaFlag('appLock')}
                   onIsOnChange={handleAppLockChange}
+                  modifiers={appLockUpdating ? [disabled(true)] : undefined}
                 />
               </SwiftSection>
 
-              <SwiftSection>
+              <SwiftSection title="Money">
                 <Picker
                   label="Currency"
                   systemImage="dollarsign.circle"
@@ -204,19 +227,59 @@ export function SettingsScreen({
                     </SwiftText>
                   ))}
                 </Picker>
-                <SwiftButton label="Monthly Income" systemImage="banknote" onPress={onOpenIncome} />
+                <SettingsActionRow label="Monthly Income" systemImage="banknote" onPress={onOpenIncome} />
               </SwiftSection>
 
-              <SwiftSection>
+              <SwiftSection
+                title="iCloud Sync"
+                footer={<SwiftText>Sync keeps this ledger updated across your devices. Sharing access is managed separately below.</SwiftText>}
+              >
                 <SwiftToggle
                   label="iCloud Sync"
                   systemImage="icloud"
                   isOn={metaFlag('icloudSync')}
                   onIsOnChange={onICloudSyncChange}
                 />
-                <SwiftButton label="Export Data" systemImage="square.and.arrow.up" onPress={() => comingSoon('Export data')} />
+                <LabeledContent label="Status">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: cloudSyncState.conflictedRecords > 0 ? 'primary' : 'secondary' })]}>
+                    {cloudSyncState.label}
+                  </SwiftText>
+                </LabeledContent>
+                <LabeledContent label="Last Update">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+                    {cloudSyncLastUpdateLabel(cloudSyncState)}
+                  </SwiftText>
+                </LabeledContent>
+                {cloudSyncState.pendingRecords > 0 && (
+                  <LabeledContent label="Pending">
+                    <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+                      {cloudSyncState.pendingRecords} change{cloudSyncState.pendingRecords === 1 ? '' : 's'}
+                    </SwiftText>
+                  </LabeledContent>
+                )}
+                {cloudSyncState.conflictedRecords > 0 && (
+                  <SettingsActionRow
+                    label={`Review ${cloudSyncState.conflictedRecords} change${cloudSyncState.conflictedRecords === 1 ? '' : 's'}`}
+                    systemImage="exclamationmark.icloud"
+                    onPress={() => onOpenSharing('overview')}
+                  />
+                )}
+                <SettingsActionRow label="Sync Now" systemImage="arrow.clockwise.icloud" onPress={onManualCloudRefresh} />
+              </SwiftSection>
+
+              <SwiftSection
+                title="Ledger & Sharing"
+                footer={<SwiftText>Manage who can access this ledger and how shared changes are handled.</SwiftText>}
+              >
+                <SettingsActionRow label="Shared Ledger" systemImage="folder" value={profileName} onPress={() => onOpenSharing('overview')} />
+                <SettingsActionRow label="Members" systemImage="person.2" value={String(memberCount)} onPress={() => onOpenSharing('members')} />
+                <SettingsActionRow label="Invite Someone" systemImage="person.badge.plus" onPress={() => onOpenSharing('invite')} />
+              </SwiftSection>
+
+              <SwiftSection title="Data">
+                <SettingsActionRow label="Export Data" systemImage="square.and.arrow.up" onPress={() => comingSoon('Export data')} />
                 {__DEV__ && onResetSyncedSampleData && (
-                  <SwiftButton
+                  <SettingsActionRow
                     label="Reset Synced Sample Data"
                     systemImage="arrow.counterclockwise.icloud"
                     role="destructive"
@@ -225,20 +288,10 @@ export function SettingsScreen({
                 )}
               </SwiftSection>
 
-              <SwiftSection>
-                <LabeledContent label="Shared Ledger">
-                  <SwiftButton label={profileName} onPress={() => onOpenSharing('overview')} />
-                </LabeledContent>
-                <LabeledContent label="Members">
-                  <SwiftButton label={String(memberCount)} onPress={() => onOpenSharing('members')} />
-                </LabeledContent>
-                <SwiftButton label="Invite Someone" systemImage="person.badge.plus" onPress={() => onOpenSharing('invite')} />
-              </SwiftSection>
-
-              <SwiftSection>
-                <SwiftButton label="Help & Support" systemImage="questionmark.circle" onPress={() => comingSoon('Help & support')} />
-                <SwiftButton label="Privacy Policy" systemImage="hand.raised" onPress={() => comingSoon('Privacy policy')} />
-                <SwiftButton label="Terms of Service" systemImage="doc.text" onPress={() => comingSoon('Terms of service')} />
+              <SwiftSection title="Support">
+                <SettingsActionRow label="Help & Support" systemImage="questionmark.circle" onPress={() => comingSoon('Help & support')} />
+                <SettingsActionRow label="Privacy Policy" systemImage="hand.raised" onPress={() => comingSoon('Privacy policy')} />
+                <SettingsActionRow label="Terms of Service" systemImage="doc.text" onPress={() => comingSoon('Terms of service')} />
                 <LabeledContent label="Version">
                   <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
                     {version}
@@ -247,7 +300,7 @@ export function SettingsScreen({
               </SwiftSection>
 
               <SwiftSection>
-                <SwiftButton
+                <SettingsActionRow
                   label="Sign Out"
                   systemImage="rectangle.portrait.and.arrow.right"
                   role="destructive"
@@ -260,6 +313,49 @@ export function SettingsScreen({
       </View>
     </Animated.View>
   );
+}
+
+function SettingsActionRow({
+  label,
+  value,
+  systemImage,
+  role,
+  onPress,
+}: {
+  label: string;
+  value?: string;
+  systemImage?: React.ComponentProps<typeof SwiftButton>['systemImage'];
+  role?: React.ComponentProps<typeof SwiftButton>['role'];
+  onPress: () => void;
+}) {
+  return (
+    <SwiftButton
+      role={role}
+      onPress={onPress}
+      modifiers={[buttonStyle('automatic')]}
+    >
+      <HStack spacing={10} alignment="center" modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
+        {systemImage ? (
+          <Label title={label} systemImage={systemImage} />
+        ) : (
+          <SwiftText>{label}</SwiftText>
+        )}
+        <Spacer minLength={12} />
+        {value ? (
+          <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+            {value}
+          </SwiftText>
+        ) : null}
+      </HStack>
+    </SwiftButton>
+  );
+}
+
+function cloudSyncLastUpdateLabel(state: CloudSyncUiState) {
+  if (state.lastSyncedAt) {
+    return new Date(state.lastSyncedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  }
+  return state.detail;
 }
 
 const styles = StyleSheet.create({

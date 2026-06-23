@@ -1,31 +1,50 @@
 import React from 'react';
-import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, View } from 'react-native';
+import { BlurView } from 'expo-blur';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { Host, Image } from '@expo/ui/swift-ui';
 
 import { useTheme } from '../ThemeProvider';
-import { TYPE } from '../typography';
-import { RADIUS } from '../radius';
-import { SPACE, LAYOUT } from '../spacing';
+
+let suppressAutoPromptUntil = 0;
+
+export function suppressNextAppLockPrompt(durationMs = 1800) {
+  suppressAutoPromptUntil = Date.now() + durationMs;
+}
 
 export function AppLockGate() {
   const { theme, metaFlag, setMetaFlag } = useTheme();
   const appLockEnabled = metaFlag('appLock');
   const [locked, setLocked] = React.useState(appLockEnabled);
   const [authenticating, setAuthenticating] = React.useState(false);
-  const [message, setMessage] = React.useState('Authenticate to unlock your finance app.');
+  const [appIsActive, setAppIsActive] = React.useState(AppState.currentState === 'active');
+  const [promptTick, setPromptTick] = React.useState(0);
   const appState = React.useRef(AppState.currentState);
   const authRequestId = React.useRef(0);
   const authenticatingRef = React.useRef(false);
+  const didMountRef = React.useRef(false);
+  const ignoreAppStateUntilRef = React.useRef(0);
+  const lockCycleRef = React.useRef(0);
+  const promptedLockCycleRef = React.useRef(-1);
+
+  const lockForPrivacy = React.useCallback(() => {
+    lockCycleRef.current += 1;
+    setLocked(true);
+  }, []);
 
   const authenticate = React.useCallback(async () => {
     if (!appLockEnabled || authenticatingRef.current) return;
     const requestId = authRequestId.current + 1;
     authRequestId.current = requestId;
     authenticatingRef.current = true;
+    ignoreAppStateUntilRef.current = Date.now() + 4000;
     setLocked(true);
     setAuthenticating(true);
-    setMessage('Authenticate to unlock your finance app.');
+    const watchdog = setTimeout(() => {
+      if (authRequestId.current !== requestId || !authenticatingRef.current) return;
+      authenticatingRef.current = false;
+      setAuthenticating(false);
+      ignoreAppStateUntilRef.current = Date.now() + 400;
+    }, 8000);
 
     try {
       const [hasHardware, enrolled] = await Promise.all([
@@ -41,29 +60,30 @@ export function AppLockGate() {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Unlock finance-app',
         cancelLabel: 'Cancel',
-        disableDeviceFallback: true,
-        fallbackLabel: '',
-        biometricsSecurityLevel: 'strong',
+        disableDeviceFallback: false,
+        fallbackLabel: 'Use Passcode',
       });
       if (authRequestId.current !== requestId) return;
       if (result.success) {
         setLocked(false);
         return;
       }
-      setMessage(result.error === 'user_cancel'
-        ? 'Face ID was cancelled. Try again when you are ready.'
-        : 'Face ID did not unlock the app. Try again.');
     } catch {
-      setMessage('Face ID is unavailable right now. Try again.');
+      // Keep the blur cover up. The user can tap the cover to retry the native
+      // Face ID prompt without exposing app content.
     } finally {
+      clearTimeout(watchdog);
       if (authRequestId.current === requestId) {
         authenticatingRef.current = false;
         setAuthenticating(false);
+        ignoreAppStateUntilRef.current = Date.now() + 1200;
       }
     }
   }, [appLockEnabled, setMetaFlag]);
 
   React.useEffect(() => {
+    const isInitialCheck = !didMountRef.current;
+    didMountRef.current = true;
     if (!appLockEnabled) {
       authRequestId.current += 1;
       authenticatingRef.current = false;
@@ -71,56 +91,67 @@ export function AppLockGate() {
       setAuthenticating(false);
       return;
     }
-    setLocked(true);
-    const timer = setTimeout(() => { authenticate(); }, 250);
+    if (!isInitialCheck) {
+      // Enabling Face ID already requires authentication in Settings. Do not
+      // immediately ask for a second unlock while the app is still foregrounded.
+      suppressNextAppLockPrompt();
+      setLocked(false);
+      return;
+    }
+    lockForPrivacy();
+  }, [appLockEnabled, lockForPrivacy]);
+
+  React.useEffect(() => {
+    if (!appLockEnabled || !locked || authenticating) return undefined;
+    if (!appIsActive) return undefined;
+    const suppressWaitMs = suppressAutoPromptUntil - Date.now();
+    if (suppressWaitMs > 0) {
+      const timer = setTimeout(() => {
+        setPromptTick(tick => tick + 1);
+      }, suppressWaitMs + 50);
+      return () => clearTimeout(timer);
+    }
+
+    const lockCycle = lockCycleRef.current;
+    if (promptedLockCycleRef.current === lockCycle) return undefined;
+    promptedLockCycleRef.current = lockCycle;
+
+    const timer = setTimeout(() => {
+      authenticate();
+    }, 250);
     return () => clearTimeout(timer);
-  }, [appLockEnabled, authenticate]);
+  }, [appIsActive, appLockEnabled, authenticate, authenticating, locked, promptTick]);
 
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
-      const previous = appState.current;
       appState.current = nextState;
+      setAppIsActive(nextState === 'active');
       if (!appLockEnabled) return;
+      if (Date.now() < suppressAutoPromptUntil) return;
+      if (Date.now() < ignoreAppStateUntilRef.current) return;
       if (nextState === 'background' || nextState === 'inactive') {
-        setLocked(true);
-      }
-      if (previous.match(/inactive|background/) && nextState === 'active') {
-        authenticate();
+        lockForPrivacy();
       }
     });
     return () => sub.remove();
-  }, [appLockEnabled, authenticate]);
+  }, [appLockEnabled, lockForPrivacy]);
 
   if (!appLockEnabled || !locked) return null;
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.bg }]}>
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
-        <View style={[styles.iconDisc, { backgroundColor: theme.chipBg }]}>
-          <Host style={styles.iconHost} ignoreSafeArea="all">
-            <Image systemName="faceid" size={34} color={theme.text} />
-          </Host>
-        </View>
-        <Text style={[TYPE.sectionTitle, styles.title, { color: theme.text }]}>Face ID required</Text>
-        <Text style={[TYPE.bodySm, styles.copy, { color: theme.textSec }]}>{message}</Text>
-        <Pressable
-          onPress={authenticate}
-          disabled={authenticating}
-          accessibilityRole="button"
-          accessibilityLabel="Unlock with Face ID"
-          style={({ pressed }) => [
-            styles.button,
-            {
-              backgroundColor: theme.accent.fill,
-              opacity: authenticating ? 0.7 : pressed ? 0.88 : 1,
-            },
-          ]}
-        >
-          <Text style={[TYPE.body, styles.buttonText, { color: theme.accent.ink }]}>
-            {authenticating ? 'Checking...' : 'Unlock'}
-          </Text>
-        </Pressable>
-      </View>
+    <View style={styles.root}>
+      <BlurView
+        intensity={82}
+        tint={theme.dark ? 'dark' : 'light'}
+        style={StyleSheet.absoluteFill}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Unlock with Face ID"
+        disabled={authenticating}
+        onPress={authenticate}
+        style={StyleSheet.absoluteFill}
+      />
     </View>
   );
 }
@@ -133,48 +164,5 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     zIndex: 140,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: LAYOUT.screenGutter,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 360,
-    borderRadius: RADIUS.card,
-    borderWidth: 1,
-    padding: SPACE.xxl,
-    alignItems: 'center',
-  },
-  iconDisc: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACE.lg,
-  },
-  iconHost: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    textAlign: 'center',
-  },
-  copy: {
-    textAlign: 'center',
-    marginTop: SPACE.sm,
-    marginBottom: SPACE.xl,
-  },
-  button: {
-    minHeight: 48,
-    borderRadius: RADIUS.button,
-    paddingHorizontal: SPACE.xxl,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonText: {
-    fontWeight: '700',
   },
 });

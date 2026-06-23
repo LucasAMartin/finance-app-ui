@@ -799,7 +799,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: floorColor }}>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
           below the screen so the upward shift never reveals a gap. */}
       <Animated.View
@@ -809,7 +809,13 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           { bottom: -BG_PARALLAX_MAX, transform: [{ translateY: bgTranslateY }] },
         ]}
       >
-        <ImageBackground source={wallpaper.source} resizeMode="cover" style={{ flex: 1 }} />
+        <ImageBackground
+          source={wallpaper.source}
+          defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+          fadeDuration={0}
+          resizeMode="cover"
+          style={{ flex: 1 }}
+        />
       </Animated.View>
 
       {/* Scrim — fixed to the screen so its gradient stays tuned to screen height

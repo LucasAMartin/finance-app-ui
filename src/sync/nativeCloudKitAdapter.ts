@@ -73,7 +73,19 @@ export interface NativeCloudKitModule {
   ): Promise<NativeCloudKitPushPayload>;
   resetZone?(zoneName: string): Promise<{ zoneName: string; reset: boolean }>;
   presentLedgerShare?(ledgerId: string, title?: string): Promise<{ ledgerId: string; shareUrl?: string }>;
+  stopSharingLedger?(ledgerId: string): Promise<{ ledgerId: string; stopped: boolean }>;
   consumeAcceptedShares?(): Promise<NativeCloudKitAcceptedShare[]>;
+  ensureSubscriptions?(
+    zoneName: string,
+    databaseScope: NativeCloudKitDatabaseScope,
+    ownerName?: string,
+  ): Promise<{ zoneName: string; databaseScope: NativeCloudKitDatabaseScope; subscribed: boolean }>;
+  consumeRemoteNotifications?(): Promise<Array<{
+    zoneName?: string;
+    databaseScope?: NativeCloudKitDatabaseScope;
+    reason?: string;
+    receivedAt?: string;
+  }>>;
 }
 
 function isSyncStatus(value: unknown): value is SyncRecord['syncStatus'] {

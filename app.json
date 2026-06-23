@@ -76,7 +76,12 @@
       ],
       "expo-router",
       "expo-image",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
       [
         "expo-build-properties",
         {

@@ -21,6 +21,14 @@ export interface SQLiteSyncTableAdapter {
 
 type SyncRow = Record<string, unknown>;
 
+export type SyncConflictResolution = 'local' | 'remote' | 'discardLocal';
+
+export interface StoredSyncConflict {
+  local: SyncRecord;
+  remote?: SyncRecord;
+  reason: SyncConflict['reason'];
+}
+
 const localLedgerMetaKeys = new Set([
   'cloudDatabaseScope',
   'cloudOwnerName',
@@ -314,6 +322,26 @@ export class SQLiteSyncStore implements SyncRecordStore {
     });
   }
 
+  listConflictedRecords(ledgerId: string): SyncRecord[] {
+    return this.registry.flatMap(adapter => {
+      const ledgerSql = adapter.ledgerColumn === null
+        ? 'id = ?'
+        : `${adapter.ledgerColumn ?? 'ledger_id'} = ?`;
+      return this.database
+        .getAllSync<SyncRow>(
+          `SELECT * FROM ${adapter.tableName} WHERE ${ledgerSql} AND sync_status = 'conflicted'`,
+          ledgerId,
+        )
+        .map(row => rowToRecord(adapter, row));
+    });
+  }
+
+  listConflicts(ledgerId: string): StoredSyncConflict[] {
+    return this.listConflictedRecords(ledgerId)
+      .map(record => conflictFromRecord(record))
+      .filter((conflict): conflict is StoredSyncConflict => Boolean(conflict));
+  }
+
   applyRemoteRecord(record: SyncRecord): void {
     const adapter = adapterFor(record.recordType);
     const current = this.findRow(adapter, record.recordName);
@@ -359,6 +387,8 @@ export class SQLiteSyncStore implements SyncRecordStore {
       ...(parseJson(typeof current?.meta === 'string' ? current.meta : null) ?? {}),
       syncConflictReason: conflict.reason,
       remoteRecordChangeTag: conflict.remote?.recordChangeTag,
+      remoteSyncRecord: conflict.remote,
+      syncConflictAt: new Date().toISOString(),
     };
     this.database.runSync(
       `UPDATE ${adapter.tableName}
@@ -368,6 +398,56 @@ export class SQLiteSyncStore implements SyncRecordStore {
       conflict.local.recordName,
       conflict.local.recordName,
     );
+  }
+
+  resolveConflict(recordName: string, resolution: SyncConflictResolution): boolean {
+    const match = this.findAdapterAndRow(recordName);
+    if (!match) return false;
+    const { adapter, row } = match;
+    const local = rowToRecord(adapter, row);
+    const conflict = conflictFromRecord(local);
+    if (!conflict) return false;
+
+    if (resolution === 'remote') {
+      if (!conflict.remote) return false;
+      this.applyRemoteRecord(conflict.remote);
+      return true;
+    }
+    if (resolution === 'discardLocal') {
+      if (conflict.reason !== 'permission-denied') return false;
+      const meta = parseJson(typeof row.meta === 'string' ? row.meta : null) ?? {};
+      delete meta.syncConflictReason;
+      delete meta.remoteRecordChangeTag;
+      delete meta.remoteSyncRecord;
+      delete meta.syncConflictAt;
+      this.database.runSync(
+        `UPDATE ${adapter.tableName}
+         SET sync_status = 'synced', updated_at = ?, deleted_at = NULL, meta = ?
+         WHERE cloud_record_name = ? OR id = ?`,
+        '1970-01-01T00:00:00.000Z',
+        json(Object.keys(meta).length > 0 ? meta : undefined),
+        recordName,
+        recordName,
+      );
+      return true;
+    }
+    if (conflict.reason === 'permission-denied') return false;
+
+    const meta = parseJson(typeof row.meta === 'string' ? row.meta : null) ?? {};
+    delete meta.syncConflictReason;
+    delete meta.remoteRecordChangeTag;
+    delete meta.remoteSyncRecord;
+    delete meta.syncConflictAt;
+    this.database.runSync(
+      `UPDATE ${adapter.tableName}
+       SET sync_status = 'pending', record_change_tag = COALESCE(?, record_change_tag), meta = ?
+      WHERE cloud_record_name = ? OR id = ?`,
+      conflict.remote?.recordChangeTag ?? null,
+      json(Object.keys(meta).length > 0 ? meta : undefined),
+      recordName,
+      recordName,
+    );
+    return true;
   }
 
   canPushRecord(record: SyncRecord): boolean {
@@ -380,6 +460,14 @@ export class SQLiteSyncStore implements SyncRecordStore {
       recordName,
       recordName,
     );
+  }
+
+  private findAdapterAndRow(recordName: string): { adapter: SQLiteSyncTableAdapter; row: SyncRow } | null {
+    for (const adapter of this.registry) {
+      const row = this.findRow(adapter, recordName);
+      if (row) return { adapter, row };
+    }
+    return null;
   }
 
   private valueForColumn(
@@ -413,6 +501,55 @@ export class SQLiteSyncStore implements SyncRecordStore {
     }
     return encodeField(nextValue, field.kind);
   }
+}
+
+function conflictFromRecord(record: SyncRecord): StoredSyncConflict | undefined {
+  const meta = objectRecord(record.fields.meta);
+  if (!meta) return undefined;
+  const reason = meta?.syncConflictReason;
+  if (reason !== 'remote-newer' && reason !== 'deleted-remotely' && reason !== 'permission-denied') {
+    return undefined;
+  }
+  const remote = syncRecordFromMeta(meta.remoteSyncRecord);
+  return { local: record, remote, reason };
+}
+
+function syncRecordFromMeta(value: unknown): SyncRecord | undefined {
+  const source = objectRecord(value);
+  if (!source) return undefined;
+  const recordType = source.recordType;
+  if (
+    recordType !== 'ledger' &&
+    recordType !== 'ledgerMember' &&
+    recordType !== 'transaction' &&
+    recordType !== 'income' &&
+    recordType !== 'category' &&
+    recordType !== 'budget' &&
+    recordType !== 'recurringRule' &&
+    recordType !== 'bill' &&
+    recordType !== 'attachment'
+  ) {
+    return undefined;
+  }
+  const recordName = typeof source.recordName === 'string' ? source.recordName : undefined;
+  const zoneName = typeof source.zoneName === 'string' ? source.zoneName : undefined;
+  const ledgerId = typeof source.ledgerId === 'string' ? source.ledgerId : undefined;
+  const updatedAt = typeof source.updatedAt === 'string' ? source.updatedAt : undefined;
+  if (!recordName || !zoneName || !ledgerId || !updatedAt) return undefined;
+  return {
+    recordName,
+    recordType,
+    zoneName,
+    ledgerId,
+    fields: objectRecord(source.fields) ?? {},
+    createdByUserId: typeof source.createdByUserId === 'string' ? source.createdByUserId : undefined,
+    updatedByUserId: typeof source.updatedByUserId === 'string' ? source.updatedByUserId : undefined,
+    createdAt: typeof source.createdAt === 'string' ? source.createdAt : undefined,
+    updatedAt,
+    deletedAt: typeof source.deletedAt === 'string' ? source.deletedAt : undefined,
+    recordChangeTag: typeof source.recordChangeTag === 'string' ? source.recordChangeTag : undefined,
+    syncStatus: 'synced',
+  };
 }
 
 function shouldApplyLedgerReset(record: SyncRecord, current: SyncRow | null): boolean {
