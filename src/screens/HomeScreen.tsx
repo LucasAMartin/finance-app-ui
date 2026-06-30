@@ -73,7 +73,7 @@ import { GlassCircleButton, GlassCircleIcon, SUPPORTS_GLASS } from '../component
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { MerchantMark } from '../components/MerchantMark';
-import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
+import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap, useMerchantLogoMapForMerchants } from '../merchantLogos';
 import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
@@ -112,6 +112,11 @@ const CATEGORY_SF_SYMBOL: Record<string, SFSymbol> = {
   bell: 'bell',
 };
 const UPCOMING_FALLBACK_SYMBOL: SFSymbol = 'calendar';
+const GOAL_CONTRIBUTION_SYMBOL: SFSymbol = 'target';
+
+function isGoalContributionTx(tx: Transaction): boolean {
+  return tx.meta?.kind === 'goal-contribution';
+}
 
 function quickActionColors(theme: Theme, p: P) {
   const labelFg = p.text;
@@ -364,12 +369,15 @@ const fmtAmount = (n: number) =>
 interface NativeUpcomingBillItem {
   id: string;
   name: string;
+  merchant: string;
   dueDate: string;
   daysText: string;
   daysColor: string;
   amountText: string;
   symbol: SFSymbol;
   iconColor: string;
+  logoUrl?: string;
+  logoBgColor?: string | null;
   accessibilityLabel: string;
   accessibilityHint?: string;
   onOpen: () => void;
@@ -386,6 +394,7 @@ interface NativeHomeActivityItem {
   iconColor: string;
   logoUrl?: string;
   logoBgColor?: string | null;
+  goalContribution: boolean;
   accessibilityLabel: string;
   accessibilityHint?: string;
   onOpen: () => void;
@@ -525,7 +534,15 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
 
   const visibleSpendGroups = useMemo(() => spendGroups(transactions, budgets, categories, selectedMonthKey), [transactions, budgets, categories, selectedMonthKey]);
   const income = useMemo(() => monthlyIncome(incomes, selectedMonthKey), [incomes, selectedMonthKey]);
-  const visibleUpcomingBills = selectedIsCurrentMonth ? upcomingBills : [];
+  const visibleUpcomingBills = useMemo(
+    () => (selectedIsCurrentMonth ? upcomingBills : []),
+    [selectedIsCurrentMonth, upcomingBills],
+  );
+  const upcomingLogoMerchants = useMemo(
+    () => visibleUpcomingBills.map(bill => bill.merchant),
+    [visibleUpcomingBills],
+  );
+  const upcomingMerchantLogos = useMerchantLogoMapForMerchants(upcomingLogoMerchants, SUPPORTS_GLASS && !loading);
   const mb = visibleMonthBudgets[monthIdx] ?? visibleMonthBudgets[0];
 
   const openSwipeRef = useRef<Swipeable | null>(null);
@@ -583,6 +600,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
       const ruleId = bill.id.startsWith('bill-') ? bill.id.slice(5) : bill.id;
       const rule = recurringRules.find(item => item.id === ruleId);
       const canMarkPaid = !rule || sessionRepo.canEdit(rule.createdByUserId, rule.ledgerId);
+      const logo = upcomingMerchantLogos.get(merchantLogoKey(bill.merchant));
       const daysColor = bill.daysUntil <= 7
         ? OVER_DOT
         : bill.daysUntil <= 14
@@ -592,19 +610,22 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
       return {
         id: bill.id,
         name: bill.name,
+        merchant: bill.merchant,
         dueDate: bill.dueDate,
         daysText: `in ${bill.daysUntil} days`,
         daysColor,
         amountText,
         symbol: CATEGORY_SF_SYMBOL[bill.icon] ?? UPCOMING_FALLBACK_SYMBOL,
         iconColor: categoryGroupColor(bill.cat, categories, theme.dark),
+        logoUrl: logo?.logoUrl,
+        logoBgColor: logo?.bgColor,
         accessibilityLabel: `${bill.name}, due ${bill.dueDate}, in ${bill.daysUntil} days, ${amountText}`,
         accessibilityHint: canMarkPaid ? 'Swipe left to mark paid' : undefined,
         onOpen: () => onOpenBill(bill),
         onPaid: canMarkPaid ? () => markBillPaid(bill) : undefined,
       };
     })
-  ), [categories, currencyCode, markBillPaid, onOpenBill, p.textSec, recurringRules, sessionRepo, theme.dark, visibleUpcomingBills]);
+  ), [categories, currencyCode, markBillPaid, onOpenBill, p.textSec, recurringRules, sessionRepo, theme.dark, upcomingMerchantLogos, visibleUpcomingBills]);
 
   const nativeHomeActivityGroups = useMemo<NativeHomeActivityGroup[]>(() => (
     homeActivityGroups.map(group => ({
@@ -612,6 +633,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
       label: group.label,
       items: group.txs.map(tx => {
         const cat = cats[tx.cat];
+        const isGoalContribution = isGoalContributionTx(tx);
         const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, ledgerMembers, tx.createdByUserId);
         const canDelete = transactionsRepo.canEdit(tx);
         const logo = transactionUsesMerchantLogo(tx) ? merchantLogos.get(merchantLogoKey(tx.merchant)) : undefined;
@@ -621,10 +643,12 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           meta,
           time: tx.time,
           amountText: formatActiveCurrencyAmount(tx.amount, true),
-          symbol: CATEGORY_SF_SYMBOL[cat?.icon ?? ''] ?? UPCOMING_FALLBACK_SYMBOL,
+          symbol: CATEGORY_SF_SYMBOL[cat?.icon ?? '']
+            ?? (isGoalContribution ? GOAL_CONTRIBUTION_SYMBOL : UPCOMING_FALLBACK_SYMBOL),
           iconColor: categoryGroupColor(tx.cat, categories, theme.dark),
           logoUrl: logo?.logoUrl,
           logoBgColor: logo?.bgColor,
+          goalContribution: isGoalContribution,
           accessibilityLabel: `${tx.merchant}, ${meta}, ${tx.time}, ${formatActiveCurrencyAmount(tx.amount, true)}`,
           accessibilityHint: canDelete ? 'Swipe left to delete' : undefined,
           onOpen: () => {
@@ -1695,14 +1719,14 @@ function NativeUpcomingRow({
             frame({ maxWidth: 10000, alignment: 'leading' }),
           ]}
         >
-          <SwiftImage
-            systemName={bill.symbol}
-            size={16}
-            color={bill.iconColor}
-            modifiers={[
-              frame({ width: 36, height: 36 }),
-              background(`${bill.iconColor}24`, shapes.circle()),
-            ]}
+          <NativeMerchantMark
+            logoUrl={bill.logoUrl}
+            logoBgColor={bill.logoBgColor}
+            fallbackSystemName={bill.symbol}
+            fallbackColor={bill.iconColor}
+            fallbackBackgroundColor={`${bill.iconColor}24`}
+            size={36}
+            glyphSize={16}
           />
           <VStack
             alignment="leading"
@@ -1982,16 +2006,21 @@ function NativeHomeActivityRow({
             size={32}
           />
           <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
-            <SwiftText
-              modifiers={[
-                font({ size: 15, weight: 'semibold' }),
-                foregroundStyle(p.text),
-                lineLimit(1),
-                truncationMode('tail'),
-              ]}
-            >
-              {item.merchant}
-            </SwiftText>
+            <HStack alignment="center" spacing={SPACE.xs}>
+              <SwiftText
+                modifiers={[
+                  font({ size: 15, weight: 'semibold' }),
+                  foregroundStyle(p.text),
+                  lineLimit(1),
+                  truncationMode('tail'),
+                ]}
+              >
+                {item.merchant}
+              </SwiftText>
+              {item.goalContribution ? (
+                <SwiftImage systemName="target" size={11} color={item.iconColor} />
+              ) : null}
+            </HStack>
             <SwiftText
               modifiers={[
                 font({ size: 12 }),
@@ -2288,6 +2317,8 @@ const TxRow = React.memo(function TxRow({
   members: LedgerMember[];
 }) {
   const cat = cats[tx.cat];
+  const isGoalContribution = isGoalContributionTx(tx);
+  const groupColor = categoryGroupColor(tx.cat, categories, dark);
   const meta = appendMemberLabel(cat?.label ?? UNCATEGORIZED_LABEL, members, tx.createdByUserId);
   const a11yLabel = `${tx.merchant}, ${meta}, ${tx.time}, ${formatActiveCurrencyAmount(tx.amount, true)}`;
   return (
@@ -2306,13 +2337,16 @@ const TxRow = React.memo(function TxRow({
     >
       <MerchantMark
         merchant={tx.merchant}
-        catIcon={cat?.icon}
-        color={categoryGroupColor(tx.cat, categories, dark)}
+        catIcon={cat?.icon ?? (isGoalContribution ? 'target' : undefined)}
+        color={groupColor}
         logoEnabled={transactionUsesMerchantLogo(tx)}
         size={32}
       />
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[styles.rowTitle, { color: p.text }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
+        <View style={styles.txTitleRow}>
+          <Text style={[styles.rowTitle, { color: p.text, flexShrink: 1 }]} numberOfLines={1} ellipsizeMode="tail">{tx.merchant}</Text>
+          {isGoalContribution && <Icon name="target" size={11} color={groupColor} stroke={1.7} />}
+        </View>
         <Text style={[styles.rowSub, { color: p.textSec }]}>{meta} · {tx.time}</Text>
       </View>
       <Money value={tx.amount} theme={{ text: p.text } as Theme} color={p.text} prefix="$" />
@@ -2506,6 +2540,11 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     ...TYPE.body,
+  },
+  txTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.xs,
   },
   rowSub: {
     ...TYPE.caption,

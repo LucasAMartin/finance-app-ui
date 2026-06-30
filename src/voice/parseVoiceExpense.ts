@@ -25,12 +25,14 @@ const CAT_KEYWORDS: Record<string, string> = {
   dining: 'dining', dinner: 'dining', lunch: 'dining', breakfast: 'dining',
   brunch: 'dining', restaurant: 'dining', takeout: 'dining', food: 'dining',
   cafe: 'dining', latte: 'dining', espresso: 'dining', cappuccino: 'dining',
-  cortado: 'dining', tea: 'dining', starbucks: 'dining',
+  cortado: 'dining', tea: 'dining', starbucks: 'dining', chipotle: 'dining',
+  pinoy: 'dining',
   transport: 'transport', transit: 'transport', uber: 'transport',
   lyft: 'transport', taxi: 'transport', cab: 'transport', gas: 'transport',
-  fuel: 'transport', train: 'transport', bus: 'transport', parking: 'transport',
+  fuel: 'transport', shell: 'transport', chevron: 'transport',
+  train: 'transport', bus: 'transport', parking: 'transport',
   shopping: 'shopping', shop: 'shopping', clothes: 'shopping',
-  clothing: 'shopping', amazon: 'shopping', store: 'shopping',
+  clothing: 'shopping', amazon: 'shopping', store: 'shopping', target: 'shopping',
   bill: 'bills', bills: 'bills', utility: 'bills', utilities: 'bills',
   rent: 'bills', electric: 'bills', electricity: 'bills', internet: 'bills',
   entertainment: 'entertainment', movie: 'entertainment',
@@ -130,6 +132,10 @@ function parseCategory(lower: string): string {
   return DEFAULT_CAT;
 }
 
+export function inferExpenseCategory(text: string): string {
+  return parseCategory(text.toLowerCase());
+}
+
 function parseMerchant(text: string): string {
   // Merchant follows "at" or "from"; stop once we reach the spoken amount.
   const match = text.match(/\b(?:at|from)\s+(.+)/i);
@@ -156,7 +162,7 @@ export function parseVoiceExpense(transcript: string): ParsedExpense {
   const lower = text.toLowerCase();
   return {
     amount: parseAmount(lower),
-    cat: parseCategory(lower),
+    cat: inferExpenseCategory(lower),
     merchant: parseMerchant(text),
   };
 }

@@ -163,6 +163,7 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
   const { wallpaper, wallpaperFloorBase } = useTheme();
   const { categoriesRepo, transactionsRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
+  const transactions = useRepositoryList(transactionsRepo);
   const [formGoalOpen, setFormGoalOpen] = useState(false);
   const [detailGoalId, setDetailGoalId] = useState<string | null>(null);
   const [contributionTarget, setContributionTarget] = useState<ContributionTarget | null>(null);
@@ -170,8 +171,14 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
   const lastContributeRequestRef = useRef(contributeRequestToken);
   const returningToDetailRef = useRef<string | null>(null);
 
-  const goals = useMemo<Goal[]>(() => goalsFromCategories(categories), [categories]);
-  const archivedGoals = useMemo<Goal[]>(() => archivedGoalsFromCategories(categories), [categories]);
+  const goals = useMemo<Goal[]>(
+    () => goalsFromCategories(categories, { transactions }),
+    [categories, transactions],
+  );
+  const archivedGoals = useMemo<Goal[]>(
+    () => archivedGoalsFromCategories(categories, { transactions }),
+    [categories, transactions],
+  );
 
   const allGoals = useMemo(() => [...goals, ...archivedGoals], [goals, archivedGoals]);
   const detailGoal = allGoals.find(goal => goal.id === detailGoalId) ?? null;
@@ -350,14 +357,11 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
     });
   };
 
-  const archiveGoal = (goal: Goal) => {
-    categoriesRepo.update(goal.id, {
-      meta: goalMeta(goal, {
-        goalStatus: 'archived',
-        goalArchivedAt: todayKey(),
-      }),
-      updatedByUserId: 'local',
+  const deleteGoal = (goal: Goal) => {
+    goal.contributions.forEach(contribution => {
+      if (contribution.transactionId) transactionsRepo.delete(contribution.transactionId);
     });
+    categoriesRepo.delete(goal.id);
     setDetailGoalId(null);
   };
 
@@ -516,7 +520,7 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
               }}
               onComplete={markComplete}
               onPauseToggle={goal => setGoalPaused(goal, goal.status !== 'paused')}
-              onArchive={archiveGoal}
+              onDelete={deleteGoal}
               onRestore={restoreGoal}
             />
             <GoalFormSheet
@@ -942,6 +946,10 @@ function EmptyGoals({
   p: ReturnType<typeof makeP>;
   onAdd: () => void;
 }) {
+  if (SUPPORTS_GLASS) {
+    return <NativeEmptyGoals theme={theme} tint={tint} p={p} onAdd={onAdd} />;
+  }
+
   return (
     <GlassCard dark={theme.dark} style={{ marginBottom: SPACE.lg }}>
       <View style={styles.emptyWrap}>
@@ -966,6 +974,94 @@ function EmptyGoals({
         />
       </View>
     </GlassCard>
+  );
+}
+
+function NativeEmptyGoals({
+  theme,
+  tint: goalTint,
+  p,
+  onAdd,
+}: {
+  theme: Theme;
+  tint: string;
+  p: ReturnType<typeof makeP>;
+  onAdd: () => void;
+}) {
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+  const iconWash = `${goalTint}28`;
+
+  return (
+    <Host
+      matchContents={{ vertical: true }}
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', marginBottom: SPACE.lg }}
+    >
+      <GlassEffectContainer>
+        <SwiftButton
+          onPress={onAdd}
+          modifiers={[
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+            swiftAccessibilityLabel('Add goal'),
+          ]}
+        >
+          <VStack
+            alignment="center"
+            spacing={SPACE.sm}
+            modifiers={[
+              padding({
+                leading: LAYOUT.cardPadX,
+                trailing: LAYOUT.cardPadX,
+                top: SPACE.xxl,
+                bottom: SPACE.xxl,
+              }),
+              frame({ minHeight: 220, maxWidth: 10000, alignment: 'center' }),
+            ]}
+          >
+            <SwiftImage
+              systemName={GOAL_FALLBACK_SYMBOL}
+              size={22}
+              color={goalTint}
+              modifiers={[
+                frame({ width: 48, height: 48 }),
+                background(iconWash, shapes.circle()),
+              ]}
+            />
+            <SwiftText modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle(p.text), lineLimit(1)]}>
+              No goals yet
+            </SwiftText>
+            <SwiftText
+              modifiers={[
+                font({ size: 13 }),
+                foregroundStyle(p.textSec),
+                lineLimit(2),
+                frame({ maxWidth: 260, alignment: 'center' }),
+              ]}
+            >
+              Create a goal for any savings plan, then track contributions here.
+            </SwiftText>
+            <HStack
+              alignment="center"
+              spacing={SPACE.xs}
+              modifiers={[
+                padding({ leading: SPACE.md, trailing: SPACE.md, top: SPACE.sm, bottom: SPACE.sm }),
+                background(theme.accent.fill, shapes.capsule()),
+              ]}
+            >
+              <SwiftImage systemName="plus" size={13} color={theme.accent.ink} />
+              <SwiftText modifiers={[font({ size: 13, weight: 'semibold' }), foregroundStyle(theme.accent.ink)]}>
+                Add goal
+              </SwiftText>
+            </HStack>
+          </VStack>
+        </SwiftButton>
+      </GlassEffectContainer>
+    </Host>
   );
 }
 
@@ -1234,7 +1330,7 @@ function GoalDetailSheet({
   onEditCategory,
   onPauseToggle,
   onComplete,
-  onArchive,
+  onDelete,
   onRestore,
 }: {
   theme: Theme;
@@ -1246,7 +1342,7 @@ function GoalDetailSheet({
   onEditCategory: (goal: Goal) => void;
   onPauseToggle: (goal: Goal) => void;
   onComplete: (goal: Goal) => void;
-  onArchive: (goal: Goal) => void;
+  onDelete: (goal: Goal) => void;
   onRestore: (goal: Goal) => void;
 }) {
   const sheetRef = useRef<BottomSheet>(null);
@@ -1286,6 +1382,7 @@ function GoalDetailSheet({
   );
   const status = goal ? statusFor(goal) : null;
   const isArchived = goal?.status === 'archived';
+  const closeTint = theme.textSec;
 
   return (
     <BottomSheet
@@ -1316,7 +1413,7 @@ function GoalDetailSheet({
             <ScreenExitButton
               variant="close"
               onPress={closeSheet}
-              tint={theme.textSec}
+              tint={closeTint}
               fallbackBg={theme.chipBg}
             />
             {!isArchived && (
@@ -1324,7 +1421,7 @@ function GoalDetailSheet({
                 <Menu
                   label={
                     <View style={[styles.moreBtn, { backgroundColor: theme.chipBg }]}>
-                      <Icon name="ellipsis" size={15} color={theme.textSec} />
+                      <Icon name="ellipsis" size={15} color={closeTint} />
                     </View>
                   }
                 >
@@ -1347,13 +1444,13 @@ function GoalDetailSheet({
                     />
                   )}
                   <SwiftButton
-                    label="Archive goal"
+                    label="Delete goal"
                     onPress={() => Alert.alert(
-                      'Archive goal?',
-                      `"${goal.label}" will be hidden from your active goals. You can restore it later.`,
+                      'Delete goal?',
+                      `"${goal.label}" will be removed from your goals.`,
                       [
                         { text: 'Cancel', style: 'cancel' },
-                        { text: 'Archive', style: 'destructive', onPress: () => { closeSheet(); onArchive(goal); } },
+                        { text: 'Delete', style: 'destructive', onPress: () => { closeSheet(); onDelete(goal); } },
                       ],
                     )}
                   />

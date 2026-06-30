@@ -2605,7 +2605,8 @@ const NativeActivityDayGroup = React.memo(function NativeActivityDayGroup({
       meta,
       amountText: `${isIncome ? '+' : '-'}${formatActiveCurrencyAmount(tx.amount, true)}`,
       amountColor: isIncome ? incomeColor : p.textSec,
-      symbol: ACTIVITY_SF_SYMBOL[isGoalContribution ? 'target' : cat?.icon ?? ''] ?? ACTIVITY_FALLBACK_SYMBOL,
+      symbol: ACTIVITY_SF_SYMBOL[cat?.icon ?? '']
+        ?? (isGoalContribution ? ACTIVITY_SF_SYMBOL.target : ACTIVITY_FALLBACK_SYMBOL),
       iconColor: groupColor,
       logoUrl: logo?.logoUrl,
       logoBgColor: logo?.bgColor,
@@ -2890,7 +2891,7 @@ const TxRow = React.memo(function TxRow({
     >
       <MerchantMark
         merchant={title}
-        catIcon={isGoalContribution ? 'target' : cat?.icon}
+        catIcon={cat?.icon ?? (isGoalContribution ? 'target' : undefined)}
         color={groupColor}
         logoEnabled={!isGoalContribution && transactionUsesMerchantLogo(tx)}
         size={32}

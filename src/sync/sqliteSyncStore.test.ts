@@ -320,6 +320,68 @@ test('SQLite ledger currency updates sync through ledger metadata', async () => 
   assert.equal(db.getFirstSync<{ sync_status: string }>('SELECT sync_status FROM ledgers WHERE id = ?', LEDGER_ID)?.sync_status, 'synced');
 });
 
+test('SQLite goal categories and contribution transactions sync for shared ledgers', async () => {
+  const { repos, store } = fresh();
+  clearDomainRows();
+  markSharingRowsSynced();
+  const adapter = new PushAcceptingAdapter();
+
+  const goal = repos.categoriesRepo.create({
+    label: 'New Car',
+    icon: 'car',
+    group: 'savings',
+    defaultBudget: 250,
+    sortOrder: 10,
+    meta: {
+      custom: true,
+      goalTarget: 5000,
+      goalStartingBalance: 0,
+      goalSaved: 200,
+      goalContributions: [],
+      goalStatus: 'active',
+    },
+    createdByUserId: 'alex',
+    updatedByUserId: 'alex',
+  });
+  const contribution = repos.transactionsRepo.create({
+    merchant: goal.label,
+    cat: goal.id,
+    amount: 200,
+    note: 'Goal contribution',
+    occurredAt: '2026-06-01T12:00:00.000Z',
+    type: 'expense',
+    visibility: 'shared',
+    meta: {
+      kind: 'goal-contribution',
+      goalId: goal.id,
+      contributionId: 'goal-contribution-1',
+    },
+    createdByUserId: 'alex',
+    updatedByUserId: 'alex',
+  });
+
+  const result = await syncWith(adapter, store);
+
+  assert.equal(result.pushedRecords, 2);
+  const pushedGoal = adapter.pushed.find(record => record.recordType === 'category' && record.recordName === goal.id);
+  const pushedContribution = adapter.pushed.find(record => record.recordType === 'transaction' && record.recordName === contribution.id);
+  assert.equal(pushedGoal?.fields.group, 'savings');
+  assert.deepEqual(pushedGoal?.fields.meta, {
+    custom: true,
+    goalTarget: 5000,
+    goalStartingBalance: 0,
+    goalSaved: 200,
+    goalContributions: [],
+    goalStatus: 'active',
+  });
+  assert.deepEqual(pushedContribution?.fields.meta, {
+    kind: 'goal-contribution',
+    goalId: goal.id,
+    contributionId: 'goal-contribution-1',
+  });
+  assert.equal(pushedContribution?.fields.visibility, 'shared');
+});
+
 test('SQLite ledger sync keeps local CloudKit routing metadata on device only', async () => {
   const { repos, store, db } = fresh();
   clearDomainRows();

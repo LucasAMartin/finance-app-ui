@@ -21,6 +21,11 @@ import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
 import type { Category, GroupKey } from '../repositories/types';
 import { useVoiceRecognition } from '../voice/useVoiceRecognition';
 import { parseVoiceExpense } from '../voice/parseVoiceExpense';
+import {
+  transactionAutomationFingerprint,
+  transactionIntakeSourceLabel,
+  type TransactionIntakeDraft,
+} from '../automation/parseTransactionIntake';
 import { Host, Menu, Picker, Text as SwiftText, Button, Image as SwiftImage, DatePicker } from '@expo/ui/swift-ui';
 import {
   buttonStyle, controlSize, datePickerStyle, environment, frame, pickerStyle, tag, tint,
@@ -37,6 +42,7 @@ export interface SavedExpenseInfo {
 interface ExpenseFlowProps {
   theme: Theme;
   initialMode?: 'voice' | 'manual';
+  initialDraft?: TransactionIntakeDraft | null;
   onClose: () => void;
   onSaved?: (info: SavedExpenseInfo) => void;
 }
@@ -95,22 +101,26 @@ function nextDueAfter(start: Date, cadence: 'weekly' | 'monthly' | 'annual'): st
   return d.toISOString();
 }
 
-export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: ExpenseFlowProps) {
+export function ExpenseFlow({ theme, initialMode = 'voice', initialDraft, onClose, onSaved }: ExpenseFlowProps) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const cats = categoryMap(categories);
   const insets = useSafeAreaInsets();
   const darkScheme = theme.dark ? 'dark' : 'light';
+  const hasInitialDraft = !!initialDraft;
 
-  const [mode, setMode] = useState<Mode>(initialMode === 'manual' ? 'manual' : 'idle');
+  const [mode, setMode] = useState<Mode>(initialMode === 'manual' || hasInitialDraft ? 'manual' : 'idle');
   const [keypadOpen, setKeypadOpen] = useState(false);
-  const [manualAmt, setManualAmt] = useState('0.00');
-  const [manualCat, setManualCat] = useState('groceries');
-  const [manualMerchant, setManualMerchant] = useState('');
-  const [manualNote, setManualNote] = useState('');
-  const [manualDate, setManualDate] = useState<Date>(() => new Date());
+  const [manualAmt, setManualAmt] = useState(() => initialDraft ? initialDraft.amount.toFixed(2) : '0.00');
+  const [manualCat, setManualCat] = useState(() => initialDraft?.cat ?? 'groceries');
+  const [manualMerchant, setManualMerchant] = useState(() => initialDraft?.merchant ?? '');
+  const [manualNote, setManualNote] = useState(() => initialDraft?.note ?? '');
+  const [manualDate, setManualDate] = useState<Date>(() => initialDraft?.occurredAt ? new Date(initialDraft.occurredAt) : new Date());
   const [manualRepeat, setManualRepeat] = useState<RepeatValue>('never');
   const [heardTranscript, setHeardTranscript] = useState('');
+  const [importCaption, setImportCaption] = useState(() => (
+    initialDraft ? `Imported from ${transactionIntakeSourceLabel(initialDraft.source)}` : ''
+  ));
 
   const merchantRef = useRef<TextInput>(null);
   const noteRef = useRef<TextInput>(null);
@@ -162,16 +172,17 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
   // Reset when opened.
   useEffect(() => {
-    setManualAmt('0.00');
-    setManualCat(categories[0]?.id ?? 'groceries');
-    setManualMerchant('');
-    setManualNote('');
-    setManualDate(new Date());
+    setManualAmt(initialDraft ? initialDraft.amount.toFixed(2) : '0.00');
+    setManualCat(initialDraft?.cat ?? categories[0]?.id ?? 'groceries');
+    setManualMerchant(initialDraft?.merchant ?? '');
+    setManualNote(initialDraft?.note ?? '');
+    setManualDate(initialDraft?.occurredAt ? new Date(initialDraft.occurredAt) : new Date());
     setManualRepeat('never');
     setHeardTranscript('');
+    setImportCaption(initialDraft ? `Imported from ${transactionIntakeSourceLabel(initialDraft.source)}` : '');
     voice.reset();
     // Landing straight in manual mode: same delayed pad reveal as the toggle.
-    if (initialMode === 'manual') openKeypadSoon();
+    if (initialMode === 'manual' && !initialDraft) openKeypadSoon();
     return () => { voice.abort(); stopRings(); cancelKeypadOpen(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -196,6 +207,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
       setManualMerchant(result.merchant);
       setManualNote('');
       setHeardTranscript(finalText);
+      setImportCaption('');
       setMode('manual');
     } else if (mode === 'listening') {
       setMode('idle');
@@ -215,6 +227,7 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
 
   const switchToVoice = () => {
     setHeardTranscript('');
+    setImportCaption('');
     cancelKeypadOpen();
     setKeypadOpen(false);
     setMode('idle');
@@ -233,12 +246,30 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
     const cat = manualCat;
     const rawMerchant = manualMerchant.trim();
     const merchant = rawMerchant || cats[cat]?.label || 'Expense';
+    const occurredAt = manualDate.toISOString();
+    const automationFingerprint = initialDraft
+      ? transactionAutomationFingerprint({
+        ...initialDraft,
+        amount,
+        merchant,
+        occurredAt,
+      })
+      : undefined;
     const tx = transactionsRepo.create({
       amount, cat, merchant, note: manualNote,
-      occurredAt: manualDate.toISOString(),
+      occurredAt,
       type: 'expense', visibility: 'shared',
       createdByUserId: 'local', updatedByUserId: 'local',
-      meta: { merchantSource: rawMerchant ? 'user' : 'fallback' },
+      meta: {
+        merchantSource: rawMerchant ? 'user' : 'fallback',
+        ...(initialDraft ? {
+          automationSource: initialDraft.source,
+          automationConfidence: initialDraft.confidence,
+          cardLast4: initialDraft.cardLast4,
+          automationOccurredAt: occurredAt,
+          automationFingerprint,
+        } : {}),
+      },
     });
     // When marked recurring, also seed a rule so future instances are tracked.
     if (manualRepeat !== 'never') {
@@ -436,11 +467,11 @@ export function ExpenseFlow({ theme, initialMode = 'voice', onClose, onSaved }: 
                 </Text>
               </Pressable>
 
-              {heardTranscript ? (
+              {heardTranscript || importCaption ? (
                 <View style={S.heardRow}>
-                  <Icon name="mic" size={11} color={theme.textTer} stroke={1.7} />
+                  <Icon name={importCaption ? 'receipt' : 'mic'} size={11} color={theme.textTer} stroke={1.7} />
                   <Text style={[TYPE.caption, { color: theme.textTer, flexShrink: 1 }]} numberOfLines={1}>
-                    "{heardTranscript}"
+                    {importCaption || `"${heardTranscript}"`}
                   </Text>
                 </View>
               ) : null}

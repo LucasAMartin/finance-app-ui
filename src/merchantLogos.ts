@@ -31,6 +31,7 @@ const COUNTRY_CODE = (process.env.EXPO_PUBLIC_MERCHANT_LOGO_COUNTRY_CODE ?? 'US'
 const inflight = new Map<string, Promise<void>>();
 
 export function transactionUsesMerchantLogo(tx: Transaction): boolean {
+  if (tx.meta?.kind === 'goal-contribution') return false;
   const source = tx.meta?.merchantSource;
   if (source === 'fallback' || source === 'note') return false;
   return isLookupableMerchantName(tx.merchant);
@@ -170,6 +171,60 @@ export function useMerchantLogoMap(transactions: Transaction[], enabled = true):
     });
     return () => task.cancel();
   }, [enabled, entriesByKey, merchantLogosRepo, transactions]);
+
+  return useMemo(() => {
+    const next = new Map<string, MerchantLogo>();
+    entries.forEach(entry => {
+      if (entry.status === 'resolved' && isSafeLogoUrl(entry.logoUrl) && !isExpired(entry)) {
+        next.set(entry.merchantKey, entry);
+      }
+    });
+    return next;
+  }, [entries]);
+}
+
+export function useMerchantLogoMapForMerchants(merchants: string[], enabled = true): Map<string, MerchantLogo> {
+  const { merchantLogosRepo } = useRepositories();
+  const entries = useRepositoryList(merchantLogosRepo);
+
+  const entriesByKey = useMemo(() => {
+    const next = new Map<string, MerchantLogo>();
+    entries.forEach(entry => next.set(entry.merchantKey, entry));
+    return next;
+  }, [entries]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      const seen = new Set<string>();
+      merchants.forEach(merchant => {
+        if (!isLookupableMerchantName(merchant)) return;
+        const key = merchantLogoKey(merchant);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+
+        const entry = entriesByKey.get(key);
+        if (entry?.logoUrl && !isSafeLogoUrl(entry.logoUrl)) {
+          merchantLogosRepo.create({
+            id: key,
+            merchantKey: key,
+            displayName: merchant.trim(),
+            status: 'error',
+            source: entry.source ?? RESOLVED_SOURCE,
+            lastCheckedAt: new Date().toISOString(),
+            retryAfter: addMs(new Date().toISOString(), ERROR_RETRY_MS),
+            failureCount: entry.failureCount + 1,
+            meta: { error: 'unsafe_logo_url_rejected' },
+          });
+          return;
+        }
+
+        resolveAndCacheMerchantLogo(merchant, merchantLogosRepo, entry).catch(() => {});
+      });
+    });
+    return () => task.cancel();
+  }, [enabled, entriesByKey, merchantLogosRepo, merchants]);
 
   return useMemo(() => {
     const next = new Map<string, MerchantLogo>();

@@ -47,13 +47,16 @@ interface Props {
   ledgerMembers: LedgerMember[];
   inviteNoticeToken: number;
   inviteBusy: boolean;
+  iCloudSyncEnabled: boolean;
   cloudSyncState: CloudSyncUiState;
   cloudConflicts: CloudSyncConflictItem[];
+  onICloudSyncChange: (enabled: boolean) => void;
   onManualCloudRefresh: () => void;
   onInviteSomeone: () => void;
   onLeaveOrManageSharing: () => void;
   onResolveCloudConflict: (recordName: string, resolution: CloudSyncConflictResolution) => void;
   onCurrentMemberEditLockChange: (allow: boolean) => void;
+  onResetSyncedSampleData?: () => void;
 }
 
 export function SharingSettingsScreen({
@@ -68,13 +71,16 @@ export function SharingSettingsScreen({
   ledgerMembers,
   inviteNoticeToken,
   inviteBusy,
+  iCloudSyncEnabled,
   cloudSyncState,
   cloudConflicts,
+  onICloudSyncChange,
   onManualCloudRefresh,
   onInviteSomeone,
   onLeaveOrManageSharing,
   onResolveCloudConflict,
   onCurrentMemberEditLockChange,
+  onResetSyncedSampleData,
 }: Props) {
   const insets = useSafeAreaInsets();
   const currentMember = ledgerMembers.find(member => member.userId === currentUserId);
@@ -128,7 +134,7 @@ export function SharingSettingsScreen({
             fallbackBg={theme.chipBg}
             accessibilityLabel="Back"
           />
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Sharing</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Data & Sharing</Text>
           <View style={styles.headerSpacer} />
           <View style={[styles.headerDivider, { backgroundColor: theme.hairline }]} />
         </View>
@@ -147,7 +153,7 @@ export function SharingSettingsScreen({
                 tint(theme.accent.dot),
               ]}
             >
-              <SwiftSection title="Ledger">
+              <SwiftSection>
                 <LabeledContent label="Ledger">
                   <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
                     {activeLedgerName ?? 'Shared ledger'}
@@ -166,9 +172,14 @@ export function SharingSettingsScreen({
               </SwiftSection>
 
               <SwiftSection
-                title="iCloud Sync"
                 footer={<SwiftText>{cloudSyncState.detail}</SwiftText>}
               >
+                <SwiftToggle
+                  label="iCloud Sync"
+                  systemImage="icloud"
+                  isOn={iCloudSyncEnabled}
+                  onIsOnChange={onICloudSyncChange}
+                />
                 <LabeledContent label="Status">
                   <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: cloudSyncState.conflictedRecords > 0 ? 'primary' : 'secondary' })]}>
                     {cloudSyncState.label}
@@ -193,7 +204,7 @@ export function SharingSettingsScreen({
                 />
               </SwiftSection>
 
-              <SwiftSection title="Sharing" footer={<SwiftText>{sharingFooter}</SwiftText>}>
+              <SwiftSection footer={<SwiftText>{sharingFooter}</SwiftText>}>
                 <SwiftButton
                   label={inviteLabel}
                   systemImage={canInvite ? 'person.2.badge.gearshape' : 'person.crop.circle.badge.checkmark'}
@@ -205,7 +216,7 @@ export function SharingSettingsScreen({
               </SwiftSection>
 
               {cloudSyncState.conflictedRecords > 0 && cloudConflicts.length === 0 && (
-                <SwiftSection title="Review Changes" footer={<SwiftText>{cloudSyncState.detail}</SwiftText>}>
+                <SwiftSection footer={<SwiftText>{cloudSyncState.detail}</SwiftText>}>
                   {cloudSyncState.conflictedRecords > 0 && (
                     <LabeledContent label="Review Needed">
                       <SwiftText>
@@ -219,7 +230,6 @@ export function SharingSettingsScreen({
               {cloudConflicts.map((conflict, index) => (
                 <SwiftSection
                   key={conflict.recordName}
-                  title={index === 0 ? 'Review Changes' : undefined}
                   footer={index === cloudConflicts.length - 1
                     ? <SwiftText>For locked items, discard the blocked device change and refresh from iCloud. For edit conflicts, pick the version to keep.</SwiftText>
                     : undefined}
@@ -265,7 +275,7 @@ export function SharingSettingsScreen({
                 </SwiftSection>
               ))}
 
-              <SwiftSection title="Members">
+              <SwiftSection>
                 {ledgerMembers.length > 0 ? (
                   ledgerMembers.map(member => (
                     <MemberFormRow
@@ -285,7 +295,6 @@ export function SharingSettingsScreen({
 
               {currentMember && (
                 <SwiftSection
-                  title="Your Items"
                   footer={<SwiftText>Turning this off protects items you create from changes by other members. You can still edit your own items.</SwiftText>}
                 >
                   <LabeledContent label="Viewing As">
@@ -302,7 +311,7 @@ export function SharingSettingsScreen({
                 </SwiftSection>
               )}
 
-              <SwiftSection title="Advanced Sharing">
+              <SwiftSection>
                 <SwiftButton
                   label={cloudShared ? 'Leave Shared Ledger' : 'Stop iCloud Sharing'}
                   systemImage={cloudShared ? 'rectangle.portrait.and.arrow.right' : 'person.2.slash'}
@@ -310,6 +319,14 @@ export function SharingSettingsScreen({
                   onPress={onLeaveOrManageSharing}
                   modifiers={inviteBusy || (!cloudShared && !canInvite) ? [disabled(true)] : undefined}
                 />
+                {__DEV__ && onResetSyncedSampleData && (
+                  <SwiftButton
+                    label="Reset Synced Sample Data"
+                    systemImage="arrow.counterclockwise.icloud"
+                    role="destructive"
+                    onPress={onResetSyncedSampleData}
+                  />
+                )}
               </SwiftSection>
             </SwiftForm>
           </Host>

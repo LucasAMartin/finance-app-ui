@@ -25,7 +25,7 @@ const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON, cautionText } from '../theme';
+import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON } from '../theme';
 import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
@@ -47,7 +47,7 @@ import { categoryGroupColor, categoryGroupFor } from '../repositories/categoryUt
 import { memberDisplayName } from '../repositories/memberLabels';
 import type { Bill, Category, GroupKey, Income, SpendGroup, SpendSub, Transaction, TransactionCursor } from '../repositories/types';
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
-import { contributionTotal, goalFromCategory, goalProgressPct, goalRemaining, goalSavedFromParts, statusFor } from '../selectors/goals';
+import { contributionTotal, goalFromCategory, goalProgressPct, goalRemaining, goalSavedFromParts } from '../selectors/goals';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
 import {
   BottomSheetModal,
@@ -465,8 +465,6 @@ type NativeBudgetRowItem = {
   draft: string;
   goal?: {
     pct: number;
-    status: string;
-    statusColor: string;
     remaining: number;
   };
   accessibilityLabel: string;
@@ -865,11 +863,8 @@ function NativeBudgetRow({
                 frame({ width: 54 }),
               ]}
             />
-            <SwiftText modifiers={[font({ size: 11 }), foregroundStyle(item.goal.statusColor), lineLimit(1)]}>
-              {item.goal.status}
-            </SwiftText>
             <SwiftText modifiers={[font({ size: 11 }), foregroundStyle(p.textTer), lineLimit(1)]}>
-              · ${fmtMoney(item.goal.remaining)} to go
+              {item.goal.pct}% · {fmtMoney(item.goal.remaining)} to go
             </SwiftText>
           </HStack>
         ) : item.meta ? (
@@ -1143,6 +1138,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
+  const allTransactions = useRepositoryList(transactionsRepo);
   const incomes = useRepositoryList(incomeRepo);
   const budgetRecords = useRepositoryList(budgetsRepo);
   const categories = useRepositoryList(categoriesRepo);
@@ -1714,7 +1710,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     setCategoryLabelDraft(category.label);
     setCategoryIconDraft(category.icon);
     const meta = category.meta ?? {};
-    const goal = goalFromCategory(category);
+    const goal = goalFromCategory(category, { transactions: allTransactions });
     setCategoryGoalTarget(goal ? String(goal.target) : '');
     setCategoryGoalSaved(goal ? String(goal.saved) : '');
     setCategoryGoalDeadline(goal?.deadline ?? (typeof meta.goalDeadline === 'string' ? meta.goalDeadline : ''));
@@ -1786,7 +1782,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
       : budgets[bKey(editingCategory.group, editingCategory.label)] ?? editingCategory.defaultBudget;
     const nextMeta: Record<string, unknown> = { ...(editingCategory.meta ?? {}) };
     if (categoryGroupDraft === 'savings' && goalTarget && goalTarget > 0) {
-      const existingGoal = goalFromCategory(editingCategory);
+      const existingGoal = goalFromCategory(editingCategory, { transactions: allTransactions });
       const contributions = existingGoal?.contributions ?? [];
       const saved = goalSaved && goalSaved > 0 ? goalSaved : 0;
       const startingBalance = Math.max(0, saved - contributionTotal(contributions));
@@ -2247,14 +2243,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                     ...visibleOrigSubs.map(sub => {
                       const rowKey = bKey(g.key, sub.label);
                       const subCat = categories.find(c => c.id === sub.cat);
-                      const subGoal = subCat ? goalFromCategory(subCat) : null;
+                      const subGoal = subCat ? goalFromCategory(subCat, { transactions: allTransactions }) : null;
                       const subGoalPct = subGoal ? goalProgressPct(subGoal) : 0;
-                      const subGoalStatus = subGoal ? statusFor(subGoal) : null;
-                      const subGoalStatusColor = subGoalStatus?.tone === 'caution'
-                        ? (theme.dark ? cautionText(true) : OVER_DOT)
-                        : subGoalStatus?.tone === 'good'
-                          ? groupColor
-                          : p.textTer;
                       const subBudget = budgets[rowKey] ?? sub.budget;
                       const canEditRow = canEditBudgetKey(rowKey) && canEditCategoryId(sub.cat);
                       return {
@@ -2270,8 +2260,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                         goal: subGoal
                           ? {
                               pct: subGoalPct,
-                              status: subGoalStatus?.label ?? 'Goal',
-                              statusColor: subGoalStatusColor,
                               remaining: goalRemaining(subGoal),
                             }
                           : undefined,
@@ -2382,14 +2370,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 	                      const rowKey = bKey(g.key, sub.label);
                       const isRemoving = pendingRemoveKeys.has(rowKey);
 	                      const subCat = categories.find(c => c.id === sub.cat);
-	                      const subGoal = subCat ? goalFromCategory(subCat) : null;
+	                      const subGoal = subCat ? goalFromCategory(subCat, { transactions: allTransactions }) : null;
 	                      const subGoalPct = subGoal ? goalProgressPct(subGoal) : 0;
-	                      const subGoalStatus = subGoal ? statusFor(subGoal) : null;
-	                      const subGoalStatusColor = subGoalStatus?.tone === 'caution'
-                          ? (theme.dark ? cautionText(true) : OVER_DOT)
-                          : subGoalStatus?.tone === 'good'
-                            ? groupColor
-                            : p.textTer;
 	                      const subBudget = budgets[rowKey] ?? sub.budget;
                       const canEditRow = canEditBudgetKey(rowKey) && canEditCategoryId(sub.cat);
 	                      return (
@@ -2417,10 +2399,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                                       <View style={{ height: '100%', borderRadius: 2, width: `${subGoalPct}%`, backgroundColor: groupColor }} />
                                     </View>
                                     <Text style={[TYPE.caption, { color: p.textSec, marginTop: SPACE.xs }]}>
-                                      <Text style={{ color: subGoalStatusColor }}>
-                                        {subGoalStatus?.label}
-                                      </Text>
-                                      {' · '}{subGoalPct}% · ${goalRemaining(subGoal).toLocaleString()} to go
+                                      {subGoalPct}% · {formatActiveCurrencyAmount(goalRemaining(subGoal), 0)} to go
                                     </Text>
                                   </>
                                 )}
@@ -2741,8 +2720,6 @@ function CategoryEditSheet({
   const [goalTargetDisplay, setGoalTargetDisplay] = useState('');
   const [goalSavedDisplay, setGoalSavedDisplay] = useState('');
   const [deadlineDate, setDeadlineDate] = useState<Date | null>(null);
-  const deadlineAutoFilled = useRef(false);
-  const deadlineDateRef = useRef<Date | null>(null);
   useEffect(() => {
     if (shouldPresent) {
       if (!presentedRef.current) {
@@ -2759,9 +2736,7 @@ function CategoryEditSheet({
   useEffect(() => {
     if (category !== null || addingForGroup !== null) {
       iconManuallySet.current = false;
-      deadlineAutoFilled.current = false;
       const parsed = parseDeadline(goalDeadline);
-      deadlineDateRef.current = parsed;
       const symbol = getActiveCurrency().symbol;
       setBudgetDisplay(budget ? `${symbol}${budget}` : '');
       setGoalTargetDisplay(goalTarget ? `${symbol}${goalTarget}` : '');
@@ -2771,29 +2746,6 @@ function CategoryEditSheet({
       sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
     }
   }, [category, addingForGroup]);
-
-  useEffect(() => {
-    if (!showGoalFields) return;
-    const target = parseAmountDraft(goalTargetDisplay) ?? 0;
-    const saved = parseAmountDraft(goalSavedDisplay) ?? 0;
-    const budg = parseAmountDraft(budgetDisplay) ?? 0;
-    if (target > 0 && budg > 0 && (deadlineAutoFilled.current || !deadlineDateRef.current)) {
-      const remaining = Math.max(0, target - saved);
-      const months = Math.ceil(remaining / budg);
-      const now = new Date();
-      const projected = new Date(now.getFullYear(), now.getMonth() + months, 1);
-      deadlineDateRef.current = projected;
-      deadlineAutoFilled.current = true;
-      setDeadlineDate(projected);
-      onGoalDeadlineChange(projected.toISOString().slice(0, 10));
-    } else if (deadlineAutoFilled.current && (target <= 0 || budg <= 0)) {
-      deadlineDateRef.current = null;
-      deadlineAutoFilled.current = false;
-      setDeadlineDate(null);
-      onGoalDeadlineChange('');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goalTargetDisplay, goalSavedDisplay, budgetDisplay]);
 
   useEffect(() => {
     // Close any open keypad and reset scroll when the group changes so content
@@ -3176,17 +3128,17 @@ function CategoryEditSheet({
                       <Host ignoreSafeArea="all" style={styles.catDatePickerHost}>
                         <DatePicker
                           selection={deadlineDate}
-	                          onDateChange={(d) => { if (!canEdit) return; deadlineAutoFilled.current = false; deadlineDateRef.current = d; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
+	                          onDateChange={(d) => { if (!canEdit) return; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }}
                           displayedComponents={['date']}
                           modifiers={[datePickerStyle('compact'), tint(theme.text), environment({ key: 'colorScheme', value: theme.dark ? 'dark' : 'light' })]}
                         />
                       </Host>
-	                      <Pressable onPress={() => { if (!canEdit) return; deadlineAutoFilled.current = false; deadlineDateRef.current = null; setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8} disabled={!canEdit}>
+	                      <Pressable onPress={() => { if (!canEdit) return; setDeadlineDate(null); onGoalDeadlineChange(''); }} pointerEvents="box-only" hitSlop={8} disabled={!canEdit}>
                         <Icon name="close" size={11} color={theme.textTer} stroke={2} />
                       </Pressable>
                     </View>
                   ) : (
-	                    <Pressable onPress={() => { if (!canEdit) return; const d = new Date(); d.setFullYear(d.getFullYear() + 1); deadlineAutoFilled.current = false; deadlineDateRef.current = d; setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only" disabled={!canEdit}>
+	                    <Pressable onPress={() => { if (!canEdit) return; const d = new Date(); d.setFullYear(d.getFullYear() + 1); setDeadlineDate(d); onGoalDeadlineChange(d.toISOString().slice(0, 10)); }} pointerEvents="box-only" disabled={!canEdit}>
                       <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set date</Text>
                     </Pressable>
                   )}
@@ -3202,7 +3154,7 @@ function CategoryEditSheet({
                     }} />
                   </View>
                   <Text style={[TYPE.caption, { color: theme.textSec }]}>
-                    {goalPct}% · ${Math.max(0, rawGoalTarget - rawGoalSaved).toLocaleString()} to go
+                    {goalPct}% · {formatActiveCurrencyAmount(Math.max(0, rawGoalTarget - rawGoalSaved), 0)} to go
                   </Text>
                 </View>
               )}

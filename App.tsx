@@ -815,6 +815,7 @@ export function DashboardApp() {
     ];
     const subscription = AppState.addEventListener('change', state => {
       if (state === 'active') {
+        refreshAfterSync();
         consumeAcceptedCloudKitShares();
         ensureCloudKitSubscriptions();
         consumeRemoteCloudKitChanges();
@@ -829,6 +830,7 @@ export function DashboardApp() {
     consumeAcceptedCloudKitShares,
     consumeRemoteCloudKitChanges,
     ensureCloudKitSubscriptions,
+    refreshAfterSync,
     verifyCloudKitAccount,
   ]);
 
@@ -1361,12 +1363,7 @@ export function DashboardApp() {
           onOpenNotifications={openNotificationSettings}
           onOpenIncome={openIncomeFromSettings}
           onOpenSharing={openSharingSettings}
-          onICloudSyncChange={handleICloudSyncChange}
-          onResetSyncedSampleData={confirmResetSyncedSampleData}
           cloudSyncState={cloudSyncState}
-          onManualCloudRefresh={handleManualCloudRefresh}
-          activeLedgerName={activeLedger?.name}
-          memberCount={ledgerMembers.length}
         />
 
         <ProfileScreen
@@ -1374,7 +1371,6 @@ export function DashboardApp() {
           visible={profileOpen}
           onClose={closeProfile}
           member={currentMember}
-          iCloudSyncEnabled={iCloudSyncEnabled}
           onProfileChange={handleCurrentMemberProfileChange}
           onOpenSharing={() => openSharingSettings('overview')}
         />
@@ -1397,13 +1393,16 @@ export function DashboardApp() {
           ledgerMembers={ledgerMembers}
           inviteNoticeToken={sharingInviteNoticeToken}
           inviteBusy={sharingInviteBusy}
+          iCloudSyncEnabled={iCloudSyncEnabled}
           cloudSyncState={cloudSyncState}
           cloudConflicts={cloudConflictItems}
+          onICloudSyncChange={handleICloudSyncChange}
           onManualCloudRefresh={handleManualCloudRefresh}
           onInviteSomeone={handlePresentLedgerShare}
           onLeaveOrManageSharing={handleLeaveSharedLedger}
           onResolveCloudConflict={handleResolveCloudConflict}
           onCurrentMemberEditLockChange={handleCurrentMemberEditLockChange}
+          onResetSyncedSampleData={confirmResetSyncedSampleData}
         />
 
         <ThemeScreen

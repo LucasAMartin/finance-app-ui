@@ -441,7 +441,15 @@ export function TxSheet({
       keyboardBehavior={"none" as any}
     >
       <View
-        style={[S.content, { backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)' }]}
+        style={[
+          S.content,
+          {
+            backgroundColor: theme.dark ? theme.surface : 'rgba(255,255,255,0.40)',
+            borderTopLeftRadius: 32,
+            borderTopRightRadius: 32,
+            overflow: 'hidden',
+          },
+        ]}
         onLayout={event => handleContentLayout(event.nativeEvent.layout.height)}
       >
         {t && (
@@ -572,7 +580,7 @@ function SheetBody({
     <View style={[S.hero, isExpanded && S.heroCompact]}>
       <MerchantMark
         merchant={title}
-        catIcon={isGoalContribution ? 'target' : cat?.icon}
+        catIcon={cat?.icon ?? (isGoalContribution ? 'target' : undefined)}
         color={groupColor}
         iconSize={isExpanded ? 18 : 24}
         logoEnabled={useLogo}

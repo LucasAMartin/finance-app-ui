@@ -44,7 +44,6 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   member?: LedgerMember;
-  iCloudSyncEnabled: boolean;
   onProfileChange: (patch: { displayName?: string; profileImageDataUri?: string | null }) => void;
   onOpenSharing: () => void;
 }
@@ -54,7 +53,6 @@ export function ProfileScreen({
   visible,
   onClose,
   member,
-  iCloudSyncEnabled,
   onProfileChange,
   onOpenSharing,
 }: Props) {
@@ -74,8 +72,7 @@ export function ProfileScreen({
   const initial = displayName.trim().slice(0, 1).toUpperCase() || 'U';
   const profileImageDataUri = memberProfileImageDataUri(member);
   const accessLabel = member?.role === 'owner' ? 'Can manage sharing' : 'Shared member';
-  const profileSubtitle = iCloudSyncEnabled ? 'iCloud profile' : 'Local profile';
-  const syncLabel = iCloudSyncEnabled ? 'Synced with iCloud' : 'Local only';
+  const profileSubtitle = 'Personal profile';
 
   const editName = React.useCallback(() => {
     Alert.prompt(
@@ -163,6 +160,17 @@ export function ProfileScreen({
     onOpenSharing();
   }, [onClose, onOpenSharing]);
 
+  const handleSignOut = React.useCallback(() => {
+    Alert.alert('Sign Out', "You'll need to sign in again to reach your data.", [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: () => Alert.alert('Sign Out', 'This will be available in a future update.'),
+      },
+    ]);
+  }, []);
+
   return (
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
@@ -177,7 +185,7 @@ export function ProfileScreen({
             fallbackBg={theme.chipBg}
             accessibilityLabel="Back"
           />
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Profile</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Account</Text>
           <View style={styles.headerSpacer} />
           <View style={[styles.headerDivider, { backgroundColor: theme.hairline }]} />
         </View>
@@ -239,14 +247,19 @@ export function ProfileScreen({
                 </RNHostView>
               </SwiftGroup>
               <SwiftSection>
-                <LabeledContent label="Name">
+                <LabeledContent label="Display Name">
                   <SwiftButton label={displayName} onPress={editName} />
                 </LabeledContent>
-                <LabeledContent label="Photo">
+                <LabeledContent label="Profile Photo">
                   <SwiftButton
                     label={profileImageDataUri ? 'Edit' : 'Add'}
                     onPress={openPhotoActions}
                   />
+                </LabeledContent>
+                <LabeledContent label="Shown On">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+                    Shared ledgers
+                  </SwiftText>
                 </LabeledContent>
               </SwiftSection>
               <SwiftSection>
@@ -255,18 +268,13 @@ export function ProfileScreen({
                     {accessLabel}
                   </SwiftText>
                 </LabeledContent>
-                <LabeledContent label="iCloud Sync">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {syncLabel}
-                  </SwiftText>
-                </LabeledContent>
                 <LabeledContent label="Edit Access">
                   <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
                     {member?.allowOthersToEditMyItems ? 'Others can edit my items' : 'Only I can edit my items'}
                   </SwiftText>
                 </LabeledContent>
                 <SwiftButton
-                  label="iCloud & Sharing Settings"
+                  label="Data & Sharing"
                   systemImage="person.2.badge.gearshape"
                   onPress={openSharingAndClose}
                 />
@@ -276,6 +284,14 @@ export function ProfileScreen({
                   <SwiftButton label="Remove Photo" systemImage="trash" role="destructive" onPress={removePhoto} />
                 </SwiftSection>
               )}
+              <SwiftSection>
+                <SwiftButton
+                  label="Sign Out"
+                  systemImage="rectangle.portrait.and.arrow.right"
+                  role="destructive"
+                  onPress={handleSignOut}
+                />
+              </SwiftSection>
             </SwiftForm>
           </Host>
         </View>

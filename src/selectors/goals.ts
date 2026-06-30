@@ -1,4 +1,4 @@
-import type { Category } from '../repositories/types';
+import type { Category, Transaction } from '../repositories/types';
 import { formatActiveCurrencyAmount } from '../currency';
 
 export type GoalStatus = 'active' | 'paused' | 'completed' | 'archived';
@@ -35,6 +35,7 @@ export interface GoalHealth {
 
 interface GoalOptions {
   includeArchived?: boolean;
+  transactions?: Transaction[];
 }
 
 export const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -119,6 +120,34 @@ const goalContributionsFromMeta = (meta: Record<string, unknown> | undefined): G
     }));
 };
 
+const contributionIdFor = (item: GoalContribution) => item.transactionId ?? item.id;
+
+const goalContributionsFromTransactions = (
+  goalId: string,
+  transactions: Transaction[] | undefined,
+): GoalContribution[] => {
+  if (!transactions || transactions.length === 0) return [];
+  return transactions
+    .filter(tx => tx.meta?.kind === 'goal-contribution' && tx.meta?.goalId === goalId)
+    .map(tx => ({
+      id: typeof tx.meta?.contributionId === 'string' ? tx.meta.contributionId : tx.id,
+      amount: Math.max(0, tx.amount),
+      date: (tx.occurredAt ?? new Date().toISOString()).slice(0, 10),
+      note: tx.note || undefined,
+      transactionId: tx.id,
+    }));
+};
+
+const mergeGoalContributions = (
+  metaContributions: GoalContribution[],
+  transactionContributions: GoalContribution[],
+): GoalContribution[] => {
+  const merged = new Map<string, GoalContribution>();
+  metaContributions.forEach(item => merged.set(contributionIdFor(item), item));
+  transactionContributions.forEach(item => merged.set(contributionIdFor(item), item));
+  return [...merged.values()].sort((a, b) => b.date.localeCompare(a.date));
+};
+
 const goalStatusFromMeta = (
   meta: Record<string, unknown> | undefined,
   saved: number,
@@ -142,7 +171,10 @@ export const goalFromCategory = (category: Category, options: GoalOptions = {}):
   }
 
   const target = meta.goalTarget;
-  const contributions = goalContributionsFromMeta(meta);
+  const contributions = mergeGoalContributions(
+    goalContributionsFromMeta(meta),
+    goalContributionsFromTransactions(category.id, options.transactions),
+  );
   const startingBalance = goalStartingBalanceFromMeta(meta, contributions);
   const saved = goalSavedFromParts(target, startingBalance, contributions);
   const status = goalStatusFromMeta(meta, saved, target);
@@ -172,9 +204,9 @@ export const goalFromCategory = (category: Category, options: GoalOptions = {}):
   };
 };
 
-export const goalsFromCategories = (categories: Category[]) =>
+export const goalsFromCategories = (categories: Category[], options: GoalOptions = {}) =>
   categories
-    .map(category => goalFromCategory(category))
+    .map(category => goalFromCategory(category, options))
     .filter((goal): goal is Goal => goal !== null)
     .sort((a, b) => {
       const aStatus = statusFor(a).tone === 'caution' ? 1 : 0;
@@ -183,9 +215,9 @@ export const goalsFromCategories = (categories: Category[]) =>
       return a.saved / a.target - b.saved / b.target;
     });
 
-export const archivedGoalsFromCategories = (categories: Category[]) =>
+export const archivedGoalsFromCategories = (categories: Category[], options: GoalOptions = {}) =>
   categories
-    .map(category => goalFromCategory(category, { includeArchived: true }))
+    .map(category => goalFromCategory(category, { ...options, includeArchived: true }))
     .filter((goal): goal is Goal => goal !== null && goal.status === 'archived')
     .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''));
 
