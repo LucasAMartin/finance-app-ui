@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseTransactionIntake, transactionAutomationFingerprint } from './parseTransactionIntake';
+import {
+  explainTransactionIntakeRejection,
+  parseTransactionIntake,
+  transactionAutomationFingerprint,
+} from './parseTransactionIntake';
 
 test('parses card purchase SMS alerts', () => {
   const parsed = parseTransactionIntake(
@@ -21,6 +25,65 @@ test('parses card purchase SMS alerts', () => {
     cardLast4: '7780',
     note: 'Imported from SMS alert',
   });
+});
+
+test('parses text alerts where merchant follows the amount directly', () => {
+  const parsed = parseTransactionIntake(
+    'Debit card purchase $12.50 SQ *LASANG PINOY card ending 7780. Reply STOP.',
+    'sms',
+  );
+
+  assert.equal(parsed?.amount, 12.5);
+  assert.equal(parsed?.merchant, 'Lasang Pinoy');
+  assert.equal(parsed?.cardLast4, '7780');
+});
+
+test('parses text alerts where amount follows the merchant', () => {
+  const parsed = parseTransactionIntake(
+    'A charge at STARBUCKS for $4.65 was approved on card ending 7780.',
+    'sms',
+  );
+
+  assert.equal(parsed?.amount, 4.65);
+  assert.equal(parsed?.merchant, 'Starbucks');
+  assert.equal(parsed?.cat, 'dining');
+});
+
+test('parses purchase alerts with trailing balance details', () => {
+  const parsed = parseTransactionIntake(
+    'You spent $8.10 at BLUE BOTTLE with card ending 7780. Available balance $123.45.',
+    'sms',
+  );
+
+  assert.equal(parsed?.amount, 8.1);
+  assert.equal(parsed?.merchant, 'Blue Bottle');
+  assert.equal(parsed?.cardLast4, '7780');
+});
+
+test('ignores non-transaction text alerts with dollar amounts', () => {
+  assert.equal(parseTransactionIntake('Your available balance is $500.00 as of 9:41 AM.', 'sms'), null);
+  assert.equal(parseTransactionIntake('Your minimum payment of $25.00 is due on July 12.', 'sms'), null);
+  assert.equal(parseTransactionIntake('A transaction for $12.50 at TARGET was declined.', 'sms'), null);
+  assert.equal(parseTransactionIntake('Did you make a purchase of $12.50 at TARGET? Reply YES or NO.', 'sms'), null);
+});
+
+test('explains why text alerts are ignored', () => {
+  assert.equal(
+    explainTransactionIntakeRejection('', 'sms'),
+    'No receipt text reached finance-app. In Shortcuts, tap the blank text field in Process Receipt and choose Shortcut Input.',
+  );
+  assert.equal(
+    explainTransactionIntakeRejection('test text from me', 'sms'),
+    'No transaction amount was found.',
+  );
+  assert.equal(
+    explainTransactionIntakeRejection('A transaction for $12.50 at TARGET was declined.', 'sms'),
+    'Ignored because this looks like a non-purchase card alert.',
+  );
+  assert.equal(
+    explainTransactionIntakeRejection('I paid $12.50 at Target', 'sms'),
+    'Ignored because the text did not include purchase, spent, charge, transaction, or authorized.',
+  );
 });
 
 test('parses wallet shortcut text', () => {

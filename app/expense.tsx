@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams, usePreventZoomTransitionDismissal } from 'expo-router';
 
 import {
+  explainTransactionIntakeRejection,
   parseTransactionIntake,
   transactionAutomationFingerprint,
   transactionIntakeSourceLabel,
@@ -65,34 +66,55 @@ function likelyDuplicate(rows: Transaction[], draft: TransactionIntakeDraft): Tr
   });
 }
 
-function applePayAutomationRunMeta(
+function automationMetaPrefix(source: TransactionIntakeSource): string | undefined {
+  if (source === 'wallet') return 'applePayAutomation';
+  if (source === 'sms') return 'textAutomation';
+  return undefined;
+}
+
+function automationFallbackMerchant(source: TransactionIntakeSource): string {
+  if (source === 'wallet') return 'Apple Pay';
+  if (source === 'sms') return 'Text alert';
+  return 'Automation';
+}
+
+function automationDisplaySource(source: TransactionIntakeSource): string {
+  if (source === 'wallet') return 'Apple Pay';
+  if (source === 'sms') return 'text alert';
+  return 'automation';
+}
+
+function automationRunMeta(
   currentMeta: Record<string, unknown> | undefined,
-  status: 'saved' | 'duplicate' | 'review' | 'failed',
+  status: 'saved' | 'duplicate' | 'review' | 'failed' | 'ignored',
   draft: TransactionIntakeDraft,
   options: { transactionId?: string; error?: string } = {},
 ): Record<string, unknown> {
+  const prefix = automationMetaPrefix(draft.source);
+  if (!prefix) return currentMeta ?? {};
+
   const occurredAt = draft.occurredAt ?? new Date().toISOString();
   const fingerprint = transactionAutomationFingerprint({ ...draft, occurredAt });
   const nextMeta: Record<string, unknown> = {
     ...(currentMeta ?? {}),
-    applePayAutomationLastStatus: status,
-    applePayAutomationLastRunAt: new Date().toISOString(),
-    applePayAutomationLastMerchant: draft.merchant || 'Apple Pay',
-    applePayAutomationLastAmount: draft.amount,
-    applePayAutomationLastOccurredAt: occurredAt,
-    applePayAutomationLastFingerprint: fingerprint,
-    applePayAutomationLastTransactionId: options.transactionId,
-    applePayAutomationLastError: options.error,
-    applePayAutomationLastBackground: false,
+    [`${prefix}LastStatus`]: status,
+    [`${prefix}LastRunAt`]: new Date().toISOString(),
+    [`${prefix}LastMerchant`]: draft.merchant || automationFallbackMerchant(draft.source),
+    [`${prefix}LastAmount`]: draft.amount > 0 ? draft.amount : undefined,
+    [`${prefix}LastOccurredAt`]: occurredAt,
+    [`${prefix}LastFingerprint`]: fingerprint,
+    [`${prefix}LastTransactionId`]: options.transactionId,
+    [`${prefix}LastError`]: options.error,
+    [`${prefix}LastBackground`]: false,
   };
 
   if (__DEV__) {
-    nextMeta.applePayAutomationLastReplayText = draft.rawText;
-    nextMeta.applePayAutomationLastReplayAmount = draft.amount;
-    nextMeta.applePayAutomationLastReplayMerchant = draft.merchant;
-    nextMeta.applePayAutomationLastReplayOccurredAt = occurredAt;
-    nextMeta.applePayAutomationLastReplayCategory = draft.cat;
-    nextMeta.applePayAutomationLastReplayCardLast4 = draft.cardLast4;
+    nextMeta[`${prefix}LastReplayText`] = draft.rawText;
+    nextMeta[`${prefix}LastReplayAmount`] = draft.amount;
+    nextMeta[`${prefix}LastReplayMerchant`] = draft.merchant;
+    nextMeta[`${prefix}LastReplayOccurredAt`] = occurredAt;
+    nextMeta[`${prefix}LastReplayCategory`] = draft.cat;
+    nextMeta[`${prefix}LastReplayCardLast4`] = draft.cardLast4;
   }
 
   Object.keys(nextMeta).forEach(key => {
@@ -124,6 +146,7 @@ export default function ExpenseRoute() {
   const cats = categoryMap(categories);
   const { showToast } = useAppFeedback();
   const autoSaveHandledRef = useRef(false);
+  const issueHandledRef = useRef(false);
   const mode = param(params.mode);
   const initialMode = mode === 'manual' ? 'manual' : 'voice';
   const initialDraft = useMemo<TransactionIntakeDraft | null>(() => {
@@ -152,6 +175,7 @@ export default function ExpenseRoute() {
       };
     }
 
+    if (source === 'sms') return null;
     if (amount <= 0) return null;
 
     const cat = categoryParam || inferExpenseCategory(merchant);
@@ -176,30 +200,64 @@ export default function ExpenseRoute() {
     params.source,
     params.text,
   ]);
+  const automationIssue = useMemo(() => {
+    const source = validSource(param(params.source));
+    if (source !== 'sms' || initialDraft) return null;
+    const text = param(params.text) || param(params.body);
+    return explainTransactionIntakeRejection(text, source);
+  }, [
+    initialDraft,
+    params.body,
+    params.source,
+    params.text,
+  ]);
   usePreventZoomTransitionDismissal();
 
-  const autoSaveApplePay = !!initialDraft
-    && initialDraft.source === 'wallet'
+  useEffect(() => {
+    if (!automationIssue || issueHandledRef.current) return;
+    issueHandledRef.current = true;
+    const rawText = param(params.text) || param(params.body);
+    settingsRepo.update('settings', {
+      meta: automationRunMeta(settings?.meta, 'ignored', {
+        amount: 0,
+        merchant: '',
+        cat: 'shopping',
+        source: 'sms',
+        note: 'Ignored text alert',
+        rawText,
+        confidence: 0,
+      }, { error: automationIssue }),
+    });
+  }, [
+    automationIssue,
+    params.body,
+    params.text,
+    settings?.meta,
+    settingsRepo,
+  ]);
+
+  const autoSaveAutomation = !!initialDraft
+    && !!automationMetaPrefix(initialDraft.source)
     && param(params.preview) !== '1'
-    && settings?.meta?.applePayAutomationMode === 'autosave';
+    && settings?.meta?.[`${automationMetaPrefix(initialDraft.source)}Mode`] === 'autosave';
 
   useEffect(() => {
-    if (!autoSaveApplePay || !initialDraft || autoSaveHandledRef.current) return;
+    if (!autoSaveAutomation || !initialDraft || autoSaveHandledRef.current) return;
     autoSaveHandledRef.current = true;
 
     const duplicate = likelyDuplicate(transactions, initialDraft);
     if (duplicate) {
       settingsRepo.update('settings', {
-        meta: applePayAutomationRunMeta(settings?.meta, 'duplicate', initialDraft, { transactionId: duplicate.id }),
+        meta: automationRunMeta(settings?.meta, 'duplicate', initialDraft, { transactionId: duplicate.id }),
       });
-      showToast('Apple Pay transaction already imported');
+      showToast(`${automationDisplaySource(initialDraft.source)} transaction already imported`);
       router.replace('/');
       return;
     }
 
     const cat = cats[initialDraft.cat] ? initialDraft.cat : categories[0]?.id ?? 'shopping';
     const rawMerchant = initialDraft.merchant.trim();
-    const merchant = rawMerchant || cats[cat]?.label || 'Apple Pay';
+    const merchant = rawMerchant || cats[cat]?.label || automationFallbackMerchant(initialDraft.source);
     const occurredAt = initialDraft.occurredAt ?? new Date().toISOString();
     const automationFingerprint = transactionAutomationFingerprint({
       ...initialDraft,
@@ -226,15 +284,15 @@ export default function ExpenseRoute() {
       },
     });
     settingsRepo.update('settings', {
-      meta: applePayAutomationRunMeta(settings?.meta, 'saved', { ...initialDraft, merchant, occurredAt }, { transactionId: tx.id }),
+      meta: automationRunMeta(settings?.meta, 'saved', { ...initialDraft, merchant, occurredAt }, { transactionId: tx.id }),
     });
     showToast(
-      `Added $${initialDraft.amount.toFixed(2)} from Apple Pay`,
+      `Added $${initialDraft.amount.toFixed(2)} from ${automationDisplaySource(initialDraft.source)}`,
       () => transactionsRepo.delete(tx.id),
     );
     router.replace('/');
   }, [
-    autoSaveApplePay,
+    autoSaveAutomation,
     categories,
     cats,
     initialDraft,
@@ -256,12 +314,27 @@ export default function ExpenseRoute() {
     );
   }, [showToast, transactionsRepo]);
 
-  if (autoSaveApplePay) {
+  if (autoSaveAutomation) {
     return (
       <View style={[styles.importingRoot, { backgroundColor: theme.bg }]}>
-        <Text style={[TYPE.pageTitle, { color: theme.text }]}>Importing Apple Pay transaction</Text>
+        <Text style={[TYPE.pageTitle, { color: theme.text }]}>
+          Importing {initialDraft?.source === 'sms' ? 'text' : 'Apple Pay'} transaction
+        </Text>
         <Text style={[TYPE.bodyRegular, styles.importingText, { color: theme.textSec }]}>
           This should only take a moment.
+        </Text>
+      </View>
+    );
+  }
+
+  if (automationIssue) {
+    return (
+      <View style={[styles.importingRoot, { backgroundColor: theme.bg }]}>
+        <Text style={[TYPE.pageTitle, { color: theme.text }]}>
+          Text alert ignored
+        </Text>
+        <Text style={[TYPE.bodyRegular, styles.importingText, { color: theme.textSec }]}>
+          {automationIssue}
         </Text>
       </View>
     );

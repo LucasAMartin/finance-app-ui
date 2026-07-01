@@ -55,11 +55,13 @@ import { TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 
-type ApplePayAutomationMode = 'off' | 'confirm' | 'autosave';
-type ApplePayAutomationLastStatus = 'saved' | 'duplicate' | 'review' | 'disabled' | 'failed';
+type TransactionAutomationMode = 'off' | 'confirm' | 'autosave';
+type TransactionAutomationLastStatus = 'saved' | 'duplicate' | 'review' | 'disabled' | 'failed' | 'ignored';
+type ApplePayAutomationMode = TransactionAutomationMode;
+type ApplePayAutomationLastStatus = TransactionAutomationLastStatus;
 
-interface ApplePayAutomationStatus {
-  status?: ApplePayAutomationLastStatus;
+interface TransactionAutomationStatus {
+  status?: TransactionAutomationLastStatus;
   runAt?: string;
   merchant?: string;
   amount?: number;
@@ -72,6 +74,8 @@ interface ApplePayAutomationStatus {
   replayCategory?: string;
   replayCardLast4?: string;
 }
+
+type ApplePayAutomationStatus = TransactionAutomationStatus;
 
 const applePayShortcutTriggerName = iosMajorVersion() >= 26 ? 'Wallet' : 'Transaction';
 
@@ -109,6 +113,12 @@ export function SettingsScreen({
       : settings?.meta?.applePayAutomationMode === 'confirm'
         ? 'confirm'
         : 'off';
+  const textAutomationMode: TransactionAutomationMode =
+    settings?.meta?.textAutomationMode === 'autosave'
+      ? 'autosave'
+      : settings?.meta?.textAutomationMode === 'confirm'
+        ? 'confirm'
+        : 'off';
 
   // Slide-up + fade, mirroring ThemeScreen so pushed screens feel consistent.
   const anim = React.useRef(new Animated.Value(0)).current;
@@ -125,6 +135,7 @@ export function SettingsScreen({
   const dataAndSharingValue = dataAndSharingSummary(cloudSyncState);
   const [appLockUpdating, setAppLockUpdating] = React.useState(false);
   const [applePayGuideOpen, setApplePayGuideOpen] = React.useState(false);
+  const [textGuideOpen, setTextGuideOpen] = React.useState(false);
   const recentApplePayImports = React.useMemo(
     () => transactions
       .filter(isApplePayImport)
@@ -132,8 +143,19 @@ export function SettingsScreen({
       .slice(0, 3),
     [transactions],
   );
+  const recentTextImports = React.useMemo(
+    () => transactions
+      .filter(isTextImport)
+      .sort((a, b) => transactionTime(b) - transactionTime(a))
+      .slice(0, 3),
+    [transactions],
+  );
   const applePayLastRun = React.useMemo(
     () => applePayAutomationStatus(settings?.meta),
+    [settings?.meta],
+  );
+  const textLastRun = React.useMemo(
+    () => textAutomationStatus(settings?.meta),
     [settings?.meta],
   );
 
@@ -208,9 +230,32 @@ export function SettingsScreen({
     if (mode !== 'off') showApplePaySetup();
   };
 
+  const setTextAutomationMode = (mode: TransactionAutomationMode) => {
+    const currentMeta = settings?.meta ?? {};
+    const updatedAt = new Date().toISOString();
+    const nextMeta = {
+      ...currentMeta,
+      textAutomationMode: mode,
+      textAutomationUpdatedAt: updatedAt,
+      textAutomationLedgerId: mode === 'off' ? undefined : session.activeLedgerId,
+      textAutomationUserId: mode === 'off' ? undefined : session.currentUserId,
+    };
+    settingsRepo.update('settings', {
+      meta: nextMeta,
+    }) ?? settingsRepo.create({
+      id: 'settings',
+      themeDark: dark,
+      accentKey: 'ink',
+      cardStyle: theme.cardStyle,
+      wallpaperId: settings?.wallpaperId,
+      meta: nextMeta,
+    });
+    if (mode !== 'off') showTextSetup();
+  };
+
   const openShortcuts = () => {
     Linking.openURL('shortcuts://create-automation').catch(() => {
-      Alert.alert('Open Shortcuts', 'Open the Shortcuts app, then create a personal automation with the Transaction trigger.');
+      Alert.alert('Open Shortcuts', 'Open the Shortcuts app, then create a personal automation.');
     });
   };
 
@@ -221,8 +266,19 @@ export function SettingsScreen({
     });
   };
 
+  const testTextImport = () => {
+    const sample = encodeURIComponent('You made a purchase of $12.50 at SQ *LASANG PINOY with credit card ...7780. Reply STOP to end.');
+    Linking.openURL(`financeapp:///expense?source=sms&preview=1&text=${sample}`).catch(() => {
+      Alert.alert('Could not open test import', 'The financeapp URL scheme is not available in this build yet.');
+    });
+  };
+
   const showApplePaySetup = () => {
     setApplePayGuideOpen(true);
+  };
+
+  const showTextSetup = () => {
+    setTextGuideOpen(true);
   };
 
   return (
@@ -334,6 +390,31 @@ export function SettingsScreen({
                   systemImage="play.circle"
                   onPress={testApplePayImport}
                 />
+                <Picker
+                  label="Text Message Import"
+                  systemImage="message"
+                  selection={textAutomationMode}
+                  onSelectionChange={(value) => {
+                    if (value === 'autosave' || value === 'confirm') setTextAutomationMode(value);
+                    else setTextAutomationMode('off');
+                  }}
+                  modifiers={[pickerStyle('menu')]}
+                >
+                  <SwiftText modifiers={[tag('autosave')]}>Auto-save</SwiftText>
+                  <SwiftText modifiers={[tag('confirm')]}>Review first</SwiftText>
+                  <SwiftText modifiers={[tag('off')]}>Off</SwiftText>
+                </Picker>
+                <SettingsActionRow
+                  label="Text Message Setup"
+                  systemImage="wand.and.stars"
+                  value={automationSetupValue(textAutomationMode)}
+                  onPress={showTextSetup}
+                />
+                <SettingsActionRow
+                  label="Preview Text Import"
+                  systemImage="play.circle"
+                  onPress={testTextImport}
+                />
               </SwiftSection>
 
               <SwiftSection>
@@ -368,12 +449,31 @@ export function SettingsScreen({
             lastRun={applePayLastRun}
           />
         ) : null}
+        {textGuideOpen ? (
+          <TextMessageAutomationGuide
+            theme={theme}
+            mode={textAutomationMode}
+            insetsTop={insets.top}
+            insetsBottom={insets.bottom}
+            onClose={() => setTextGuideOpen(false)}
+            onCreateAutomation={openShortcuts}
+            onPreview={testTextImport}
+            onSetMode={setTextAutomationMode}
+            recentImports={recentTextImports}
+            currencyCode={currencyCode}
+            lastRun={textLastRun}
+          />
+        ) : null}
       </View>
     </Animated.View>
   );
 }
 
 function applePaySetupValue(mode: ApplePayAutomationMode) {
+  return automationSetupValue(mode);
+}
+
+function automationSetupValue(mode: TransactionAutomationMode) {
   if (mode === 'autosave') return 'Auto-save';
   if (mode === 'confirm') return 'Review first';
   return 'Not set';
@@ -472,12 +572,15 @@ function ApplePayAutomationGuide({
           latestImport={latestImport}
           currencyCode={currencyCode}
           lastRun={lastRun}
+          sourceName="Wallet"
+          fallbackMerchant="Apple Pay"
         />
 
         {__DEV__ ? (
           <DeveloperReplayPanel
             theme={theme}
-            lastRun={lastRun}
+            sourceName="Wallet"
+            replayReady={!!applePayReplayUrl(lastRun)}
             onReplay={replayLastImport}
           />
         ) : null}
@@ -504,17 +607,18 @@ function ApplePayAutomationGuide({
 
         <View style={styles.guideSection}>
           <Text style={[TYPE.labelLg, { color: theme.textTer }]}>Shortest setup</Text>
-          <StepRow theme={theme} n={1} title="Create a new automation" detail="The button below opens Shortcuts directly to automation creation." />
-          <StepRow theme={theme} n={2} title={`Choose ${applePayShortcutTriggerName}`} detail={applePayShortcutTriggerName === 'Wallet' ? 'This is the iOS 26 Wallet trigger.' : 'Newer iOS versions may label this Wallet.'} />
+          <StepRow theme={theme} n={1} title="Create a new automation" detail="Shortcuts shows three sections: Automation, When, and Do." />
+          <StepRow theme={theme} n={2} title={`Set When to ${applePayShortcutTriggerName}`} detail={applePayShortcutTriggerName === 'Wallet' ? 'This is the iOS 26 Wallet trigger.' : 'Newer iOS versions may label this Wallet.'} />
           <StepRow theme={theme} n={3} title="Select all cards and categories" detail="This is the key step. Choosing all avoids a separate automation for each card." />
-          <StepRow theme={theme} n={4} title="Add finance-app action" detail="Pick Import Apple Pay Transaction. Shortcut Input should connect automatically." />
-          <StepRow theme={theme} n={5} title="Set Run Immediately" detail="Tap the automation itself, then turn Notify When Run off." />
+          <StepRow theme={theme} n={4} title="Add the app action" detail="In Do, tap Add Action, open finance-app, then choose Import Apple Pay Transaction." />
+          <StepRow theme={theme} n={5} title="Pass the transaction" detail="Tap the blank transaction field, then choose Shortcut Input." />
+          <StepRow theme={theme} n={6} title="Run immediately" detail="Open Automation, choose Run Immediately, and turn Notify When Run off." />
         </View>
 
         <View style={[styles.notePanel, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
           <Icon name="bell" size={16} color={theme.textSec} stroke={1.7} />
           <Text style={[TYPE.bodySm, styles.noteText, { color: theme.textSec }]}>
-            If payments do not import, enable mobile data for Wallet in iOS Settings, then run a test purchase again.
+            If Shortcuts adds a fieldless row, back out and add Import Apple Pay Transaction from the automation Add Action screen.
           </Text>
         </View>
 
@@ -545,35 +649,225 @@ function ApplePayAutomationGuide({
   );
 }
 
+function TextMessageAutomationGuide({
+  theme,
+  mode,
+  insetsTop,
+  insetsBottom,
+  onClose,
+  onCreateAutomation,
+  onPreview,
+  onSetMode,
+  recentImports,
+  currencyCode,
+  lastRun,
+}: {
+  theme: Theme;
+  mode: TransactionAutomationMode;
+  insetsTop: number;
+  insetsBottom: number;
+  onClose: () => void;
+  onCreateAutomation: () => void;
+  onPreview: () => void;
+  onSetMode: (mode: TransactionAutomationMode) => void;
+  recentImports: Transaction[];
+  currencyCode: string;
+  lastRun: TransactionAutomationStatus;
+}) {
+  const autoSave = mode === 'autosave';
+  const latestImport = recentImports[0];
+  const replayLastImport = () => {
+    const url = textReplayUrl(lastRun);
+    if (!url) {
+      Alert.alert('Replay unavailable', 'Run one real text import in this debug build first.');
+      return;
+    }
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Could not replay import', 'The financeapp URL scheme is not available in this build yet.');
+    });
+  };
+
+  return (
+    <View style={[styles.guideRoot, { backgroundColor: theme.bg }]}>
+      <View style={[styles.guideHeader, { paddingTop: insetsTop + SPACE.sm, backgroundColor: theme.bg }]}>
+        <ScreenExitButton
+          variant="back"
+          onPress={onClose}
+          tint={theme.text}
+          fallbackBg={theme.chipBg}
+          accessibilityLabel="Back"
+        />
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Text Message Import</Text>
+        <View style={styles.headerSpacer} />
+        <View style={[styles.headerDivider, { backgroundColor: theme.hairline }]} />
+      </View>
+
+      <ScrollView
+        style={styles.guideScroll}
+        contentContainerStyle={[
+          styles.guideContent,
+          { paddingTop: insetsTop + 84, paddingBottom: Math.max(insetsBottom, SPACE.lg) + 112 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.guideHero, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
+          <View style={styles.guideHeroTop}>
+            <View style={[styles.guideIconDisc, { backgroundColor: theme.accent.fill }]}>
+              <Icon name="bell" size={20} color={theme.accent.ink} stroke={1.7} />
+            </View>
+            <View style={[styles.statusPill, { backgroundColor: theme.chipBg }]}>
+              <Text style={[TYPE.captionEm, { color: theme.textSec }]}>
+                {autoSave ? 'Auto-save ready' : mode === 'confirm' ? 'Review mode' : 'Setup needed'}
+              </Text>
+            </View>
+          </View>
+          <Text style={[TYPE.sectionTitle, styles.guideHeroTitle, { color: theme.text }]}>
+            Turn card texts into transactions.
+          </Text>
+          <Text style={[TYPE.bodyRegular, styles.guideHeroCopy, { color: theme.textSec }]}>
+            Choose your card alert senders once in Shortcuts. finance-app reads the amount, merchant, card, and category.
+          </Text>
+
+          <View style={styles.flowPreview}>
+            <FlowNode theme={theme} icon="bell" label="Text" />
+            <Icon name="chevR" size={16} color={theme.textTer} stroke={1.8} />
+            <FlowNode theme={theme} icon="sparkle" label="Shortcut" />
+            <Icon name="chevR" size={16} color={theme.textTer} stroke={1.8} />
+            <FlowNode theme={theme} icon="check" label="Saved" />
+          </View>
+        </View>
+
+        <AutomationStatusPanel
+          theme={theme}
+          mode={mode}
+          latestImport={latestImport}
+          currencyCode={currencyCode}
+          lastRun={lastRun}
+          sourceName="Text"
+          fallbackMerchant="Text alert"
+        />
+
+        {__DEV__ ? (
+          <DeveloperReplayPanel
+            theme={theme}
+            sourceName="Text"
+            replayReady={!!textReplayUrl(lastRun)}
+            onReplay={replayLastImport}
+          />
+        ) : null}
+
+        <View style={styles.guideSection}>
+          <Text style={[TYPE.labelLg, { color: theme.textTer }]}>Import behavior</Text>
+          <ModeChoice
+            theme={theme}
+            active={mode === 'autosave'}
+            title="Auto-save"
+            detail="Recommended after one preview works. Saves matched card alerts in the background."
+            onPress={() => onSetMode('autosave')}
+          />
+          <ModeChoice
+            theme={theme}
+            active={mode === 'confirm'}
+            title="Review first"
+            detail="Best for first setup. Opens the filled expense screen before saving."
+            onPress={() => onSetMode('confirm')}
+          />
+        </View>
+
+        <TextShortcutSetupPreview theme={theme} mode={mode} />
+
+        <View style={styles.guideSection}>
+          <Text style={[TYPE.labelLg, { color: theme.textTer }]}>Shortest setup</Text>
+          <StepRow theme={theme} n={1} title="Create a new automation" detail="Shortcuts shows three sections: Automation, When, and Do." />
+          <StepRow theme={theme} n={2} title="Set When" detail="Choose Message, then select your card alert sender." />
+          <StepRow theme={theme} n={3} title="Filter alert texts" detail="Use purchase, spent, charge, or transaction. Avoid $ for the final setup." />
+          <StepRow theme={theme} n={4} title="Add the app action" detail="In Do, tap Add Action, open finance-app, then choose Process Receipt." />
+          <StepRow theme={theme} n={5} title="Pass the text" detail="Tap the blank text field in Process Receipt, then choose Shortcut Input." />
+          <StepRow theme={theme} n={6} title="Run immediately" detail="Open Automation, choose Run Immediately, and turn Notify When Run off." />
+        </View>
+
+        <View style={[styles.notePanel, { backgroundColor: theme.chipBg, borderColor: theme.hairline }]}>
+          <Icon name="bell" size={16} color={theme.textSec} stroke={1.7} />
+          <Text style={[TYPE.bodySm, styles.noteText, { color: theme.textSec }]}>
+            finance-app cannot read your inbox. Only messages matched by this Shortcuts automation are handed to the app.
+          </Text>
+        </View>
+
+        <View style={[styles.notePanel, { backgroundColor: cautionBg(theme.dark), borderColor: theme.hairline }]}>
+          <Icon name="bell" size={16} color={cautionText(theme.dark)} stroke={1.7} />
+          <Text style={[TYPE.bodySm, styles.noteText, { color: cautionText(theme.dark) }]}>
+            If Shortcuts shows Add Shortcut or adds a fieldless Process Receipt row, back out and add the finance-app action from Add Action instead.
+          </Text>
+        </View>
+
+        <RecentAutomationImports
+          theme={theme}
+          imports={recentImports}
+          currencyCode={currencyCode}
+          sourceName="Text"
+          emptyIcon="bell"
+          emptyTitle="No text imports yet"
+          emptyCopy="After the first matched alert, it appears here with the merchant and amount."
+        />
+      </ScrollView>
+
+      <View style={[styles.guideFooter, { paddingBottom: Math.max(insetsBottom, SPACE.md), backgroundColor: theme.bg, borderTopColor: theme.hairline }]}>
+        <SheetPrimaryButton
+          label="Create Automation"
+          onPress={onCreateAutomation}
+          theme={theme}
+        />
+        <Pressable
+          onPress={onPreview}
+          style={[styles.secondaryButton, { backgroundColor: theme.chipBg }]}
+          accessibilityRole="button"
+          accessibilityLabel="Preview text import"
+        >
+          <Icon name="play" size={16} color={theme.text} stroke={1.7} />
+          <Text style={[TYPE.body, { color: theme.text }]}>Preview Text Import</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function AutomationStatusPanel({
   theme,
   mode,
   latestImport,
   currencyCode,
   lastRun,
+  sourceName,
+  fallbackMerchant,
 }: {
   theme: Theme;
-  mode: ApplePayAutomationMode;
+  mode: TransactionAutomationMode;
   latestImport?: Transaction;
   currencyCode: string;
-  lastRun: ApplePayAutomationStatus;
+  lastRun: TransactionAutomationStatus;
+  sourceName: string;
+  fallbackMerchant: string;
 }) {
   const autoSave = mode === 'autosave';
   const confirm = mode === 'confirm';
-  const needsAttention = lastRun.status === 'failed';
+  const needsAttention = lastRun.status === 'failed' || lastRun.status === 'ignored';
   const statusTitle = autoSave
-    ? 'Background logging is armed'
+    ? `${sourceName} logging is armed`
     : confirm
-      ? 'Review-first is armed'
+      ? `${sourceName} review is armed`
       : 'Choose an import behavior';
   const statusDetail = lastRun.status
-    ? applePayStatusDetail(lastRun, currencyCode)
+    ? automationStatusDetail(lastRun, currencyCode, fallbackMerchant)
     : latestImport
     ? `Latest: ${latestImport.merchant} · ${formatMoney(latestImport.amount, true, currencyCode)}`
     : autoSave
-      ? 'The next Wallet transaction can save without launching the app.'
+      ? sourceName === 'Wallet'
+        ? 'The next Wallet transaction can save without launching the app.'
+        : 'The next matched text alert can save without launching the app.'
       : confirm
-        ? 'The next Wallet transaction opens with the fields already filled.'
+        ? sourceName === 'Wallet'
+          ? 'The next Wallet transaction opens with the fields already filled.'
+          : 'The next matched text alert opens with the fields already filled.'
         : 'Pick Auto-save for the quietest setup.';
   const iconName = needsAttention
     ? 'bell'
@@ -583,7 +877,7 @@ function AutomationStatusPanel({
         ? 'check'
         : confirm
           ? 'receipt'
-          : 'wallet';
+          : sourceName === 'Wallet' ? 'wallet' : 'bell';
   const iconBg = needsAttention ? cautionBg(theme.dark) : autoSave ? theme.accent.fill : theme.surface;
   const iconColor = needsAttention ? cautionText(theme.dark) : autoSave ? theme.accent.ink : theme.text;
 
@@ -607,14 +901,15 @@ function AutomationStatusPanel({
 
 function DeveloperReplayPanel({
   theme,
-  lastRun,
+  sourceName,
+  replayReady,
   onReplay,
 }: {
   theme: Theme;
-  lastRun: ApplePayAutomationStatus;
+  sourceName: string;
+  replayReady: boolean;
   onReplay: () => void;
 }) {
-  const replayReady = !!applePayReplayUrl(lastRun);
   return (
     <View style={[styles.devReplayPanel, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
       <View style={styles.devReplayHeader}>
@@ -624,7 +919,7 @@ function DeveloperReplayPanel({
         <View style={styles.devReplayCopy}>
           <Text style={[TYPE.body, { color: theme.text }]}>Developer replay</Text>
           <Text style={[TYPE.caption, { color: theme.textSec }]}>
-            Debug builds keep the last Wallet payload so parser changes can be checked without another payment.
+            Debug builds keep the last {sourceName} payload so parser changes can be checked repeatedly.
           </Text>
         </View>
       </View>
@@ -640,7 +935,7 @@ function DeveloperReplayPanel({
         ]}
         accessibilityRole="button"
         accessibilityState={{ disabled: !replayReady }}
-        accessibilityLabel="Replay last Wallet import"
+        accessibilityLabel={`Replay last ${sourceName} import`}
       >
         <Icon name="play" size={15} color={replayReady ? theme.accent.ink : theme.textSec} stroke={1.8} />
         <Text style={[TYPE.body, { color: replayReady ? theme.accent.ink : theme.textSec }]}>
@@ -673,7 +968,43 @@ function ShortcutSetupPreview({ theme, mode }: { theme: Theme; mode: ApplePayAut
           theme={theme}
           icon="wallet"
           title="Import Apple Pay Transaction"
-          detail={autoSave ? 'Saves in background' : 'Opens review screen'}
+          detail={autoSave ? 'Transaction: Shortcut Input · Saves in background' : 'Transaction: Shortcut Input · Opens review'}
+        />
+        <ShortcutPreviewRow
+          theme={theme}
+          icon="sparkle"
+          title="Run immediately"
+          detail="Notify when run: off"
+          last
+        />
+      </View>
+    </View>
+  );
+}
+
+function TextShortcutSetupPreview({ theme, mode }: { theme: Theme; mode: TransactionAutomationMode }) {
+  const autoSave = mode === 'autosave';
+  return (
+    <View style={styles.guideSection}>
+      <Text style={[TYPE.labelLg, { color: theme.textTer }]}>Shortcut should look like</Text>
+      <View style={[styles.shortcutPreview, { backgroundColor: theme.surface, borderColor: theme.hairline }]}>
+        <View style={styles.shortcutTopBar}>
+          <View style={[styles.shortcutDot, { backgroundColor: theme.textTer }]} />
+          <View style={[styles.shortcutDot, { backgroundColor: theme.textTer }]} />
+          <View style={[styles.shortcutDot, { backgroundColor: theme.textTer }]} />
+        </View>
+
+        <ShortcutPreviewRow
+          theme={theme}
+          icon="bell"
+          title="When message arrives"
+          detail="Sender: card alert · Contains: purchase, spent, charge, or transaction"
+        />
+        <ShortcutPreviewRow
+          theme={theme}
+          icon="receipt"
+          title="Process Receipt"
+          detail={autoSave ? 'Text field: Shortcut Input · Saves in background' : 'Text field: Shortcut Input · Opens review'}
         />
         <ShortcutPreviewRow
           theme={theme}
@@ -726,6 +1057,36 @@ function RecentApplePayImports({
   currencyCode: string;
 }) {
   return (
+    <RecentAutomationImports
+      theme={theme}
+      imports={imports}
+      currencyCode={currencyCode}
+      sourceName="Wallet"
+      emptyIcon="wallet"
+      emptyTitle="No Wallet imports yet"
+      emptyCopy="After the first background save, it appears here with the merchant and amount."
+    />
+  );
+}
+
+function RecentAutomationImports({
+  theme,
+  imports,
+  currencyCode,
+  sourceName,
+  emptyIcon,
+  emptyTitle,
+  emptyCopy,
+}: {
+  theme: Theme;
+  imports: Transaction[];
+  currencyCode: string;
+  sourceName: string;
+  emptyIcon: string;
+  emptyTitle: string;
+  emptyCopy: string;
+}) {
+  return (
     <View style={styles.guideSection}>
       <View style={styles.sectionTitleRow}>
         <Text style={[TYPE.labelLg, { color: theme.textTer }]}>Recent imports</Text>
@@ -735,20 +1096,21 @@ function RecentApplePayImports({
         {imports.length === 0 ? (
           <View style={styles.emptyRecent}>
             <View style={[styles.emptyRecentIcon, { backgroundColor: theme.chipBg }]}>
-              <Icon name="wallet" size={18} color={theme.textSec} stroke={1.7} />
+              <Icon name={emptyIcon} size={18} color={theme.textSec} stroke={1.7} />
             </View>
-            <Text style={[TYPE.body, { color: theme.text }]}>No Wallet imports yet</Text>
+            <Text style={[TYPE.body, { color: theme.text }]}>{emptyTitle}</Text>
             <Text style={[TYPE.caption, styles.emptyRecentCopy, { color: theme.textSec }]}>
-              After the first background save, it appears here with the merchant and amount.
+              {emptyCopy}
             </Text>
           </View>
         ) : (
           imports.map((tx, index) => (
-            <RecentApplePayImportRow
+            <RecentAutomationImportRow
               key={tx.id}
               theme={theme}
               tx={tx}
               currencyCode={currencyCode}
+              sourceName={sourceName}
               showDivider={index < imports.length - 1}
             />
           ))
@@ -758,15 +1120,17 @@ function RecentApplePayImports({
   );
 }
 
-function RecentApplePayImportRow({
+function RecentAutomationImportRow({
   theme,
   tx,
   currencyCode,
+  sourceName,
   showDivider,
 }: {
   theme: Theme;
   tx: Transaction;
   currencyCode: string;
+  sourceName: string;
   showDivider: boolean;
 }) {
   const background = tx.meta?.backgroundImported === true;
@@ -779,7 +1143,7 @@ function RecentApplePayImportRow({
         <View style={styles.recentCopy}>
           <Text style={[TYPE.body, { color: theme.text }]} numberOfLines={1}>{tx.merchant}</Text>
           <Text style={[TYPE.caption, { color: theme.textSec }]} numberOfLines={1}>
-            {background ? 'Background' : 'Reviewed'} · {relativeImportTime(tx)}
+            {background ? 'Background' : 'Reviewed'} · {sourceName} · {relativeImportTime(tx)}
           </Text>
         </View>
         <Text style={[TYPE.body, styles.recentAmount, { color: theme.text }]}>
@@ -916,30 +1280,46 @@ function iosMajorVersion(): number {
 }
 
 function applePayAutomationStatus(meta?: Record<string, unknown>): ApplePayAutomationStatus {
-  const status = metaString(meta?.applePayAutomationLastStatus);
-  const amount = metaNumber(meta?.applePayAutomationLastAmount);
+  return transactionAutomationStatus(meta, 'applePayAutomation');
+}
+
+function textAutomationStatus(meta?: Record<string, unknown>): TransactionAutomationStatus {
+  return transactionAutomationStatus(meta, 'textAutomation');
+}
+
+function transactionAutomationStatus(
+  meta: Record<string, unknown> | undefined,
+  prefix: 'applePayAutomation' | 'textAutomation',
+): TransactionAutomationStatus {
+  const status = metaString(meta?.[`${prefix}LastStatus`]);
+  const amount = metaNumber(meta?.[`${prefix}LastAmount`]);
   return {
-    status: isApplePayLastStatus(status) ? status : undefined,
-    runAt: metaString(meta?.applePayAutomationLastRunAt),
-    merchant: metaString(meta?.applePayAutomationLastMerchant),
+    status: isAutomationLastStatus(status) ? status : undefined,
+    runAt: metaString(meta?.[`${prefix}LastRunAt`]),
+    merchant: metaString(meta?.[`${prefix}LastMerchant`]),
     amount,
-    error: metaString(meta?.applePayAutomationLastError),
-    background: meta?.applePayAutomationLastBackground === true,
-    replayText: metaString(meta?.applePayAutomationLastReplayText),
-    replayAmount: metaNumber(meta?.applePayAutomationLastReplayAmount),
-    replayMerchant: metaString(meta?.applePayAutomationLastReplayMerchant),
-    replayOccurredAt: metaString(meta?.applePayAutomationLastReplayOccurredAt),
-    replayCategory: metaString(meta?.applePayAutomationLastReplayCategory),
-    replayCardLast4: metaString(meta?.applePayAutomationLastReplayCardLast4),
+    error: metaString(meta?.[`${prefix}LastError`]),
+    background: meta?.[`${prefix}LastBackground`] === true,
+    replayText: metaString(meta?.[`${prefix}LastReplayText`]),
+    replayAmount: metaNumber(meta?.[`${prefix}LastReplayAmount`]),
+    replayMerchant: metaString(meta?.[`${prefix}LastReplayMerchant`]),
+    replayOccurredAt: metaString(meta?.[`${prefix}LastReplayOccurredAt`]),
+    replayCategory: metaString(meta?.[`${prefix}LastReplayCategory`]),
+    replayCardLast4: metaString(meta?.[`${prefix}LastReplayCardLast4`]),
   };
 }
 
 function isApplePayLastStatus(value?: string): value is ApplePayAutomationLastStatus {
+  return isAutomationLastStatus(value);
+}
+
+function isAutomationLastStatus(value?: string): value is TransactionAutomationLastStatus {
   return value === 'saved'
     || value === 'duplicate'
     || value === 'review'
     || value === 'disabled'
-    || value === 'failed';
+    || value === 'failed'
+    || value === 'ignored';
 }
 
 function metaString(value: unknown): string | undefined {
@@ -951,7 +1331,11 @@ function metaNumber(value: unknown): number | undefined {
 }
 
 function applePayStatusDetail(status: ApplePayAutomationStatus, currencyCode: string): string {
-  const merchant = status.merchant ?? 'Apple Pay';
+  return automationStatusDetail(status, currencyCode, 'Apple Pay');
+}
+
+function automationStatusDetail(status: TransactionAutomationStatus, currencyCode: string, fallbackMerchant: string): string {
+  const merchant = status.merchant ?? fallbackMerchant;
   const amount = status.amount !== undefined ? ` · ${formatMoney(status.amount, true, currencyCode)}` : '';
   const when = status.runAt ? ` · ${relativeTimeFromIso(status.runAt)}` : '';
 
@@ -967,17 +1351,28 @@ function applePayStatusDetail(status: ApplePayAutomationStatus, currencyCode: st
   if (status.status === 'disabled') {
     return `Last run: ignored while off${when}`;
   }
+  if (status.status === 'ignored') {
+    return `Last run: ignored ${status.error ?? 'because it was not a transaction alert'}${when}`;
+  }
   if (status.status === 'failed') {
     return `Last run: opened review after ${status.error ?? 'a background error'}${when}`;
   }
-  return 'No Wallet transactions have run yet.';
+  return `No ${fallbackMerchant === 'Apple Pay' ? 'Wallet transactions' : 'text alerts'} have run yet.`;
 }
 
 function applePayReplayUrl(status: ApplePayAutomationStatus): string | null {
+  return automationReplayUrl(status, 'wallet');
+}
+
+function textReplayUrl(status: TransactionAutomationStatus): string | null {
+  return automationReplayUrl(status, 'sms');
+}
+
+function automationReplayUrl(status: TransactionAutomationStatus, source: 'wallet' | 'sms'): string | null {
   if (!status.replayText && status.replayAmount === undefined) return null;
 
   const query: [string, string][] = [
-    ['source', 'wallet'],
+    ['source', source],
     ['preview', '1'],
     ['replay', '1'],
   ];
@@ -1000,6 +1395,10 @@ function applePayReplayUrl(status: ApplePayAutomationStatus): string | null {
 
 function isApplePayImport(tx: Transaction): boolean {
   return tx.meta?.automationSource === 'wallet';
+}
+
+function isTextImport(tx: Transaction): boolean {
+  return tx.meta?.automationSource === 'sms';
 }
 
 function transactionTime(tx: Transaction): number {

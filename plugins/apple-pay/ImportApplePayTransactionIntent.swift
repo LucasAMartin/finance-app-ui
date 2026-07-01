@@ -10,7 +10,7 @@ struct ImportApplePayTransactionIntent: AppIntent {
   static var openAppWhenRun = false
 
   @Parameter(title: "Transaction", inputConnectionBehavior: .connectToPreviousIntentResult)
-  var transaction: String?
+  var transaction: String
 
   @Parameter(title: "Amount")
   var amount: Double?
@@ -21,16 +21,8 @@ struct ImportApplePayTransactionIntent: AppIntent {
   @Parameter(title: "Date")
   var date: Date?
 
-  init() {
-    self.transaction = nil
-    self.amount = nil
-    self.merchant = nil
-    self.date = nil
-  }
-
   static var parameterSummary: some ParameterSummary {
-    Summary("Import Apple Pay transaction") {
-      \.$transaction
+    Summary("Import \(\.$transaction) as Apple Pay transaction") {
       \.$amount
       \.$merchant
       \.$date
@@ -43,7 +35,8 @@ struct ImportApplePayTransactionIntent: AppIntent {
       transaction: transaction,
       amount: amount,
       merchant: merchant,
-      date: date
+      date: date,
+      source: .wallet
     ) else {
       return .result()
     }
@@ -71,7 +64,7 @@ struct ImportApplePayTransactionIntent: AppIntent {
     components.path = "/expense"
 
     var queryItems = [
-      URLQueryItem(name: "source", value: "wallet"),
+      URLQueryItem(name: "source", value: draft.source.rawValue),
       URLQueryItem(name: "autoSave", value: "1"),
     ]
 
@@ -93,17 +86,130 @@ struct ImportApplePayTransactionIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
-struct FinanceAppShortcutsProvider: AppShortcutsProvider {
-  static var appShortcuts: [AppShortcut] {
-    AppShortcut(
-      intent: ImportApplePayTransactionIntent(),
-      phrases: [
-        "Import Apple Pay transaction in \(.applicationName)",
-        "Add Apple Pay transaction to \(.applicationName)",
-      ],
-      shortTitle: "Import Apple Pay",
-      systemImageName: "wallet.pass"
-    )
+struct ImportTextTransactionIntent: AppIntent {
+  static var title: LocalizedStringResource = "Process Receipt"
+  static var description = IntentDescription("Send a transaction alert or receipt text to finance-app.")
+  static var openAppWhenRun = false
+
+  @Parameter(title: "Receipt Text", inputConnectionBehavior: .connectToPreviousIntentResult)
+  var message: String
+
+  @Parameter(title: "Amount")
+  var amount: Double?
+
+  @Parameter(title: "Merchant")
+  var merchant: String?
+
+  @Parameter(title: "Date")
+  var date: Date?
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("Process receipt \(\.$message)") {
+      \.$amount
+      \.$merchant
+      \.$date
+    }
+  }
+
+  @MainActor
+  func perform() async throws -> some IntentResult {
+    if let rejectionReason = ApplePayTransactionParser.rejectionReason(
+      transaction: message,
+      amount: amount,
+      source: .sms
+    ) {
+      ApplePayTransactionStore.recordIgnored(
+        source: .sms,
+        rawText: message,
+        amount: ApplePayTransactionParser.resolvedAmount(transaction: message, amount: amount),
+        reason: rejectionReason
+      )
+      return .result()
+    }
+
+    guard let draft = ApplePayTransactionParser.makeDraft(
+      transaction: message,
+      amount: amount,
+      merchant: merchant,
+      date: date,
+      source: .sms
+    ) else {
+      return .result()
+    }
+
+    do {
+      switch try ApplePayTransactionStore.importInBackground(draft) {
+      case .saved, .duplicate, .disabled:
+        return .result()
+      case .needsReview:
+        await openReview(for: draft)
+        return .result()
+      }
+    } catch {
+      ApplePayTransactionStore.recordFailure(draft, error: error)
+      await openReview(for: draft)
+      return .result()
+    }
+  }
+
+  @MainActor
+  private func openReview(for draft: ApplePayTransactionDraft) async {
+    var components = URLComponents()
+    components.scheme = "financeapp"
+    components.host = ""
+    components.path = "/expense"
+
+    var queryItems = [
+      URLQueryItem(name: "source", value: draft.source.rawValue),
+      URLQueryItem(name: "autoSave", value: "1"),
+    ]
+
+    if let rawText = draft.rawText, !rawText.isEmpty {
+      queryItems.append(URLQueryItem(name: "text", value: rawText))
+    }
+
+    queryItems.append(URLQueryItem(name: "amount", value: String(format: "%.2f", draft.amount)))
+    queryItems.append(URLQueryItem(name: "merchant", value: draft.merchant))
+    queryItems.append(URLQueryItem(name: "category", value: draft.category))
+    queryItems.append(URLQueryItem(name: "date", value: ISO8601DateFormatter().string(from: draft.occurredAt)))
+
+    components.queryItems = queryItems
+
+    if let url = components.url {
+      await UIApplication.shared.open(url)
+    }
+  }
+}
+
+private enum TransactionAutomationSource: String {
+  case wallet
+  case sms
+
+  var note: String {
+    switch self {
+    case .wallet:
+      return "Imported from Wallet shortcut"
+    case .sms:
+      return "Imported from text message"
+    }
+  }
+
+  var fallbackMerchant: String {
+    switch self {
+    case .wallet:
+      return "Apple Pay"
+    case .sms:
+      return "Text alert"
+    }
+  }
+
+  var settingsPrefix: String {
+    switch self {
+    case .wallet:
+      return "applePayAutomation"
+    case .sms:
+      return "textAutomation"
+    }
   }
 }
 
@@ -115,9 +221,10 @@ private struct ApplePayTransactionDraft {
   let rawText: String?
   let cardLast4: String?
   let confidence: Double
+  let source: TransactionAutomationSource
 
   var note: String {
-    "Imported from Wallet shortcut"
+    source.note
   }
 }
 
@@ -143,16 +250,22 @@ private enum ApplePayTransactionParser {
     "movies": "entertainment", "netflix": "entertainment", "spotify": "entertainment",
     "concert": "entertainment", "game": "entertainment", "games": "entertainment",
   ]
+  private static let smsTransactionCue = #"\b(?:purchase|purchased|spent|charge|charged|transaction|authorization|authorized)\b|\b(?:card|visa|mastercard|amex)[^.!?]{0,50}\b(?:used|charged)\b"#
+  private static let smsNonTransactionCue = #"\b(?:verification|security|one[-\s]?time|otp|login|password|fraud|declined|denied|blocked|payment\s+due|minimum\s+payment|statement|auto\s*pay|autopay|payment\s+(?:received|posted|processed)|deposit|transfer|refund|credit\s+limit)\b|\b(?:did\s+you|was\s+this\s+you)\b|\breply\s+(?:yes|no)\b"#
 
   static func makeDraft(
     transaction: String?,
     amount explicitAmount: Double?,
     merchant explicitMerchant: String?,
-    date explicitDate: Date?
+    date explicitDate: Date?,
+    source: TransactionAutomationSource
   ) -> ApplePayTransactionDraft? {
     let rawText = transaction?.trimmedNonEmpty
-    let parsedAmount = parseAmount(rawText ?? "")
-    let amount = explicitAmount.flatMap { $0 > 0 ? $0 : nil } ?? parsedAmount
+    if rejectionReason(transaction: transaction, amount: explicitAmount, source: source) != nil {
+      return nil
+    }
+
+    let amount = resolvedAmount(transaction: transaction, amount: explicitAmount) ?? 0
     guard amount > 0 else { return nil }
 
     let parsedMerchant = parseMerchant(rawText ?? "")
@@ -169,8 +282,46 @@ private enum ApplePayTransactionParser {
       occurredAt: explicitDate ?? Date(),
       rawText: rawText,
       cardLast4: parseCardLast4(rawText ?? ""),
-      confidence: confidence
+      confidence: confidence,
+      source: source
     )
+  }
+
+  static func rejectionReason(
+    transaction: String?,
+    amount explicitAmount: Double?,
+    source: TransactionAutomationSource
+  ) -> String? {
+    let rawText = transaction?.trimmedNonEmpty
+    if source == .sms, rawText == nil {
+      return "No receipt text reached finance-app. In Shortcuts, tap the blank text field in Process Receipt and choose Shortcut Input."
+    }
+
+    guard resolvedAmount(transaction: transaction, amount: explicitAmount) != nil else {
+      return "No transaction amount was found."
+    }
+
+    if source == .sms, let rawText {
+      if rawText.firstRegexMatch(smsNonTransactionCue, options: [.caseInsensitive]) != nil {
+        return "Ignored because this looks like a non-purchase card alert."
+      }
+      if rawText.firstRegexMatch(smsTransactionCue, options: [.caseInsensitive]) == nil {
+        return "Ignored because the text did not include purchase, spent, charge, transaction, or authorized."
+      }
+    }
+
+    return nil
+  }
+
+  static func resolvedAmount(transaction: String?, amount explicitAmount: Double?) -> Double? {
+    let parsedAmount = parseAmount(transaction?.trimmedNonEmpty ?? "")
+    let amount = explicitAmount.flatMap { $0 > 0 ? $0 : nil } ?? parsedAmount
+    return amount > 0 ? amount : nil
+  }
+
+  private static func isLikelySmsTransaction(_ text: String) -> Bool {
+    text.firstRegexMatch(smsTransactionCue, options: [.caseInsensitive]) != nil
+      && text.firstRegexMatch(smsNonTransactionCue, options: [.caseInsensitive]) == nil
   }
 
   private static func parseAmount(_ text: String) -> Double {
@@ -194,7 +345,24 @@ private enum ApplePayTransactionParser {
     for pattern in patterns {
       guard let raw = text.firstRegexMatch(pattern, options: [.caseInsensitive])?[safe: 1] else { continue }
       let stopped = raw.removingAfterFirstMatch(
-        #"\b(?:with|using|on|for|from)\s+(?:your\s+)?(?:credit|debit|card|visa|mastercard|amex|account)\b|(?:^|\s)(?:reply|msg|message|data|rates?|apply|stop|txt)\b|[.。]\s*(?:reply|msg|message)\b"#,
+        #"\b(?:with|using|on|for|from)\s+(?:your\s+)?(?:credit|debit|card|visa|mastercard|amex|account)\b|\b(?:card|account|acct)\s+(?:ending|ends(?:\s+in)?|[xX*.\s-]*\d{4})\b|\s+for\s+(?:USD\s*)?\$?\s*\d|(?:^|\s)(?:reply|msg|message|data|rates?|apply|stop|txt|available|balance)\b|[.。]\s*(?:reply|msg|message)\b"#,
+        options: [.caseInsensitive]
+      )
+      let merchant = cleanupMerchant(stopped)
+      if !merchant.isEmpty { return merchant }
+    }
+
+    let amountThenMerchantPatterns = [
+      #"(?:USD\s*)?\$?\s*[0-9]{1,6}(?:[.,][0-9]{2})\b(?:\s+(?:was|is|has been))?(?:\s+(?:made|authorized|approved|posted|processed))?(?:\s+(?:at|to|from))?\s+(.+)$"#,
+      #"\b[0-9]{1,6}(?:[.,][0-9]{2})\s*(?:USD|dollars?)\b(?:\s+(?:was|is|has been))?(?:\s+(?:made|authorized|approved|posted|processed))?(?:\s+(?:at|to|from))?\s+(.+)$"#,
+    ]
+
+    for pattern in amountThenMerchantPatterns {
+      guard let raw = text.firstRegexMatch(pattern, options: [.caseInsensitive])?[safe: 1] else { continue }
+      let candidate = raw
+        .replacing(pattern: #"^(?:[\s:;,.=-]+|(?:was|is|has been)\s+|(?:made|authorized|approved|posted|processed)\s+|(?:at|to|from|merchant|purchase|charge|transaction)\s*)+"#, with: "", options: [.caseInsensitive])
+      let stopped = candidate.removingAfterFirstMatch(
+        #"\b(?:with|using|on|for|from)\s+(?:your\s+)?(?:credit|debit|card|visa|mastercard|amex|account)\b|\b(?:card|account|acct)\s+(?:ending|ends(?:\s+in)?|[xX*.\s-]*\d{4})\b|\s+for\s+(?:USD\s*)?\$?\s*\d|(?:^|\s)(?:reply|msg|message|data|rates?|apply|stop|txt|available|balance)\b|[.。]\s*(?:reply|msg|message)\b"#,
         options: [.caseInsensitive]
       )
       let merchant = cleanupMerchant(stopped)
@@ -236,7 +404,7 @@ private enum ApplePayBackgroundImportOutcome {
   case needsReview
 }
 
-private enum ApplePayAutomationMode: String {
+private enum TransactionAutomationMode: String {
   case off
   case confirm
   case autosave
@@ -257,7 +425,7 @@ private enum ApplePayTransactionStore {
     try db.exec("PRAGMA busy_timeout = 5000;")
 
     let meta = settingsMeta(db)
-    let mode = automationMode(from: meta)
+    let mode = automationMode(from: meta, source: draft.source)
     if mode == .off {
       try? recordRunStatus(db, meta: meta, draft: draft, status: "disabled", background: true)
       return .disabled
@@ -267,8 +435,8 @@ private enum ApplePayTransactionStore {
       return .needsReview
     }
 
-    let context = automationContext(db, meta: meta)
-    let merchant = draft.merchant.trimmedNonEmpty ?? "Apple Pay"
+    let context = automationContext(db, meta: meta, source: draft.source)
+    let merchant = draft.merchant.trimmedNonEmpty ?? draft.source.fallbackMerchant
     let category = validCategory(draft.category, db: db, ledgerId: context.ledgerId)
     let occurredAt = isoFormatter.string(from: draft.occurredAt)
     let fingerprint = automationFingerprint(draft: draft, merchant: merchant)
@@ -282,7 +450,7 @@ private enum ApplePayTransactionStore {
     let id = nextId(prefix: "tx")
     let metadata = jsonString([
       "merchantSource": draft.merchant.trimmedNonEmpty == nil ? "fallback" : "automation",
-      "automationSource": "wallet",
+      "automationSource": draft.source.rawValue,
       "automationConfidence": draft.confidence,
       "cardLast4": draft.cardLast4 as Any,
       "automationOccurredAt": occurredAt,
@@ -344,6 +512,24 @@ private enum ApplePayTransactionStore {
     )
   }
 
+  static func recordIgnored(source: TransactionAutomationSource, rawText: String?, amount: Double?, reason: String) {
+    guard let databaseURL = databaseURL(), FileManager.default.fileExists(atPath: databaseURL.path),
+          let db = try? SQLiteConnection(path: databaseURL.path)
+    else {
+      return
+    }
+
+    let meta = settingsMeta(db)
+    try? recordIgnoredStatus(
+      db,
+      meta: meta,
+      source: source,
+      rawText: rawText?.trimmedNonEmpty,
+      amount: amount,
+      reason: reason
+    )
+  }
+
   private static func databaseURL() -> URL? {
     FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
       .first?
@@ -362,20 +548,20 @@ private enum ApplePayTransactionStore {
     return object
   }
 
-  private static func automationMode(from meta: [String: Any]) -> ApplePayAutomationMode {
-    guard let raw = meta["applePayAutomationMode"] as? String else { return .off }
-    return ApplePayAutomationMode(rawValue: raw) ?? .off
+  private static func automationMode(from meta: [String: Any], source: TransactionAutomationSource) -> TransactionAutomationMode {
+    guard let raw = meta["\(source.settingsPrefix)Mode"] as? String else { return .off }
+    return TransactionAutomationMode(rawValue: raw) ?? .off
   }
 
-  private static func automationContext(_ db: SQLiteConnection, meta: [String: Any]) -> (ledgerId: String, userId: String) {
-    let ledgerId = (meta["applePayAutomationLedgerId"] as? String)?.trimmedNonEmpty
+  private static func automationContext(_ db: SQLiteConnection, meta: [String: Any], source: TransactionAutomationSource) -> (ledgerId: String, userId: String) {
+    let ledgerId = (meta["\(source.settingsPrefix)LedgerId"] as? String)?.trimmedNonEmpty
       ?? (try? db.scalarString(
         "SELECT id FROM ledgers WHERE active = 1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1",
         []
       ))?.trimmedNonEmpty
       ?? defaultLedgerId
 
-    let requestedUserId = (meta["applePayAutomationUserId"] as? String)?.trimmedNonEmpty
+    let requestedUserId = (meta["\(source.settingsPrefix)UserId"] as? String)?.trimmedNonEmpty
     if let requestedUserId,
        (try? db.scalarString(
         "SELECT user_id FROM ledger_members WHERE ledger_id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1",
@@ -416,47 +602,106 @@ private enum ApplePayTransactionStore {
     transactionId: String? = nil,
     errorMessage: String? = nil
   ) throws {
-    let merchant = draft.merchant.trimmedNonEmpty ?? "Apple Pay"
+    let merchant = draft.merchant.trimmedNonEmpty ?? draft.source.fallbackMerchant
     let occurredAt = isoFormatter.string(from: draft.occurredAt)
     var nextMeta = meta
-    nextMeta["applePayAutomationLastStatus"] = status
-    nextMeta["applePayAutomationLastRunAt"] = isoFormatter.string(from: Date())
-    nextMeta["applePayAutomationLastMerchant"] = merchant
-    nextMeta["applePayAutomationLastAmount"] = draft.amount
-    nextMeta["applePayAutomationLastOccurredAt"] = occurredAt
-    nextMeta["applePayAutomationLastFingerprint"] = fingerprint ?? automationFingerprint(draft: draft, merchant: merchant)
-    nextMeta["applePayAutomationLastTransactionId"] = transactionId
-    nextMeta["applePayAutomationLastBackground"] = background
+    let prefix = draft.source.settingsPrefix
+    nextMeta["\(prefix)LastStatus"] = status
+    nextMeta["\(prefix)LastRunAt"] = isoFormatter.string(from: Date())
+    nextMeta["\(prefix)LastMerchant"] = merchant
+    nextMeta["\(prefix)LastAmount"] = draft.amount
+    nextMeta["\(prefix)LastOccurredAt"] = occurredAt
+    nextMeta["\(prefix)LastFingerprint"] = fingerprint ?? automationFingerprint(draft: draft, merchant: merchant)
+    nextMeta["\(prefix)LastTransactionId"] = transactionId
+    nextMeta["\(prefix)LastBackground"] = background
 
     #if DEBUG
     if let rawText = draft.rawText {
-      nextMeta["applePayAutomationLastReplayText"] = rawText
+      nextMeta["\(prefix)LastReplayText"] = rawText
     } else {
-      nextMeta.removeValue(forKey: "applePayAutomationLastReplayText")
+      nextMeta.removeValue(forKey: "\(prefix)LastReplayText")
     }
-    nextMeta["applePayAutomationLastReplayAmount"] = draft.amount
-    nextMeta["applePayAutomationLastReplayMerchant"] = merchant
-    nextMeta["applePayAutomationLastReplayOccurredAt"] = occurredAt
-    nextMeta["applePayAutomationLastReplayCategory"] = draft.category
+    nextMeta["\(prefix)LastReplayAmount"] = draft.amount
+    nextMeta["\(prefix)LastReplayMerchant"] = merchant
+    nextMeta["\(prefix)LastReplayOccurredAt"] = occurredAt
+    nextMeta["\(prefix)LastReplayCategory"] = draft.category
     if let cardLast4 = draft.cardLast4 {
-      nextMeta["applePayAutomationLastReplayCardLast4"] = cardLast4
+      nextMeta["\(prefix)LastReplayCardLast4"] = cardLast4
     } else {
-      nextMeta.removeValue(forKey: "applePayAutomationLastReplayCardLast4")
+      nextMeta.removeValue(forKey: "\(prefix)LastReplayCardLast4")
     }
     #else
-    nextMeta.removeValue(forKey: "applePayAutomationLastReplayText")
-    nextMeta.removeValue(forKey: "applePayAutomationLastReplayAmount")
-    nextMeta.removeValue(forKey: "applePayAutomationLastReplayMerchant")
-    nextMeta.removeValue(forKey: "applePayAutomationLastReplayOccurredAt")
-    nextMeta.removeValue(forKey: "applePayAutomationLastReplayCategory")
-    nextMeta.removeValue(forKey: "applePayAutomationLastReplayCardLast4")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayText")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayAmount")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayMerchant")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayOccurredAt")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayCategory")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayCardLast4")
     #endif
 
     if let errorMessage {
-      nextMeta["applePayAutomationLastError"] = errorMessage
+      nextMeta["\(prefix)LastError"] = errorMessage
     } else {
-      nextMeta.removeValue(forKey: "applePayAutomationLastError")
+      nextMeta.removeValue(forKey: "\(prefix)LastError")
     }
+
+    try db.execute(
+      "UPDATE settings SET meta = ? WHERE id = ?",
+      [
+        jsonString(nextMeta).map(SQLiteValue.text) ?? .null,
+        .text("settings"),
+      ]
+    )
+  }
+
+  private static func recordIgnoredStatus(
+    _ db: SQLiteConnection,
+    meta: [String: Any],
+    source: TransactionAutomationSource,
+    rawText: String?,
+    amount: Double?,
+    reason: String
+  ) throws {
+    let now = isoFormatter.string(from: Date())
+    var nextMeta = meta
+    let prefix = source.settingsPrefix
+    nextMeta["\(prefix)LastStatus"] = "ignored"
+    nextMeta["\(prefix)LastRunAt"] = now
+    nextMeta["\(prefix)LastMerchant"] = source.fallbackMerchant
+    if let amount, amount > 0 {
+      nextMeta["\(prefix)LastAmount"] = amount
+    } else {
+      nextMeta.removeValue(forKey: "\(prefix)LastAmount")
+    }
+    nextMeta.removeValue(forKey: "\(prefix)LastOccurredAt")
+    nextMeta.removeValue(forKey: "\(prefix)LastFingerprint")
+    nextMeta.removeValue(forKey: "\(prefix)LastTransactionId")
+    nextMeta["\(prefix)LastBackground"] = true
+    nextMeta["\(prefix)LastError"] = reason
+
+    #if DEBUG
+    if let rawText {
+      nextMeta["\(prefix)LastReplayText"] = rawText
+    } else {
+      nextMeta.removeValue(forKey: "\(prefix)LastReplayText")
+    }
+    if let amount, amount > 0 {
+      nextMeta["\(prefix)LastReplayAmount"] = amount
+    } else {
+      nextMeta.removeValue(forKey: "\(prefix)LastReplayAmount")
+    }
+    nextMeta["\(prefix)LastReplayMerchant"] = source.fallbackMerchant
+    nextMeta["\(prefix)LastReplayOccurredAt"] = now
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayCategory")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayCardLast4")
+    #else
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayText")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayAmount")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayMerchant")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayOccurredAt")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayCategory")
+    nextMeta.removeValue(forKey: "\(prefix)LastReplayCardLast4")
+    #endif
 
     try db.execute(
       "UPDATE settings SET meta = ? WHERE id = ?",
@@ -519,7 +764,7 @@ private enum ApplePayTransactionStore {
     let minuteBucket = Int(floor(draft.occurredAt.timeIntervalSince1970 / 60))
     let cleanedCard = draft.cardLast4.map { String($0.replacing(pattern: #"\D+"#, with: "").suffix(4)) }
     let card = cleanedCard?.trimmedNonEmpty ?? "unknown"
-    return "wallet:v1:\(amountCents):\(normalizedMerchant):\(minuteBucket):\(card)"
+    return "\(draft.source.rawValue):v1:\(amountCents):\(normalizedMerchant):\(minuteBucket):\(card)"
   }
 
   private static func jsonObject(_ raw: String?) -> [String: Any] {
