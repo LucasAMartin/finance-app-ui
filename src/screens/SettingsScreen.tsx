@@ -56,7 +56,7 @@ import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 
 type TransactionAutomationMode = 'off' | 'confirm' | 'autosave';
-type TransactionAutomationLastStatus = 'saved' | 'duplicate' | 'review' | 'disabled' | 'failed' | 'ignored';
+type TransactionAutomationLastStatus = 'saved' | 'duplicate' | 'review' | 'disabled' | 'failed' | 'ignored' | 'queued';
 type ApplePayAutomationMode = TransactionAutomationMode;
 type ApplePayAutomationLastStatus = TransactionAutomationLastStatus;
 
@@ -554,7 +554,7 @@ function ApplePayAutomationGuide({
             Log every Wallet tap with one automation.
           </Text>
           <Text style={[TYPE.bodyRegular, styles.guideHeroCopy, { color: theme.textSec }]}>
-            Select all cards once in Shortcuts. Auto-save runs without opening finance-app; review mode opens a filled expense screen.
+            Select all cards once in Shortcuts. Auto-save captures quietly and finance-app finishes the import the next time it opens.
           </Text>
 
           <View style={styles.flowPreview}>
@@ -562,7 +562,7 @@ function ApplePayAutomationGuide({
             <Icon name="chevR" size={16} color={theme.textTer} stroke={1.8} />
             <FlowNode theme={theme} icon="sparkle" label="Shortcut" />
             <Icon name="chevR" size={16} color={theme.textTer} stroke={1.8} />
-            <FlowNode theme={theme} icon="check" label="Saved" />
+            <FlowNode theme={theme} icon="check" label={autoSave ? 'Queued' : 'Saved'} />
           </View>
         </View>
 
@@ -591,7 +591,7 @@ function ApplePayAutomationGuide({
             theme={theme}
             active={mode === 'autosave'}
             title="Auto-save"
-            detail="Recommended. Saves quietly in the background after each Wallet transaction."
+            detail="Recommended. Captures quietly in the background, then saves on the next app open."
             onPress={() => onSetMode('autosave')}
           />
           <ModeChoice
@@ -725,7 +725,7 @@ function TextMessageAutomationGuide({
             Turn card texts into transactions.
           </Text>
           <Text style={[TYPE.bodyRegular, styles.guideHeroCopy, { color: theme.textSec }]}>
-            Choose your card alert senders once in Shortcuts. finance-app reads the amount, merchant, card, and category.
+            Choose your card alert senders once in Shortcuts. finance-app reads the amount, merchant, card, and category when it processes the queued alert.
           </Text>
 
           <View style={styles.flowPreview}>
@@ -733,7 +733,7 @@ function TextMessageAutomationGuide({
             <Icon name="chevR" size={16} color={theme.textTer} stroke={1.8} />
             <FlowNode theme={theme} icon="sparkle" label="Shortcut" />
             <Icon name="chevR" size={16} color={theme.textTer} stroke={1.8} />
-            <FlowNode theme={theme} icon="check" label="Saved" />
+            <FlowNode theme={theme} icon="check" label={autoSave ? 'Queued' : 'Saved'} />
           </View>
         </View>
 
@@ -762,7 +762,7 @@ function TextMessageAutomationGuide({
             theme={theme}
             active={mode === 'autosave'}
             title="Auto-save"
-            detail="Recommended after one preview works. Saves matched card alerts in the background."
+            detail="Recommended after one preview works. Captures matched alerts in the background, then saves on the next app open."
             onPress={() => onSetMode('autosave')}
           />
           <ModeChoice
@@ -862,8 +862,8 @@ function AutomationStatusPanel({
     ? `Latest: ${latestImport.merchant} · ${formatMoney(latestImport.amount, true, currencyCode)}`
     : autoSave
       ? sourceName === 'Wallet'
-        ? 'The next Wallet transaction can save without launching the app.'
-        : 'The next matched text alert can save without launching the app.'
+        ? 'The next Wallet transaction can be captured without launching the app.'
+        : 'The next matched text alert can be captured without launching the app.'
       : confirm
         ? sourceName === 'Wallet'
           ? 'The next Wallet transaction opens with the fields already filled.'
@@ -968,7 +968,7 @@ function ShortcutSetupPreview({ theme, mode }: { theme: Theme; mode: ApplePayAut
           theme={theme}
           icon="wallet"
           title="Import Apple Pay Transaction"
-          detail={autoSave ? 'Transaction: Shortcut Input · Saves in background' : 'Transaction: Shortcut Input · Opens review'}
+          detail={autoSave ? 'Transaction: Shortcut Input · Queues in background' : 'Transaction: Shortcut Input · Opens review'}
         />
         <ShortcutPreviewRow
           theme={theme}
@@ -1004,7 +1004,7 @@ function TextShortcutSetupPreview({ theme, mode }: { theme: Theme; mode: Transac
           theme={theme}
           icon="receipt"
           title="Process Receipt"
-          detail={autoSave ? 'Text field: Shortcut Input · Saves in background' : 'Text field: Shortcut Input · Opens review'}
+          detail={autoSave ? 'Text field: Shortcut Input · Queues in background' : 'Text field: Shortcut Input · Opens review'}
         />
         <ShortcutPreviewRow
           theme={theme}
@@ -1319,7 +1319,8 @@ function isAutomationLastStatus(value?: string): value is TransactionAutomationL
     || value === 'review'
     || value === 'disabled'
     || value === 'failed'
-    || value === 'ignored';
+    || value === 'ignored'
+    || value === 'queued';
 }
 
 function metaString(value: unknown): string | undefined {
@@ -1354,6 +1355,9 @@ function automationStatusDetail(status: TransactionAutomationStatus, currencyCod
   if (status.status === 'ignored') {
     return `Last run: ignored ${status.error ?? 'because it was not a transaction alert'}${when}`;
   }
+  if (status.status === 'queued') {
+    return `Last run: queued ${merchant}${amount}${when}`;
+  }
   if (status.status === 'failed') {
     return `Last run: opened review after ${status.error ?? 'a background error'}${when}`;
   }
@@ -1370,6 +1374,7 @@ function textReplayUrl(status: TransactionAutomationStatus): string | null {
 
 function automationReplayUrl(status: TransactionAutomationStatus, source: 'wallet' | 'sms'): string | null {
   if (!status.replayText && status.replayAmount === undefined) return null;
+  if (source === 'sms' && !status.replayText) return null;
 
   const query: [string, string][] = [
     ['source', source],

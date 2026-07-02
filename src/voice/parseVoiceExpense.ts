@@ -21,7 +21,7 @@ const MONEY_WORDS = new Set(['dollar', 'dollars', 'buck', 'bucks', 'cent', 'cent
 // Spoken keyword -> category id. Ids must match the keys of CATS in ../data.
 const CAT_KEYWORDS: Record<string, string> = {
   groceries: 'groceries', grocery: 'groceries', supermarket: 'groceries',
-  market: 'groceries',
+  market: 'groceries', kroger: 'groceries', fred: 'groceries', meyer: 'groceries',
   dining: 'dining', dinner: 'dining', lunch: 'dining', breakfast: 'dining',
   brunch: 'dining', restaurant: 'dining', takeout: 'dining', food: 'dining',
   cafe: 'dining', latte: 'dining', espresso: 'dining', cappuccino: 'dining',
@@ -38,6 +38,8 @@ const CAT_KEYWORDS: Record<string, string> = {
   entertainment: 'entertainment', movie: 'entertainment',
   movies: 'entertainment', netflix: 'entertainment', spotify: 'entertainment',
   concert: 'entertainment', game: 'entertainment', games: 'entertainment',
+  subscription: 'bills', subscriptions: 'bills', software: 'bills',
+  openai: 'bills', claude: 'bills', anthropic: 'bills',
 };
 
 const DEFAULT_CAT = 'dining';

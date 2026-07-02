@@ -12,8 +12,10 @@ import {
   merchantLogoKey,
   planLogoEntry,
   redactLogoUrl,
+  shouldCacheLogoAsset,
   sanitizeBgColor,
   shouldResolve,
+  withRenderableLogoUrl,
   type ResolveResponse,
 } from './merchantLogoPolicy.ts';
 
@@ -172,6 +174,43 @@ test('planLogoEntry: records provider merchantKey in meta only when it differs f
     NOW,
   );
   assert.deepEqual(diff.meta, { providerMerchantKey: 'chipotle' });
+});
+
+test('withRenderableLogoUrl prefers locally cached logo assets', () => {
+  const entry: MerchantLogo = {
+    id: 'chipotle',
+    merchantKey: 'chipotle',
+    status: 'resolved',
+    logoUrl: PK_URL,
+    lastCheckedAt: NOW,
+    failureCount: 0,
+    meta: { localLogoUri: 'file:///cache/chipotle.png' },
+  };
+
+  assert.equal(withRenderableLogoUrl(entry).logoUrl, 'file:///cache/chipotle.png');
+});
+
+test('shouldCacheLogoAsset waits for resolved safe urls and backs off failures', () => {
+  const now = new Date(NOW);
+  const base: MerchantLogo = {
+    id: 'chipotle',
+    merchantKey: 'chipotle',
+    status: 'resolved',
+    logoUrl: PK_URL,
+    lastCheckedAt: NOW,
+    failureCount: 0,
+  };
+
+  assert.equal(shouldCacheLogoAsset(base, now), true);
+  assert.equal(shouldCacheLogoAsset({ ...base, meta: { localLogoUri: 'file:///cache/chipotle.png' } }, now), false);
+  assert.equal(
+    shouldCacheLogoAsset({ ...base, meta: { localLogoRetryAfter: new Date(now.getTime() + 60_000).toISOString() } }, now),
+    false,
+  );
+  assert.equal(
+    shouldCacheLogoAsset({ ...base, meta: { localLogoRetryAfter: new Date(now.getTime() - 60_000).toISOString() } }, now),
+    true,
+  );
 });
 
 test('shouldResolve: no entry resolves; fresh resolved does not; expired resolved does', () => {

@@ -96,7 +96,7 @@ import { buildSavedMetric } from '../selectors/savings';
 import { Icon } from '../components/Icon';
 import { MerchantMark } from '../components/MerchantMark';
 import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
-import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
+import { NativeRowMerchantMark } from '../components/NativeRowMerchantMark';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
@@ -586,7 +586,7 @@ function NativeWhereItWentRow({
         <VStack alignment="leading" spacing={SPACE.xs} modifiers={[frame({ height: NATIVE_WHERE_ROW_H - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' })]}>
           <HStack alignment="center" spacing={SPACE.md} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
             {merchantMode ? (
-              <NativeMerchantMark
+              <NativeRowMerchantMark
                 logoUrl={item.logoUrl}
                 logoBgColor={item.logoBgColor}
                 fallbackSystemName={item.symbol}
@@ -1025,7 +1025,7 @@ export function InsightsScreen({
     } while (cursor);
     return rows;
   }, [transactionsRepo, ranges, repoVersion]);
-  const merchantLogos = useMerchantLogoMap(transactions, SUPPORTS_GLASS);
+  const merchantLogos = useMerchantLogoMap(transactions, SUPPORTS_GLASS && active);
   // A range whose end is in the past is settled: its totals are actuals, not
   // projections, so we drop the "pace"/"projected" framing for it.
   const rangeComplete = ranges.current.to <= now;

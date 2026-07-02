@@ -74,7 +74,7 @@ import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/head
 import { HomeSpendGroups } from '../components/HomeSpendGroups';
 import { MerchantMark } from '../components/MerchantMark';
 import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap, useMerchantLogoMapForMerchants } from '../merchantLogos';
-import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
+import { NativeRowMerchantMark } from '../components/NativeRowMerchantMark';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { useAppFeedback } from '../AppFeedbackProvider';
@@ -1719,7 +1719,7 @@ function NativeUpcomingRow({
             frame({ maxWidth: 10000, alignment: 'leading' }),
           ]}
         >
-          <NativeMerchantMark
+          <NativeRowMerchantMark
             logoUrl={bill.logoUrl}
             logoBgColor={bill.logoBgColor}
             fallbackSystemName={bill.symbol}
@@ -1997,7 +1997,7 @@ function NativeHomeActivityRow({
             frame({ maxWidth: 10000, alignment: 'leading' }),
           ]}
         >
-          <NativeMerchantMark
+          <NativeRowMerchantMark
             logoUrl={item.logoUrl}
             logoBgColor={item.logoBgColor}
             fallbackSystemName={item.symbol}

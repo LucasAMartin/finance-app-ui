@@ -167,6 +167,8 @@ export interface Attachment extends SyncFields {
 }
 
 export type MerchantLogoStatus = 'resolved' | 'not_found' | 'error';
+export type AutomationImportSource = 'wallet' | 'sms';
+export type AutomationImportStatus = 'pending' | 'processing' | 'processed' | 'duplicate' | 'ignored' | 'failed' | 'needs_review';
 
 export interface MerchantLogo {
   id: string;
@@ -199,6 +201,49 @@ export interface UpsertMerchantLogoInput {
   failureCount?: number;
   meta?: Record<string, unknown>;
 }
+
+export interface AutomationImport {
+  id: string;
+  source: AutomationImportSource;
+  rawText?: string;
+  amountHint?: number;
+  merchantHint?: string;
+  categoryHint?: string;
+  occurredAtHint?: string;
+  cardLast4Hint?: string;
+  fingerprint: string;
+  status: AutomationImportStatus;
+  attempts: number;
+  processedTransactionId?: string;
+  error?: string;
+  receivedAt: string;
+  ledgerId?: string;
+  createdByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface CreateAutomationImportInput {
+  source: AutomationImportSource;
+  rawText?: string;
+  amountHint?: number;
+  merchantHint?: string;
+  categoryHint?: string;
+  occurredAtHint?: string;
+  cardLast4Hint?: string;
+  fingerprint: string;
+  status?: AutomationImportStatus;
+  attempts?: number;
+  processedTransactionId?: string;
+  error?: string;
+  receivedAt?: string;
+  ledgerId?: string;
+  createdByUserId?: string;
+  meta?: Record<string, unknown>;
+}
+
+export type UpdateAutomationImportInput = Partial<Omit<AutomationImport, 'id' | 'source' | 'fingerprint' | 'createdAt'>>;
 
 export interface AppSettings {
   id: 'settings';
@@ -322,6 +367,9 @@ export type CategoriesRepo = Repository<Category>;
 export type RecurringRulesRepo = Repository<RecurringRule>;
 export type AttachmentsRepo = Repository<Attachment>;
 export type MerchantLogosRepo = Repository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>;
+export type AutomationImportsRepo = Repository<AutomationImport, CreateAutomationImportInput, UpdateAutomationImportInput> & {
+  listPending(limit?: number): AutomationImport[];
+};
 
 export interface DevDataRepo {
   isSeedDataEnabled(): boolean;
@@ -354,6 +402,7 @@ export interface Repositories {
   recurringRulesRepo: RecurringRulesRepo;
   attachmentsRepo: AttachmentsRepo;
   merchantLogosRepo: MerchantLogosRepo;
+  automationImportsRepo: AutomationImportsRepo;
   devDataRepo: DevDataRepo;
   sessionRepo: SessionRepo;
 }

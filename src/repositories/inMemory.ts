@@ -10,6 +10,8 @@ import {
 import type {
   AppSettings,
   Attachment,
+  AutomationImport,
+  AutomationImportsRepo,
   BindCloudIdentityInput,
   Bill,
   Budget,
@@ -38,6 +40,8 @@ import type {
   TransactionSummaryQuery,
   TransactionsRepo,
   UpdateTransactionInput,
+  CreateAutomationImportInput,
+  UpdateAutomationImportInput,
   UpsertMerchantLogoInput,
 } from './types';
 
@@ -378,6 +382,47 @@ class InMemoryTransactionsRepo
   }
 }
 
+class InMemoryAutomationImportsRepo
+  extends InMemoryRepository<AutomationImport, CreateAutomationImportInput, UpdateAutomationImportInput>
+  implements AutomationImportsRepo {
+  create(input: CreateAutomationImportInput): AutomationImport {
+    const existing = this.rows.find(row => row.fingerprint === input.fingerprint);
+    if (existing) return { ...existing };
+    const now = nowIso();
+    const row: AutomationImport = {
+      id: `automation-import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      source: input.source,
+      rawText: input.rawText,
+      amountHint: input.amountHint,
+      merchantHint: input.merchantHint,
+      categoryHint: input.categoryHint,
+      occurredAtHint: input.occurredAtHint,
+      cardLast4Hint: input.cardLast4Hint,
+      fingerprint: input.fingerprint,
+      status: input.status ?? 'pending',
+      attempts: input.attempts ?? 0,
+      processedTransactionId: input.processedTransactionId,
+      error: input.error,
+      receivedAt: input.receivedAt ?? now,
+      ledgerId: input.ledgerId ?? activeLedgerId,
+      createdByUserId: input.createdByUserId ?? currentUserId,
+      createdAt: now,
+      updatedAt: now,
+      meta: input.meta,
+    };
+    this.rows = [row, ...this.rows];
+    this.refresh();
+    return { ...row };
+  }
+
+  listPending(limit = 25): AutomationImport[] {
+    return this.list()
+      .filter(row => row.status === 'pending')
+      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.id.localeCompare(b.id))
+      .slice(0, Math.max(1, Math.min(limit, 100)));
+  }
+}
+
 class InMemoryDevDataRepo implements DevDataRepo {
   private listeners = new Set<RepoListener>();
   private repos: {
@@ -390,6 +435,7 @@ class InMemoryDevDataRepo implements DevDataRepo {
     attachmentsRepo: InMemoryRepository<Attachment>;
     ledgersRepo: InMemoryRepository<Ledger>;
     ledgerMembersRepo: InMemoryRepository<LedgerMember>;
+    automationImportsRepo: InMemoryAutomationImportsRepo;
   };
 
   constructor(repos: InMemoryDevDataRepo['repos']) {
@@ -416,6 +462,7 @@ class InMemoryDevDataRepo implements DevDataRepo {
     this.repos.categoriesRepo.replaceAll(enabled ? seedRows(SEED_CATEGORIES) : []);
     this.repos.recurringRulesRepo.replaceAll(enabled ? seedRows(SEED_RECURRING_RULES) : []);
     this.repos.attachmentsRepo.replaceAll([]);
+    this.repos.automationImportsRepo.replaceAll([]);
     this.repos.ledgersRepo.replaceAll(enabled ? [SEED_LEDGER] : []);
     this.repos.ledgerMembersRepo.replaceAll(enabled ? SEED_MEMBERS : []);
     this.listeners.forEach(listener => listener());
@@ -584,6 +631,7 @@ export function createInMemoryRepositories(): Repositories {
   const recurringRulesRepo = new InMemoryRepository<RecurringRule>(seedRows(SEED_RECURRING_RULES));
   const attachmentsRepo = new InMemoryRepository<Attachment>([]);
   const merchantLogosRepo = new InMemoryRepository<MerchantLogo, UpsertMerchantLogoInput, Partial<UpsertMerchantLogoInput>>([]);
+  const automationImportsRepo = new InMemoryAutomationImportsRepo([]);
   const ledgersRepo = new InMemoryRepository<Ledger>([SEED_LEDGER]);
   const ledgerMembersRepo = new InMemoryRepository<LedgerMember>(SEED_MEMBERS);
   getPermissionMembers = () => ledgerMembersRepo.list();
@@ -595,6 +643,7 @@ export function createInMemoryRepositories(): Repositories {
     categoriesRepo.refresh();
     recurringRulesRepo.refresh();
     attachmentsRepo.refresh();
+    automationImportsRepo.refresh();
   };
   const sessionRepo = new InMemorySessionRepo(ledgersRepo, ledgerMembersRepo, refreshDomainRepos);
 
@@ -608,6 +657,7 @@ export function createInMemoryRepositories(): Repositories {
     recurringRulesRepo,
     attachmentsRepo,
     merchantLogosRepo,
+    automationImportsRepo,
     devDataRepo: new InMemoryDevDataRepo({
       transactionsRepo,
       incomeRepo,
@@ -618,6 +668,7 @@ export function createInMemoryRepositories(): Repositories {
       attachmentsRepo,
       ledgersRepo,
       ledgerMembersRepo,
+      automationImportsRepo,
     }),
     sessionRepo,
   };

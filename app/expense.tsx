@@ -5,16 +5,19 @@ import { router, useLocalSearchParams, usePreventZoomTransitionDismissal } from 
 import {
   explainTransactionIntakeRejection,
   parseTransactionIntake,
-  transactionAutomationFingerprint,
   transactionIntakeSourceLabel,
   type TransactionIntakeDraft,
   type TransactionIntakeSource,
 } from '../src/automation/parseTransactionIntake';
+import {
+  automationDisplaySource,
+  automationMetaPrefix,
+  automationRunMeta,
+  saveAutomationTransaction,
+} from '../src/automation/saveAutomationTransaction';
 import { useAppFeedback } from '../src/AppFeedbackProvider';
 import { ExpenseFlow, type SavedExpenseInfo } from '../src/components/ExpenseFlow';
 import { useRepositories, useRepositoryList } from '../src/repositories/RepositoryProvider';
-import { categoryMap } from '../src/repositories/categoryUtils';
-import type { Transaction } from '../src/repositories/types';
 import { useTheme } from '../src/ThemeProvider';
 import { TYPE } from '../src/typography';
 import { inferExpenseCategory } from '../src/voice/parseVoiceExpense';
@@ -32,95 +35,6 @@ function amountFromParam(value: string): number {
   const normalized = value.replace(/[$,\s]/g, '');
   const amount = parseFloat(normalized);
   return Number.isFinite(amount) ? amount : 0;
-}
-
-function normalizedMerchant(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function sameCents(a: number, b: number): boolean {
-  return Math.round(a * 100) === Math.round(b * 100);
-}
-
-function metaString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value : undefined;
-}
-
-function likelyDuplicate(rows: Transaction[], draft: TransactionIntakeDraft): Transaction | undefined {
-  const fingerprint = transactionAutomationFingerprint(draft);
-  if (fingerprint) {
-    const exact = rows.find(tx => tx.type !== 'income' && tx.meta?.automationFingerprint === fingerprint);
-    if (exact) return exact;
-  }
-
-  const draftTime = draft.occurredAt ? new Date(draft.occurredAt).getTime() : Date.now();
-  const merchant = normalizedMerchant(draft.merchant);
-  return rows.find(tx => {
-    if (tx.type === 'income') return false;
-    if (!sameCents(tx.amount, draft.amount)) return false;
-    if (merchant && normalizedMerchant(tx.merchant) !== merchant) return false;
-    const txCard = metaString(tx.meta?.cardLast4);
-    if (draft.cardLast4 && txCard && draft.cardLast4 !== txCard) return false;
-    const txTime = tx.occurredAt ? new Date(tx.occurredAt).getTime() : draftTime;
-    return Math.abs(txTime - draftTime) <= 5 * 60 * 1000;
-  });
-}
-
-function automationMetaPrefix(source: TransactionIntakeSource): string | undefined {
-  if (source === 'wallet') return 'applePayAutomation';
-  if (source === 'sms') return 'textAutomation';
-  return undefined;
-}
-
-function automationFallbackMerchant(source: TransactionIntakeSource): string {
-  if (source === 'wallet') return 'Apple Pay';
-  if (source === 'sms') return 'Text alert';
-  return 'Automation';
-}
-
-function automationDisplaySource(source: TransactionIntakeSource): string {
-  if (source === 'wallet') return 'Apple Pay';
-  if (source === 'sms') return 'text alert';
-  return 'automation';
-}
-
-function automationRunMeta(
-  currentMeta: Record<string, unknown> | undefined,
-  status: 'saved' | 'duplicate' | 'review' | 'failed' | 'ignored',
-  draft: TransactionIntakeDraft,
-  options: { transactionId?: string; error?: string } = {},
-): Record<string, unknown> {
-  const prefix = automationMetaPrefix(draft.source);
-  if (!prefix) return currentMeta ?? {};
-
-  const occurredAt = draft.occurredAt ?? new Date().toISOString();
-  const fingerprint = transactionAutomationFingerprint({ ...draft, occurredAt });
-  const nextMeta: Record<string, unknown> = {
-    ...(currentMeta ?? {}),
-    [`${prefix}LastStatus`]: status,
-    [`${prefix}LastRunAt`]: new Date().toISOString(),
-    [`${prefix}LastMerchant`]: draft.merchant || automationFallbackMerchant(draft.source),
-    [`${prefix}LastAmount`]: draft.amount > 0 ? draft.amount : undefined,
-    [`${prefix}LastOccurredAt`]: occurredAt,
-    [`${prefix}LastFingerprint`]: fingerprint,
-    [`${prefix}LastTransactionId`]: options.transactionId,
-    [`${prefix}LastError`]: options.error,
-    [`${prefix}LastBackground`]: false,
-  };
-
-  if (__DEV__) {
-    nextMeta[`${prefix}LastReplayText`] = draft.rawText;
-    nextMeta[`${prefix}LastReplayAmount`] = draft.amount;
-    nextMeta[`${prefix}LastReplayMerchant`] = draft.merchant;
-    nextMeta[`${prefix}LastReplayOccurredAt`] = occurredAt;
-    nextMeta[`${prefix}LastReplayCategory`] = draft.cat;
-    nextMeta[`${prefix}LastReplayCardLast4`] = draft.cardLast4;
-  }
-
-  Object.keys(nextMeta).forEach(key => {
-    if (nextMeta[key] === undefined) delete nextMeta[key];
-  });
-  return nextMeta;
 }
 
 export default function ExpenseRoute() {
@@ -143,7 +57,6 @@ export default function ExpenseRoute() {
   const transactions = useRepositoryList(transactionsRepo);
   const categories = useRepositoryList(categoriesRepo);
   const settings = useRepositoryList(settingsRepo)[0];
-  const cats = categoryMap(categories);
   const { showToast } = useAppFeedback();
   const autoSaveHandledRef = useRef(false);
   const issueHandledRef = useRef(false);
@@ -162,7 +75,7 @@ export default function ExpenseRoute() {
       : undefined;
     const parsed = text ? parseTransactionIntake(text, source) : null;
     if (parsed) {
-      const nextMerchant = merchant || parsed.merchant;
+      const nextMerchant = source === 'sms' && text ? parsed.merchant : merchant || parsed.merchant;
       const nextCat = categoryParam || inferExpenseCategory(`${nextMerchant} ${text}`);
       return {
         ...parsed,
@@ -244,57 +157,51 @@ export default function ExpenseRoute() {
   useEffect(() => {
     if (!autoSaveAutomation || !initialDraft || autoSaveHandledRef.current) return;
     autoSaveHandledRef.current = true;
+    let cancelled = false;
 
-    const duplicate = likelyDuplicate(transactions, initialDraft);
-    if (duplicate) {
-      settingsRepo.update('settings', {
-        meta: automationRunMeta(settings?.meta, 'duplicate', initialDraft, { transactionId: duplicate.id }),
+    (async () => {
+      const result = await saveAutomationTransaction(initialDraft, {
+        settings,
+        settingsRepo,
+        transactionsRepo,
+        transactions,
+        categories,
+      }, {
+        background: false,
+        initialDraft,
       });
-      showToast(`${automationDisplaySource(initialDraft.source)} transaction already imported`);
-      router.replace('/');
-      return;
-    }
+      if (cancelled) return;
 
-    const cat = cats[initialDraft.cat] ? initialDraft.cat : categories[0]?.id ?? 'shopping';
-    const rawMerchant = initialDraft.merchant.trim();
-    const merchant = rawMerchant || cats[cat]?.label || automationFallbackMerchant(initialDraft.source);
-    const occurredAt = initialDraft.occurredAt ?? new Date().toISOString();
-    const automationFingerprint = transactionAutomationFingerprint({
-      ...initialDraft,
-      merchant,
-      occurredAt,
+      if (result.status === 'duplicate') {
+        showToast(`${automationDisplaySource(result.draft.source)} transaction already imported`);
+        router.replace('/');
+        return;
+      }
+
+      const draft = result.draft;
+      const tx = result.transaction;
+      if (!tx) return;
+      showToast(
+        `Added $${draft.amount.toFixed(2)} from ${automationDisplaySource(draft.source)}`,
+        () => transactionsRepo.delete(tx.id),
+      );
+      router.replace('/');
+    })().catch(error => {
+      if (cancelled) return;
+      settingsRepo.update('settings', {
+        meta: automationRunMeta(settings?.meta, 'failed', initialDraft, {
+          error: error instanceof Error ? error.message : 'automation_import_failed',
+        }),
+      });
+      router.replace('/');
     });
-    const tx = transactionsRepo.create({
-      amount: initialDraft.amount,
-      cat,
-      merchant,
-      note: initialDraft.note,
-      occurredAt,
-      type: 'expense',
-      visibility: 'shared',
-      createdByUserId: 'local',
-      updatedByUserId: 'local',
-      meta: {
-        merchantSource: rawMerchant ? 'automation' : 'fallback',
-        automationSource: initialDraft.source,
-        automationConfidence: initialDraft.confidence,
-        cardLast4: initialDraft.cardLast4,
-        automationOccurredAt: occurredAt,
-        automationFingerprint,
-      },
-    });
-    settingsRepo.update('settings', {
-      meta: automationRunMeta(settings?.meta, 'saved', { ...initialDraft, merchant, occurredAt }, { transactionId: tx.id }),
-    });
-    showToast(
-      `Added $${initialDraft.amount.toFixed(2)} from ${automationDisplaySource(initialDraft.source)}`,
-      () => transactionsRepo.delete(tx.id),
-    );
-    router.replace('/');
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     autoSaveAutomation,
     categories,
-    cats,
     initialDraft,
     settings?.meta,
     settingsRepo,

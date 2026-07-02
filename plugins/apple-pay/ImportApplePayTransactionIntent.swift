@@ -43,7 +43,7 @@ struct ImportApplePayTransactionIntent: AppIntent {
 
     do {
       switch try ApplePayTransactionStore.importInBackground(draft) {
-      case .saved, .duplicate, .disabled:
+      case .queued, .duplicate, .disabled:
         return .result()
       case .needsReview:
         await openReview(for: draft)
@@ -139,7 +139,7 @@ struct ImportTextTransactionIntent: AppIntent {
 
     do {
       switch try ApplePayTransactionStore.importInBackground(draft) {
-      case .saved, .duplicate, .disabled:
+      case .queued, .duplicate, .disabled:
         return .result()
       case .needsReview:
         await openReview(for: draft)
@@ -252,6 +252,7 @@ private enum ApplePayTransactionParser {
   ]
   private static let smsTransactionCue = #"\b(?:purchase|purchased|spent|charge|charged|transaction|authorization|authorized)\b|\b(?:card|visa|mastercard|amex)[^.!?]{0,50}\b(?:used|charged)\b"#
   private static let smsNonTransactionCue = #"\b(?:verification|security|one[-\s]?time|otp|login|password|fraud|declined|denied|blocked|payment\s+due|minimum\s+payment|statement|auto\s*pay|autopay|payment\s+(?:received|posted|processed)|deposit|transfer|refund|credit\s+limit)\b|\b(?:did\s+you|was\s+this\s+you)\b|\breply\s+(?:yes|no)\b"#
+  private static let merchantStopPattern = #"\b(?:with|using|on|for|from)\s+(?:your\s+)?(?:credit|debit|card|visa|mastercard|amex|account)\b|\s+on\s+(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2},?\s+\d{2,4}|\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|\d{4}-\d{2}-\d{2})\b|\b(?:card|account|acct)\s+(?:ending|ends(?:\s+in)?|[xX*.\s-]*\d{4})\b|\s+for\s+(?:USD\s*)?\$?\s*\d|(?:^|\s)(?:reply|msg|message|data|rates?|apply|stop|txt|text|available|balance)\b|[.。]\s*(?:no\s+action|see\s+it|view|text|reply|msg|message)\b|\s+https?:\/\/\S+"#
 
   static func makeDraft(
     transaction: String?,
@@ -345,7 +346,7 @@ private enum ApplePayTransactionParser {
     for pattern in patterns {
       guard let raw = text.firstRegexMatch(pattern, options: [.caseInsensitive])?[safe: 1] else { continue }
       let stopped = raw.removingAfterFirstMatch(
-        #"\b(?:with|using|on|for|from)\s+(?:your\s+)?(?:credit|debit|card|visa|mastercard|amex|account)\b|\b(?:card|account|acct)\s+(?:ending|ends(?:\s+in)?|[xX*.\s-]*\d{4})\b|\s+for\s+(?:USD\s*)?\$?\s*\d|(?:^|\s)(?:reply|msg|message|data|rates?|apply|stop|txt|available|balance)\b|[.。]\s*(?:reply|msg|message)\b"#,
+        merchantStopPattern,
         options: [.caseInsensitive]
       )
       let merchant = cleanupMerchant(stopped)
@@ -362,7 +363,7 @@ private enum ApplePayTransactionParser {
       let candidate = raw
         .replacing(pattern: #"^(?:[\s:;,.=-]+|(?:was|is|has been)\s+|(?:made|authorized|approved|posted|processed)\s+|(?:at|to|from|merchant|purchase|charge|transaction)\s*)+"#, with: "", options: [.caseInsensitive])
       let stopped = candidate.removingAfterFirstMatch(
-        #"\b(?:with|using|on|for|from)\s+(?:your\s+)?(?:credit|debit|card|visa|mastercard|amex|account)\b|\b(?:card|account|acct)\s+(?:ending|ends(?:\s+in)?|[xX*.\s-]*\d{4})\b|\s+for\s+(?:USD\s*)?\$?\s*\d|(?:^|\s)(?:reply|msg|message|data|rates?|apply|stop|txt|available|balance)\b|[.。]\s*(?:reply|msg|message)\b"#,
+        merchantStopPattern,
         options: [.caseInsensitive]
       )
       let merchant = cleanupMerchant(stopped)
@@ -373,7 +374,9 @@ private enum ApplePayTransactionParser {
   }
 
   private static func cleanupMerchant(_ raw: String) -> String {
-    var value = raw.compactedSpaces
+    var value = raw
+      .removingAfterFirstMatch(merchantStopPattern, options: [.caseInsensitive])
+      .compactedSpaces
       .replacing(pattern: #"^["'“”]+|["'“”]+$"#, with: "")
       .replacing(pattern: #"^[#*•\s-]+"#, with: "")
       .replacing(pattern: #"\s*[.,;:!]+$"#, with: "")
@@ -398,7 +401,7 @@ private enum ApplePayTransactionParser {
 }
 
 private enum ApplePayBackgroundImportOutcome {
-  case saved
+  case queued
   case duplicate
   case disabled
   case needsReview
@@ -437,62 +440,32 @@ private enum ApplePayTransactionStore {
 
     let context = automationContext(db, meta: meta, source: draft.source)
     let merchant = draft.merchant.trimmedNonEmpty ?? draft.source.fallbackMerchant
-    let category = validCategory(draft.category, db: db, ledgerId: context.ledgerId)
-    let occurredAt = isoFormatter.string(from: draft.occurredAt)
     let fingerprint = automationFingerprint(draft: draft, merchant: merchant)
+    let queueFingerprint = automationQueueFingerprint(draft: draft, merchant: merchant)
+
+    try ensureAutomationImportSchema(db)
 
     if try isDuplicate(draft: draft, merchant: merchant, fingerprint: fingerprint, db: db, ledgerId: context.ledgerId) {
       try? recordRunStatus(db, meta: meta, draft: draft, status: "duplicate", background: true, fingerprint: fingerprint)
       return .duplicate
     }
 
-    let now = isoFormatter.string(from: Date())
-    let id = nextId(prefix: "tx")
-    let metadata = jsonString([
-      "merchantSource": draft.merchant.trimmedNonEmpty == nil ? "fallback" : "automation",
-      "automationSource": draft.source.rawValue,
-      "automationConfidence": draft.confidence,
-      "cardLast4": draft.cardLast4 as Any,
-      "automationOccurredAt": occurredAt,
-      "automationFingerprint": fingerprint,
-      "backgroundImported": true,
-    ])
+    if try queuedImportExists(fingerprint: queueFingerprint, db: db, ledgerId: context.ledgerId) {
+      try? recordRunStatus(db, meta: meta, draft: draft, status: "duplicate", background: true, fingerprint: queueFingerprint)
+      return .duplicate
+    }
 
-    try db.execute(
-      """
-      INSERT INTO transactions (
-        id, type, amount, merchant, category, occurred_at, note, recurring,
-        recurring_rule_id, visibility, created_by_user_id, updated_by_user_id,
-        ledger_id, created_at, updated_at, cloud_record_name, cloud_zone_name,
-        record_change_tag, sync_status, meta
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      """,
-      [
-        .text(id),
-        .text("expense"),
-        .double(draft.amount),
-        .text(merchant),
-        .text(category),
-        .text(occurredAt),
-        .text(draft.note),
-        .int(0),
-        .null,
-        .text("shared"),
-        .text(context.userId),
-        .text(context.userId),
-        .text(context.ledgerId),
-        .text(now),
-        .text(now),
-        .null,
-        .null,
-        .null,
-        .text("pending"),
-        metadata.map(SQLiteValue.text) ?? .null,
-      ]
+    try enqueueAutomationImport(
+      draft: draft,
+      merchant: merchant,
+      fingerprint: queueFingerprint,
+      db: db,
+      ledgerId: context.ledgerId,
+      userId: context.userId
     )
 
-    try? recordRunStatus(db, meta: meta, draft: draft, status: "saved", background: true, fingerprint: fingerprint, transactionId: id)
-    return .saved
+    try? recordRunStatus(db, meta: meta, draft: draft, status: "queued", background: true, fingerprint: queueFingerprint)
+    return .queued
   }
 
   static func recordFailure(_ draft: ApplePayTransactionDraft, error: Error) {
@@ -590,6 +563,100 @@ private enum ApplePayTransactionStore {
       "SELECT id FROM categories WHERE ledger_id = ? AND archived = 0 AND deleted_at IS NULL ORDER BY group_key, sort_order, label LIMIT 1",
       [.text(ledgerId)]
     )) ?? "shopping"
+  }
+
+  private static func ensureAutomationImportSchema(_ db: SQLiteConnection) throws {
+    try db.exec(
+      """
+      CREATE TABLE IF NOT EXISTS automation_imports (
+        id TEXT PRIMARY KEY NOT NULL,
+        source TEXT NOT NULL,
+        raw_text TEXT,
+        amount_hint REAL,
+        merchant_hint TEXT,
+        category_hint TEXT,
+        occurred_at_hint TEXT,
+        card_last4_hint TEXT,
+        fingerprint TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        processed_transaction_id TEXT,
+        error TEXT,
+        received_at TEXT NOT NULL,
+        ledger_id TEXT NOT NULL DEFAULT 'ledger-default',
+        created_by_user_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        meta TEXT
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_imports_fingerprint
+      ON automation_imports (fingerprint);
+
+      CREATE INDEX IF NOT EXISTS idx_automation_imports_ledger_status_received
+      ON automation_imports (ledger_id, status, received_at ASC, id ASC);
+      """
+    )
+  }
+
+  private static func queuedImportExists(fingerprint: String, db: SQLiteConnection, ledgerId: String) throws -> Bool {
+    try db.scalarString(
+      """
+      SELECT id FROM automation_imports
+      WHERE fingerprint = ?
+        AND ledger_id = ?
+      LIMIT 1
+      """,
+      [
+        .text(fingerprint),
+        .text(ledgerId),
+      ]
+    ) != nil
+  }
+
+  private static func enqueueAutomationImport(
+    draft: ApplePayTransactionDraft,
+    merchant: String,
+    fingerprint: String,
+    db: SQLiteConnection,
+    ledgerId: String,
+    userId: String
+  ) throws {
+    let now = isoFormatter.string(from: Date())
+    let occurredAt = isoFormatter.string(from: draft.occurredAt)
+    let metadata = jsonString([
+      "queuedBy": "app_intent",
+      "nativeTransactionFingerprint": automationFingerprint(draft: draft, merchant: merchant),
+      "nativeParserConfidence": draft.confidence,
+    ])
+
+    try db.execute(
+      """
+      INSERT OR IGNORE INTO automation_imports (
+        id, source, raw_text, amount_hint, merchant_hint, category_hint,
+        occurred_at_hint, card_last4_hint, fingerprint, status, attempts,
+        processed_transaction_id, error, received_at, ledger_id,
+        created_by_user_id, created_at, updated_at, meta
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, ?, ?, ?, ?, ?, ?)
+      """,
+      [
+        .text(nextId(prefix: "automation-import")),
+        .text(draft.source.rawValue),
+        draft.rawText.map(SQLiteValue.text) ?? .null,
+        .double(draft.amount),
+        .text(merchant),
+        .text(draft.category),
+        .text(occurredAt),
+        draft.cardLast4.map(SQLiteValue.text) ?? .null,
+        .text(fingerprint),
+        .text(now),
+        .text(ledgerId),
+        .text(userId),
+        .text(now),
+        .text(now),
+        metadata.map(SQLiteValue.text) ?? .null,
+      ]
+    )
   }
 
   private static func recordRunStatus(
@@ -765,6 +832,33 @@ private enum ApplePayTransactionStore {
     let cleanedCard = draft.cardLast4.map { String($0.replacing(pattern: #"\D+"#, with: "").suffix(4)) }
     let card = cleanedCard?.trimmedNonEmpty ?? "unknown"
     return "\(draft.source.rawValue):v1:\(amountCents):\(normalizedMerchant):\(minuteBucket):\(card)"
+  }
+
+  private static func automationQueueFingerprint(draft: ApplePayTransactionDraft, merchant: String) -> String {
+    let amountCents = Int((draft.amount * 100).rounded())
+    let cleanedCard = draft.cardLast4.map { String($0.replacing(pattern: #"\D+"#, with: "").suffix(4)) }
+    let card = cleanedCard?.trimmedNonEmpty ?? "unknown"
+    let day = isoFormatter.string(from: draft.occurredAt).prefix(10)
+    if let rawText = draft.rawText?.trimmedNonEmpty {
+      let rawKey = rawText
+        .lowercased()
+        .replacing(pattern: #"\s+"#, with: " ")
+        .compactedSpaces
+      return "\(draft.source.rawValue):queue:v1:\(amountCents):\(day):\(card):\(fnv1a(rawKey))"
+    }
+
+    let normalizedMerchant = merchant.normalizedMerchantKey.trimmedNonEmpty ?? "unknown"
+    let minuteBucket = Int(floor(draft.occurredAt.timeIntervalSince1970 / 60))
+    return "\(draft.source.rawValue):queue:v1:\(amountCents):\(normalizedMerchant):\(minuteBucket):\(card)"
+  }
+
+  private static func fnv1a(_ value: String) -> String {
+    var hash: UInt32 = 0x811c9dc5
+    for byte in value.utf8 {
+      hash ^= UInt32(byte)
+      hash = hash &* 0x01000193
+    }
+    return String(format: "%08x", hash)
   }
 
   private static func jsonObject(_ raw: String?) -> [String: Any] {

@@ -217,7 +217,7 @@ function createPreLedgerV8Schema(db: SQLiteDatabaseLike) {
 test('sqlite fresh install creates CloudKit-ready schema, members, and ledger indexes', () => {
   const db = resetSQLiteDatabaseForTests();
 
-  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 11);
+  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 12);
   expectColumns(db, 'ledgers', [
     'id',
     'name',
@@ -245,6 +245,27 @@ test('sqlite fresh install creates CloudKit-ready schema, members, and ledger in
     'sync_status',
   ]);
   expectColumns(db, 'sync_state', ['zone_name', 'change_token', 'updated_at']);
+  expectColumns(db, 'automation_imports', [
+    'id',
+    'source',
+    'raw_text',
+    'amount_hint',
+    'merchant_hint',
+    'category_hint',
+    'occurred_at_hint',
+    'card_last4_hint',
+    'fingerprint',
+    'status',
+    'attempts',
+    'processed_transaction_id',
+    'error',
+    'received_at',
+    'ledger_id',
+    'created_by_user_id',
+    'created_at',
+    'updated_at',
+    'meta',
+  ]);
   DOMAIN_TABLES.forEach(table => expectColumns(db, table, SYNC_COLUMNS));
 
   assert.deepEqual(
@@ -261,6 +282,7 @@ test('sqlite fresh install creates CloudKit-ready schema, members, and ledger in
     ['attachments', 'idx_attachments_ledger_deleted_created'],
     ['bills', 'idx_bills_ledger_deleted_due'],
     ['ledger_members', 'idx_ledger_members_ledger_status'],
+    ['automation_imports', 'idx_automation_imports_ledger_status_received'],
   ]);
   expectedIndexes.forEach((index, table) => {
     assert.ok(indexNames(db, table).includes(index), `${table} missing ${index}`);
@@ -271,7 +293,8 @@ test('sqlite v8 migration backfills local single-user rows into the default shar
   const db = resetSQLiteDatabaseForTests(createPreLedgerV8Schema);
   const repos = createSQLiteRepositories();
 
-  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 11);
+  assert.equal(db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version, 12);
+  expectColumns(db, 'automation_imports', ['fingerprint', 'status', 'ledger_id', 'raw_text']);
   assert.deepEqual(
     repos.sessionRepo.listMembers().map(member => member.userId).sort(),
     ['alex'],

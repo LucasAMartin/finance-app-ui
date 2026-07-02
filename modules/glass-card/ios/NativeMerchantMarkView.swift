@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import ExpoUI
 import SwiftUI
+import UIKit
 
 public final class NativeMerchantMarkViewProps: UIBaseViewProps {
   @Field var logoUrl: String?
@@ -32,20 +33,7 @@ public struct NativeMerchantMarkView: ExpoSwiftUI.View {
       Circle().fill(fillColor)
 
       if let url = remoteURL {
-        AsyncImage(
-          url: url,
-          transaction: SwiftUI.Transaction(animation: .easeInOut(duration: 0.12))
-        ) { phase in
-          switch phase {
-          case .success(let image):
-            image
-              .resizable()
-              .scaledToFit()
-              .padding(size * 0.16)
-          default:
-            fallbackIcon(color: fallbackColor, size: size)
-          }
-        }
+        logoImage(url: url, color: fallbackColor, size: size)
       } else {
         fallbackIcon(color: fallbackColor, size: size)
       }
@@ -60,6 +48,36 @@ public struct NativeMerchantMarkView: ExpoSwiftUI.View {
       return nil
     }
     return URL(string: logoUrl)
+  }
+
+  @ViewBuilder
+  private func logoImage(url: URL, color: Color, size: CGFloat) -> some View {
+    if url.isFileURL, let image = localImage(url: url) {
+      fittedLogo(image)
+    } else {
+      AsyncImage(url: url) { phase in
+        switch phase {
+        case .success(let image):
+          fittedLogo(image)
+        default:
+          fallbackIcon(color: color, size: size)
+        }
+      }
+    }
+  }
+
+  private func localImage(url: URL) -> Image? {
+    guard url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) else {
+      return nil
+    }
+    return Image(uiImage: uiImage)
+  }
+
+  private func fittedLogo(_ image: Image) -> some View {
+    image
+      .resizable()
+      .scaledToFit()
+      .padding(CGFloat(props.size) * 0.16)
   }
 
   private func fallbackIcon(color: Color, size: CGFloat) -> some View {

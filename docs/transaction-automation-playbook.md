@@ -7,7 +7,7 @@ financeapp:///expense?source=sms&text=<url-encoded alert text>
 financeapp:///expense?source=wallet&amount=12.50&merchant=Lasang%20Pinoy&date=2026-06-29T12%3A00%3A00Z
 ```
 
-Apple Pay and SMS imports can either auto-save in the background or open in review mode with amount, merchant, note, date, and category prefilled.
+Apple Pay and SMS imports can either queue quietly in the background for the app to finish on next open, or open in review mode with amount, merchant, note, date, and category prefilled.
 
 ## SMS alert shortcut
 
@@ -26,7 +26,7 @@ Preferred setup:
 The finished action should look like `Process receipt Shortcut Input`. This is the same shape used by receipt-processing Shortcuts flows such as Monetal's setup.
 If Shortcuts opens an `Add Shortcut` screen or inserts a fieldless `Process Receipt` row, back out and add it from the automation `Add Action` screen instead.
 
-After one preview works, switch Text Message Import to `Auto-save` for background logging.
+After one preview works, switch Text Message Import to `Auto-save` for background capture. The Shortcut can run without opening finance-app; the app finalizes queued imports the next time it opens or returns to the foreground.
 
 If Shortcuts shows `Running your automation` but finance-app does not import anything, reopen Settings > Text Message Setup. The status panel records ignored runs and will show whether no receipt text reached the app or the text did not look like a card purchase alert.
 
@@ -68,7 +68,7 @@ Preferred setup:
 
 The finished action should look like `Import Shortcut Input as Apple Pay transaction`. Amount, merchant, and date fields are still available as a fallback for iOS versions or Shortcuts builds that do not convert the transaction input cleanly.
 
-In `Auto-save`, the native App Intent does not open the app. It writes directly to the app's SQLite ledger with `sync_status = pending`, so the transaction is already there the next time the app is opened. In `Review first`, the same action opens the prefilled expense screen instead.
+In `Auto-save`, the native App Intent does not open the app. It writes a pending raw import into the local SQLite queue, then the JS parser/normalizer creates the final transaction when finance-app next opens or returns to the foreground. In `Review first`, the same action opens the prefilled expense screen instead.
 
 The Apple Pay setup guide in Settings shows the last few Wallet imports. Use that section after a real tap-to-pay purchase to confirm that background logging is working without opening Activity.
 
@@ -92,11 +92,14 @@ financeapp:///expense?source=wallet&text=<encoded transaction text>
 
 - Direct Apple Pay/Wallet history import is not implemented because iOS does not expose a general third-party transaction-history reader.
 - Direct SMS inbox scanning is not implemented. Use the Shortcuts Message trigger so the user explicitly controls which alerts are handed to the app.
-- Raw SMS bodies are parsed in memory and are not stored on the transaction. Debug builds may keep the last raw text in local settings for replay testing; release builds do not. The transaction stores lightweight automation metadata such as source, confidence, and card last four when present.
-- The native Apple Pay and Text Message actions store an automation fingerprint and still keep a five-minute duplicate fallback for matching amount, merchant, card last four, and timestamp.
+- Raw SMS bodies are stored only in the local pending automation queue until the app processes them; they are not stored on the final transaction. Debug builds may keep the last raw text in local settings for replay testing; release builds do not. The transaction stores lightweight automation metadata such as source, confidence, card last four when present, and the extracted merchant descriptor.
+- When transaction normalization is configured, the app sends only the cleaned extracted descriptor, amount, date, source, local merchant/category guess, optional raw merchant descriptor, and a generated installation id to the logo-api Vercel function. The function sends only the cleaned descriptor, amount, date, and hashed installation id to Trove. It does not send the full SMS body, card last four, or raw processor-heavy descriptor to Trove.
+- Successful normalization responses are cached locally on device in settings metadata using hashed cache keys. Cached entries contain the normalized merchant/domain/category response, not the raw SMS body or card last four.
+- The native Apple Pay and Text Message actions store a queue fingerprint based on the raw payload when available, and still keep a five-minute duplicate fallback against already-saved transactions. The JS save path performs the final duplicate check before inserting a transaction.
 - Background import depends on the finance-app SQLite database already existing, which happens once the user has opened Settings and enabled the import mode. If the database is unavailable, the action falls back to the review URL.
 
 ## Before App Store upload
 
-- Add Apple Pay and SMS automation language to the privacy policy and App Review notes before submitting this feature. Call out that raw alert/transaction text is parsed locally, not stored, and that the user creates the Shortcuts automation explicitly.
+- Add Apple Pay, SMS automation, and transaction-normalization language to the privacy policy and App Review notes before submitting this feature. Call out that raw alert/transaction text is parsed locally and not stored, that only the extracted descriptor/amount/date are sent for merchant normalization when configured, and that the user creates the Shortcuts automation explicitly.
+- Add App Attest or DeviceCheck validation before shipping transaction normalization to real users. The current app key is useful for development and soft gating, but it is embedded in the app bundle and should not be treated as a production secret.
 - Real-device QA should include one auto-save purchase, one duplicate retry, one review-first run, Wallet mobile data disabled/enabled, and a fresh install where the database fallback opens review.

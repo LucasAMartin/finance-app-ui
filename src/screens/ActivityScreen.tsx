@@ -88,9 +88,10 @@ import type { ActivityInitialFilter } from '../selectors/spending';
 const NOW            = new Date();
 const CALENDAR_YEAR  = NOW.getFullYear();
 const CALENDAR_MONTH = NOW.getMonth();
-const ACTIVITY_PAGE_SIZE = 80;
+const ACTIVITY_PAGE_SIZE = 40;
 const FILTER_COMMIT_DELAY_MS = 90;
 const RANGE_CLOSE_DELAY_MS = 420;
+const FILTER_WORK_OPACITY = 0.65;
 
 let hasShownDeleteHint = false;
 import { Icon } from '../components/Icon';
@@ -98,7 +99,7 @@ import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS, glassTintForTheme 
 import { SearchFilterBar } from '../components/SearchFilterBar';
 import { MerchantMark } from '../components/MerchantMark';
 import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
-import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
+import { NativeRowMerchantMark } from '../components/NativeRowMerchantMark';
 import { Money } from '../components/shared';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { applyKeypadKey, type KeypadKey } from '../components/NumericKeypad';
@@ -427,26 +428,20 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
-export type ActivityHandle = {
-  /** Call synchronously before navigate() to pre-load the filtered skeleton. */
-  beginNavFilter: (filter: ActivityInitialFilter, filterToken?: number) => void;
-};
-
 interface Props {
   theme: Theme;
+  active?: boolean;
   onOpenDrawer?: () => void;
   onOpenTx?: (tx: Transaction) => void;
   onPrepareTx?: (tx: Transaction) => void;
   onOverlayOpenChange?: (open: boolean) => void;
   initialFilter?: ActivityInitialFilter | null;
-  filterToken?: number;
   /** App-level optimistic delete: hide this row immediately before the repo commit lands. */
   pendingDeleteId?: string | null;
   onRefreshSync?: () => Promise<void>;
 }
 
-export const ActivityScreen = React.forwardRef<ActivityHandle, Props>(
-function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, filterToken, pendingDeleteId: externalPendingDeleteId, onRefreshSync }: Props, ref) {
+export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayOpenChange, initialFilter, pendingDeleteId: externalPendingDeleteId, onRefreshSync }: Props) {
   const { transactionsRepo, categoriesRepo, recurringRulesRepo } = useRepositories();
   const categories = useRepositoryList(categoriesRepo);
   const recurringRules = useRepositoryList(recurringRulesRepo);
@@ -484,10 +479,80 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
 
   const listOpacity    = useRef(new Animated.Value(1)).current;
   const listFadePending = useRef(false);
+  const pendingActivityQueryKeyRef = useRef<string | null>(null);
+  const filterFeedbackFrameRef = useRef<number | null>(null);
+  const filterFeedbackFallbackFrameRef = useRef<number | null>(null);
+
+  const beginFilterFeedback = useCallback(() => {
+    if (filterFeedbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFrameRef.current);
+      filterFeedbackFrameRef.current = null;
+    }
+    if (filterFeedbackFallbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFallbackFrameRef.current);
+      filterFeedbackFallbackFrameRef.current = null;
+    }
+    listFadePending.current = true;
+    listOpacity.stopAnimation();
+    listOpacity.setValue(FILTER_WORK_OPACITY);
+  }, [listOpacity]);
+
+  const finishFilterFeedback = useCallback(() => {
+    if (!listFadePending.current) return;
+    listFadePending.current = false;
+    if (filterFeedbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFrameRef.current);
+      filterFeedbackFrameRef.current = null;
+    }
+    if (filterFeedbackFallbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFallbackFrameRef.current);
+      filterFeedbackFallbackFrameRef.current = null;
+    }
+    Animated.timing(listOpacity, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [listOpacity]);
+
+  const scheduleFilterFeedbackFallback = useCallback(() => {
+    if (filterFeedbackFallbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFallbackFrameRef.current);
+    }
+    filterFeedbackFallbackFrameRef.current = requestAnimationFrame(() => {
+      filterFeedbackFallbackFrameRef.current = requestAnimationFrame(() => {
+        filterFeedbackFallbackFrameRef.current = null;
+        if (pendingActivityQueryKeyRef.current === null) {
+          finishFilterFeedback();
+        }
+      });
+    });
+  }, [finishFilterFeedback]);
+
+  const runWithFilterFeedback = useCallback((apply: () => void) => {
+    beginFilterFeedback();
+    filterFeedbackFrameRef.current = requestAnimationFrame(() => {
+      filterFeedbackFrameRef.current = null;
+      apply();
+      scheduleFilterFeedbackFallback();
+    });
+  }, [beginFilterFeedback, scheduleFilterFeedbackFallback]);
 
   useEffect(() => {
     return transactionsRepo.subscribe(() => setRepoVersion(version => version + 1));
   }, [transactionsRepo]);
+
+  useEffect(() => () => {
+    if (filterFeedbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFrameRef.current);
+      filterFeedbackFrameRef.current = null;
+    }
+    if (filterFeedbackFallbackFrameRef.current !== null) {
+      cancelAnimationFrame(filterFeedbackFallbackFrameRef.current);
+      filterFeedbackFallbackFrameRef.current = null;
+    }
+  }, []);
 
   // One-time swipe hint: fires when the list first appears with real rows.
   useEffect(() => {
@@ -508,7 +573,10 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
       calendarSheetRef.current?.resetSelection?.();
     }
   }, []);
-  const clearSelectedDay = useCallback(() => setSelectedDay(null), []);
+  const clearSelectedDay = useCallback(() => {
+    if (selectedDay === null) return;
+    runWithFilterFeedback(() => setSelectedDay(null));
+  }, [runWithFilterFeedback, selectedDay]);
   const openFilterSheet = useCallback(() => filterSheetRef.current?.open(), []);
   const openCalendarSheet = useCallback(() => calendarSheetRef.current?.open(), []);
 
@@ -517,19 +585,13 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     calendarSheetRef.current?.resetSelection?.();
   }, []);
 
-  // Removing a filter pill triggers a full transaction-list rebuild, which holds
-  // the JS thread for a beat on long lists. Fire the haptic tick synchronously so
-  // the touch is acknowledged instantly, then dim the list imperatively (no render
-  // needed — native driver) so the user sees immediate acknowledgment. The RAF
-  // defers the state change one frame so the pill's exit animation paints before
-  // the rebuild blocks the thread. listFadePending lets loadFirstActivityPage know
-  // to fade the list back in once results land.
+  // Filter updates can hold the JS thread for a beat on long lists. Dim the
+  // current rows imperatively so the touch is acknowledged before query work
+  // starts, then let loadFirstActivityPage fade them back in when results land.
   const removeFilter = useCallback((apply: () => void) => {
     Haptics.selectionAsync();
-    listFadePending.current = true;
-    listOpacity.setValue(0.65);
-    requestAnimationFrame(apply);
-  }, [listOpacity]);
+    runWithFilterFeedback(apply);
+  }, [runWithFilterFeedback]);
 
   const clearAllFilters = useCallback(() => {
     setCatFilter([]);
@@ -585,61 +647,10 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
   // so the filter button doesn't fill just because the user changed sort order.
   const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0);
 
-  const appliedTokenRef    = useRef<number | undefined>(undefined);
-  const navAppliedRef      = useRef(false);
-  const [listInstanceKey, setListInstanceKey] = useState('activity-list-initial');
-  const [navLoading, setNavLoading] = useState(false);
-  const [navLoadToken, setNavLoadToken] = useState(0);
-  const navLoadingTokenRef = useRef<number | null>(null);
-  const navLoadingStartedAtRef = useRef(0);
-  const navReleaseGenerationRef = useRef(0);
-  const navReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appliedInitialFilterRef = useRef<ActivityInitialFilter | null>(null);
 
-  const beginNavLoading = useCallback((token?: number) => {
-    navReleaseGenerationRef.current += 1;
-    if (navReleaseTimerRef.current) {
-      clearTimeout(navReleaseTimerRef.current);
-      navReleaseTimerRef.current = null;
-    }
-    navLoadingStartedAtRef.current = Date.now();
-    if (token !== undefined) {
-      setListInstanceKey(`activity-list-${token}`);
-      navLoadingTokenRef.current = token;
-      setNavLoadToken(token);
-    } else {
-      navLoadingTokenRef.current = -1;
-      setNavLoadToken(token => token + 1);
-    }
-    setNavLoading(true);
-  }, []);
-
-  const releaseNavLoadingAfterPaint = useCallback(() => {
-    const releaseGeneration = navReleaseGenerationRef.current;
-    const elapsed = Date.now() - navLoadingStartedAtRef.current;
-    const delay = Math.max(180 - elapsed, 0);
-    if (navReleaseTimerRef.current) clearTimeout(navReleaseTimerRef.current);
-    navReleaseTimerRef.current = setTimeout(() => {
-      navReleaseTimerRef.current = null;
-      InteractionManager.runAfterInteractions(() => {
-        requestAnimationFrame(() => {
-          if (navReleaseGenerationRef.current !== releaseGeneration) return;
-          if (navLoadingTokenRef.current !== null) return;
-          setNavLoading(false);
-        });
-      });
-    }, delay);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (navReleaseTimerRef.current) clearTimeout(navReleaseTimerRef.current);
-    };
-  }, []);
-
-  const applyNavFilter = useCallback((filter: ActivityInitialFilter) => {
-    setActivityRows([]);
+  const applyInitialFilter = useCallback((filter: ActivityInitialFilter) => {
     setNextCursor(undefined);
-    setActivitySummary(EMPTY_SUMMARY);
     setLoadingMore(false);
     setLoadError(false);
     setCatFilter(filter.catIds ?? []);
@@ -657,31 +668,14 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     setSelectedDay(null);
   }, []);
 
-  // Called synchronously in the same event handler as navigate(), so all state
-  // changes batch into one commit with the navigation. The prop-token guard
-  // below still covers the first frame if this ref is unavailable.
-  const beginNavFilter = useCallback((filter: ActivityInitialFilter, token?: number) => {
-    navAppliedRef.current = true;
-    beginNavLoading(token);
-    applyNavFilter(filter);
-  }, [applyNavFilter, beginNavLoading]);
-
-  useImperativeHandle(ref, () => ({ beginNavFilter }), [beginNavFilter]);
-
-  // Fallback for any path that changes filterToken without going through
-  // beginNavFilter (e.g. deep-link or re-mount). If beginNavFilter already ran
-  // this cycle, just stamp the token and return — state is already set.
   useLayoutEffect(() => {
-    if (filterToken === undefined || filterToken === appliedTokenRef.current) return;
     if (!initialFilter) return;
-    appliedTokenRef.current = filterToken;
-    if (navAppliedRef.current) {
-      navAppliedRef.current = false;
-      return;
-    }
-    beginNavLoading(filterToken);
-    applyNavFilter(initialFilter);
-  }, [applyNavFilter, beginNavLoading, filterToken, initialFilter]);
+    if (appliedInitialFilterRef.current === initialFilter) return;
+    appliedInitialFilterRef.current = initialFilter;
+    beginFilterFeedback();
+    applyInitialFilter(initialFilter);
+    scheduleFilterFeedbackFallback();
+  }, [applyInitialFilter, beginFilterFeedback, initialFilter, scheduleFilterFeedbackFallback]);
 
   const { scrollY, headerBgOpacity, iconScrolledOpacity, bgTranslateY } = useHeaderScroll();
 
@@ -722,8 +716,17 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     sort: sortBy,
   }), [sortBy, transactionScope]);
   const activityQueryKey = useMemo(() => JSON.stringify(activityQuery), [activityQuery]);
+  const previousActivityQueryKeyRef = useRef(activityQueryKey);
   const latestActivityQueryKeyRef = useRef(activityQueryKey);
   latestActivityQueryKeyRef.current = activityQueryKey;
+  const [settledActivityQueryKey, setSettledActivityQueryKey] = useState(activityQueryKey);
+
+  useLayoutEffect(() => {
+    if (previousActivityQueryKeyRef.current === activityQueryKey) return;
+    previousActivityQueryKeyRef.current = activityQueryKey;
+    pendingActivityQueryKeyRef.current = activityQueryKey;
+    beginFilterFeedback();
+  }, [activityQueryKey, beginFilterFeedback]);
 
   const loadFirstActivityPage = useCallback((showSkeleton = true) => {
     const loadKey = activityQueryKey;
@@ -739,31 +742,32 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
       setNextCursor(page.nextCursor);
       setActivitySummary(page.summary);
       setLoadError(false);
+      setSettledActivityQueryKey(loadKey);
     } catch {
       if (loadKey !== latestActivityQueryKeyRef.current) return;
       setLoadError(true);
+      setSettledActivityQueryKey(loadKey);
     } finally {
       const currentLoad = loadKey === latestActivityQueryKeyRef.current;
       if (showSkeleton && currentLoad) setLoading(false);
-      if (currentLoad && navLoadingTokenRef.current !== null) {
-        navLoadingTokenRef.current = null;
-        releaseNavLoadingAfterPaint();
-      }
-      if (currentLoad && listFadePending.current) {
-        listFadePending.current = false;
-        Animated.timing(listOpacity, {
-          toValue: 1,
-          duration: 220,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }).start();
-      }
     }
-  }, [activityQuery, activityQueryKey, transactionScope, transactionsRepo, listOpacity, releaseNavLoadingAfterPaint]);
+  }, [activityQuery, activityQueryKey, transactionScope, transactionsRepo]);
+
+  useEffect(() => {
+    if (settledActivityQueryKey !== latestActivityQueryKeyRef.current) return;
+    if (
+      pendingActivityQueryKeyRef.current !== null &&
+      pendingActivityQueryKeyRef.current !== settledActivityQueryKey
+    ) {
+      return;
+    }
+    pendingActivityQueryKeyRef.current = null;
+    finishFilterFeedback();
+  }, [finishFilterFeedback, settledActivityQueryKey]);
 
   useEffect(() => {
     loadFirstActivityPage(true);
-  }, [loadFirstActivityPage, repoVersion, navLoadToken]);
+  }, [loadFirstActivityPage, repoVersion]);
 
   const loadMoreActivity = useCallback(() => {
     if (loading || loadingMore || !nextCursor || selectedDay !== null) return;
@@ -802,7 +806,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     });
     return g;
   }, [activityRows, pendingUndo?.tx.id, externalPendingDeleteId]);
-  const merchantLogos = useMerchantLogoMap(activityRows, SUPPORTS_GLASS);
+  const merchantLogos = useMerchantLogoMap(activityRows, SUPPORTS_GLASS && active);
 
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
   const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
@@ -863,28 +867,30 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
   const filterPillCount = (selectedDay !== null ? 1 : 0) + (dateFilter !== null ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0) + catFilter.length;
   const hasFilterPills = filterPillCount > 0;
 
-  // Safety net: removeFilter() dims listOpacity and relies on loadFirstActivityPage
-  // to restore it. That callback only re-runs when activityQuery changes — but
-  // selectedDay is not part of activityQuery, so clearing it (alone or via
-  // "Clear all") can leave the list stuck at 0.65 opacity. Restore whenever all
-  // pills are gone and a fade is still pending.
+  // Safety net: selected-day changes are local to the calendar detail and do not
+  // always rebuild the paged activity query, so restore once that local filter
+  // transition has painted.
   useEffect(() => {
-    if (!hasFilterPills && listFadePending.current) {
-      listFadePending.current = false;
-      Animated.timing(listOpacity, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }).start();
+    if (
+      !hasFilterPills &&
+      listFadePending.current &&
+      pendingActivityQueryKeyRef.current === null
+    ) {
+      finishFilterFeedback();
     }
-  }, [hasFilterPills, listOpacity]);
+  }, [finishFilterFeedback, hasFilterPills]);
 
-  const hasUnappliedInitialFilter = Boolean(initialFilter && filterToken !== undefined && filterToken !== appliedTokenRef.current);
-  const showNavSkeleton = navLoading || hasUnappliedInitialFilter;
+  const previousSelectedDayRef = useRef(selectedDay);
+  useEffect(() => {
+    if (previousSelectedDayRef.current === selectedDay) return;
+    previousSelectedDayRef.current = selectedDay;
+    if (pendingActivityQueryKeyRef.current !== null) return;
+    finishFilterFeedback();
+  }, [finishFilterFeedback, selectedDay]);
+
   const activityDayKeys = useMemo(
-    () => !loading && !showNavSkeleton && !loadError && selectedDay === null && dayKeys.length > 0 ? dayKeys : [],
-    [dayKeys, loadError, loading, selectedDay, showNavSkeleton],
+    () => !loading && !loadError && selectedDay === null && dayKeys.length > 0 ? dayKeys : [],
+    [dayKeys, loadError, loading, selectedDay],
   );
 
   const renderActivityDay = useCallback((day: string) => (
@@ -960,21 +966,25 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
     : undefined;
   const handleCalendarSelectDate = useCallback((dateId: string) => {
     const pressed = fromDateId(dateId);
-    if (selectedDateId === dateId) {
-      setSelectedDay(null);
-    } else {
-      setCalViewYear(pressed.getFullYear());
-      setCalViewMonth(pressed.getMonth());
-      setSelectedDay(pressed.getDate());
-      clearDateRange();
-    }
-  }, [clearDateRange, selectedDateId]);
+    runWithFilterFeedback(() => {
+      if (selectedDateId === dateId) {
+        setSelectedDay(null);
+      } else {
+        setCalViewYear(pressed.getFullYear());
+        setCalViewMonth(pressed.getMonth());
+        setSelectedDay(pressed.getDate());
+        clearDateRange();
+      }
+    });
+  }, [clearDateRange, runWithFilterFeedback, selectedDateId]);
   const handleCalendarSelectRange = useCallback(({ from, to }: { from: Date; to: Date }) => {
-    setSelectedDay(null);
-    setDateFilter({ from, to });
-    setCalViewYear(from.getFullYear());
-    setCalViewMonth(from.getMonth());
-  }, []);
+    runWithFilterFeedback(() => {
+      setSelectedDay(null);
+      setDateFilter({ from, to });
+      setCalViewYear(from.getFullYear());
+      setCalViewMonth(from.getMonth());
+    });
+  }, [runWithFilterFeedback]);
   return (
     <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       {/* Wallpaper photo — drifts up at half the scroll speed; container extends
@@ -1063,7 +1073,6 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
         {/* ── Scrollable content ──────────────────────────────────── */}
         <Animated.View style={{ flex: 1, opacity: listOpacity }}>
         <AnimatedGHFlatList
-          key={listInstanceKey}
           ref={scrollViewRef}
           data={activityDayKeys}
           keyExtractor={(day) => String(day)}
@@ -1196,7 +1205,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
               )}
             </View>
 
-            {(loading || showNavSkeleton) ? (
+            {loading ? (
               <SectionCard dark={theme.dark}>
                 <TxListSkeleton dark={theme.dark} />
               </SectionCard>
@@ -1359,7 +1368,7 @@ function ActivityScreen({ theme, onOpenDrawer, onOpenTx, onPrepareTx, onOverlayO
         />
     </View>
   );
-});
+}
 
 // ─── CalendarSheet ───────────────────────────────────────────────────────────
 
@@ -2723,7 +2732,7 @@ function NativeActivityTxRow({
             frame({ height: NATIVE_ACTIVITY_ROW_HEIGHT - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' }),
           ]}
         >
-          <NativeMerchantMark
+          <NativeRowMerchantMark
             logoUrl={item.logoUrl}
             logoBgColor={item.logoBgColor}
             fallbackSystemName={item.symbol}

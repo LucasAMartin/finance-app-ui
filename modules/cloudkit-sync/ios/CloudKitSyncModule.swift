@@ -68,7 +68,7 @@ public class CloudKitSyncModule: Module {
       do {
         _ = try await self.deleteZone(id)
       } catch {
-        if !self.isNotFound(error) { throw error }
+        if !Self.isNotFound(error) { throw error }
       }
       _ = try await self.saveZone(CKRecordZone(zoneID: id))
       return [
@@ -103,7 +103,7 @@ public class CloudKitSyncModule: Module {
           "stopped": true
         ]
       } catch {
-        if self.isNotFound(error) {
+        if Self.isNotFound(error) {
           return [
             "ledgerId": ledgerId,
             "stopped": false
@@ -221,7 +221,7 @@ public class CloudKitSyncModule: Module {
     do {
       _ = try await fetchZone(id, in: route.database)
     } catch {
-      if !isNotFound(error) { throw error }
+      if !Self.isNotFound(error) { throw error }
       _ = try await saveZone(CKRecordZone(zoneID: id), in: route.database)
     }
   }
@@ -320,7 +320,7 @@ public class CloudKitSyncModule: Module {
     try await withCheckedThrowingContinuation { continuation in
       database.fetch(withSubscriptionID: subscriptionID) { subscription, error in
         if let error {
-          if self.isNotFound(error) {
+          if Self.isNotFound(error) {
             continuation.resume(returning: nil)
           } else {
             continuation.resume(throwing: error)
@@ -417,10 +417,15 @@ public class CloudKitSyncModule: Module {
         configurationsByRecordZoneID: [zoneID: config]
       )
 
-      operation.recordChangedBlock = { [weak self] record in
+      operation.recordWasChangedBlock = { [weak self] _, recordResult in
         guard let self else { return }
-        if self.isShareRecord(record) { return }
-        records.append(self.payload(from: record, zoneName: zoneName))
+        switch recordResult {
+        case .success(let record):
+          if self.isShareRecord(record) { return }
+          records.append(self.payload(from: record, zoneName: zoneName))
+        case .failure(let error):
+          operationError = error
+        }
       }
 
       operation.recordWithIDWasDeletedBlock = { [weak self] recordID, recordType in
@@ -443,13 +448,21 @@ public class CloudKitSyncModule: Module {
         latestToken = token
       }
 
-      operation.recordZoneFetchCompletionBlock = { _, token, _, _, error in
-        latestToken = token ?? latestToken
-        operationError = error
+      operation.recordZoneFetchResultBlock = { _, fetchChangesResult in
+        switch fetchChangesResult {
+        case .success(let result):
+          latestToken = result.serverChangeToken
+        case .failure(let error):
+          operationError = error
+        }
       }
 
-      operation.fetchRecordZoneChangesCompletionBlock = { [weak self] error in
-        if let error = error ?? operationError {
+      operation.fetchRecordZoneChangesResultBlock = { [weak self] result in
+        if case .failure(let error) = result {
+          continuation.resume(throwing: error)
+          return
+        }
+        if let error = operationError {
           continuation.resume(throwing: error)
           return
         }
@@ -498,10 +511,15 @@ public class CloudKitSyncModule: Module {
         configurationsByRecordZoneID: [route.zoneID: config]
       )
 
-      operation.recordChangedBlock = { [weak self] record in
+      operation.recordWasChangedBlock = { [weak self] _, recordResult in
         guard let self else { return }
-        if self.isShareRecord(record) { return }
-        records.append(self.payload(from: record, zoneName: route.zoneName))
+        switch recordResult {
+        case .success(let record):
+          if self.isShareRecord(record) { return }
+          records.append(self.payload(from: record, zoneName: route.zoneName))
+        case .failure(let error):
+          operationError = error
+        }
       }
 
       operation.recordWithIDWasDeletedBlock = { [weak self] recordID, recordType in
@@ -524,13 +542,21 @@ public class CloudKitSyncModule: Module {
         latestToken = token
       }
 
-      operation.recordZoneFetchCompletionBlock = { _, token, _, _, error in
-        latestToken = token ?? latestToken
-        operationError = error
+      operation.recordZoneFetchResultBlock = { _, fetchChangesResult in
+        switch fetchChangesResult {
+        case .success(let result):
+          latestToken = result.serverChangeToken
+        case .failure(let error):
+          operationError = error
+        }
       }
 
-      operation.fetchRecordZoneChangesCompletionBlock = { [weak self] error in
-        if let error = error ?? operationError {
+      operation.fetchRecordZoneChangesResultBlock = { [weak self] result in
+        if case .failure(let error) = result {
+          continuation.resume(throwing: error)
+          return
+        }
+        if let error = operationError {
           continuation.resume(throwing: error)
           return
         }
@@ -569,7 +595,7 @@ public class CloudKitSyncModule: Module {
         do {
           _ = try await deleteRecord(recordID)
         } catch {
-          if !isNotFound(error) { throw error }
+          if !Self.isNotFound(error) { throw error }
         }
         accepted.append(payload.merging([
           "recordChangeTag": NSNull(),
@@ -643,7 +669,7 @@ public class CloudKitSyncModule: Module {
         do {
           _ = try await deleteRecord(recordID, in: route.database)
         } catch {
-          if !isNotFound(error) { throw error }
+          if !Self.isNotFound(error) { throw error }
         }
         accepted.append(payload.merging([
           "recordChangeTag": NSNull(),
@@ -697,7 +723,7 @@ public class CloudKitSyncModule: Module {
     try await withCheckedThrowingContinuation { continuation in
       (database ?? self.database).fetch(withRecordID: recordID) { record, error in
         if let error {
-          if self.isNotFound(error) {
+          if Self.isNotFound(error) {
             continuation.resume(returning: nil)
           } else {
             continuation.resume(throwing: error)
@@ -715,11 +741,26 @@ public class CloudKitSyncModule: Module {
       let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
       operation.savePolicy = .changedKeys
       operation.isAtomic = false
-      operation.modifyRecordsCompletionBlock = { savedRecords, _, error in
-        if let error {
+      var savedRecords: [CKRecord] = []
+      var operationError: Error?
+      operation.perRecordSaveBlock = { _, saveResult in
+        switch saveResult {
+        case .success(let record):
+          savedRecords.append(record)
+        case .failure(let error):
+          operationError = error
+        }
+      }
+      operation.modifyRecordsResultBlock = { result in
+        switch result {
+        case .success:
+          if let operationError {
+            continuation.resume(throwing: operationError)
+          } else {
+            continuation.resume(returning: savedRecords)
+          }
+        case .failure(let error):
           continuation.resume(throwing: error)
-        } else {
-          continuation.resume(returning: savedRecords ?? [])
         }
       }
       (database ?? self.database).add(operation)
@@ -873,7 +914,7 @@ public class CloudKitSyncModule: Module {
     return try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
   }
 
-  private func isNotFound(_ error: Error) -> Bool {
+  private static func isNotFound(_ error: Error) -> Bool {
     guard let ckError = error as? CKError else { return false }
     return ckError.code == .unknownItem || ckError.code == .zoneNotFound
   }

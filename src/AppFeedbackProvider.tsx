@@ -5,11 +5,12 @@ import { Toast } from './components/Toast';
 
 type ToastState = {
   message: string;
-  onUndo?: () => void;
+  onAction?: () => void;
+  actionLabel?: string;
 } | null;
 
 interface AppFeedbackContextValue {
-  showToast: (message: string, onUndo?: () => void) => void;
+  showToast: (message: string, onAction?: () => void, actionLabel?: string) => void;
 }
 
 const AppFeedbackContext = createContext<AppFeedbackContextValue | null>(null);
@@ -18,12 +19,12 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
   const { theme } = useTheme();
   const [toast, setToast] = useState<ToastState>(null);
 
-  const showToast = useCallback((message: string, onUndo?: () => void) => {
-    setToast({ message, onUndo });
+  const showToast = useCallback((message: string, onAction?: () => void, actionLabel?: string) => {
+    setToast({ message, onAction, actionLabel });
   }, []);
 
-  const runToastUndo = useCallback(() => {
-    toast?.onUndo?.();
+  const runToastAction = useCallback(() => {
+    toast?.onAction?.();
     setToast(null);
   }, [toast]);
 
@@ -36,7 +37,8 @@ export function AppFeedbackProvider({ children }: { children: React.ReactNode })
         <Toast
           theme={theme}
           message={toast?.message ?? null}
-          onAction={toast?.onUndo ? runToastUndo : undefined}
+          actionLabel={toast?.actionLabel}
+          onAction={toast?.onAction ? runToastAction : undefined}
           onDismiss={() => setToast(null)}
         />
       </View>

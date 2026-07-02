@@ -52,7 +52,7 @@ import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
 import { MerchantMark } from '../components/MerchantMark';
 import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
-import { NativeMerchantMark } from '../../modules/glass-card/src/NativeMerchantMark';
+import { NativeRowMerchantMark } from '../components/NativeRowMerchantMark';
 import { Money } from '../components/shared';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupColor, categoryMap, UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
@@ -882,7 +882,6 @@ export function InsightDetailScreen({ theme, target, onClose, onSeeAll }: Props)
                           const from = listSlot ? listSlot.from : ranges.current.from;
                           const to   = listSlot ? listSlot.to   : ranges.current.to;
                           onSeeAll?.({ dateFrom: from, dateTo: to });
-                          onClose();
                         }}
                         modifiers={[
                           buttonStyle('plain'),
@@ -908,7 +907,6 @@ export function InsightDetailScreen({ theme, target, onClose, onSeeAll }: Props)
                       const from = listSlot ? listSlot.from : ranges.current.from;
                       const to   = listSlot ? listSlot.to   : ranges.current.to;
                       onSeeAll?.({ dateFrom: from, dateTo: to });
-                      onClose();
                     }}
                   >
                     <BlurView
@@ -1191,7 +1189,7 @@ function NativeDetailTxRow({
           spacing={12}
           modifiers={[frame({ height: NATIVE_DETAIL_TX_ROW_H - (last ? 0 : 1), maxWidth: 10000, alignment: 'leading' })]}
         >
-          <NativeMerchantMark
+          <NativeRowMerchantMark
             logoUrl={item.logoUrl}
             logoBgColor={item.logoBgColor}
             fallbackSystemName={item.symbol}

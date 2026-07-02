@@ -14,30 +14,40 @@ interface MerchantMarkProps {
   logoEnabled?: boolean;
 }
 
-export function MerchantMark({
-  merchant,
+interface ResolvedMerchantMarkProps {
+  logoUrl?: string;
+  logoBgColor?: string | null;
+  catIcon?: string;
+  color: string;
+  size?: number;
+  iconColor?: string;
+  iconSize?: number;
+  onLogoError?: () => void;
+}
+
+export function ResolvedMerchantMark({
+  logoUrl,
+  logoBgColor,
   catIcon = 'tag',
   color,
   size = 32,
   iconColor,
   iconSize,
-  logoEnabled = true,
-}: MerchantMarkProps) {
-  const logo = useMerchantLogo(merchant, logoEnabled);
-  const invalidateMerchantLogo = useInvalidateMerchantLogo();
+  onLogoError,
+}: ResolvedMerchantMarkProps) {
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     setImageFailed(false);
-  }, [logo?.logoUrl, merchant]);
+  }, [logoUrl]);
 
-  const showLogo = Boolean(logo?.logoUrl && !imageFailed);
+  const showLogo = Boolean(logoUrl && !imageFailed);
   // Inner padding so the contained logo breathes inside the circle.
   const logoPad = Math.round(size * 0.16);
   // Tinted disc: 15% alpha background, group color glyph. Logo mode fills with the
   // server-sampled logo background (so a brand's solid colored tile melts into the
   // disc); null/undefined → a white backing so the image reads cleanly.
-  const bgColor = showLogo ? (logo!.bgColor ?? 'rgba(255,255,255,0.96)') : `${color}26`;
+  const bgColor = showLogo ? (logoBgColor ?? 'rgba(255,255,255,0.96)') : `${color}26`;
   const glyphColor = iconColor ?? color;
 
   return (
@@ -60,7 +70,7 @@ export function MerchantMark({
         // and preserves aspect ratio. On load failure (e.g. fallback=404) we fall
         // back to the neutral category glyph.
         <Image
-          source={{ uri: logo!.logoUrl! }}
+          source={{ uri: logoUrl! }}
           contentFit="contain"
           // expo-image keeps a persistent memory + disk cache keyed by URL, so a
           // once-fetched logo loads instantly on later renders and across JS
@@ -69,7 +79,7 @@ export function MerchantMark({
           transition={120}
           onError={() => {
             setImageFailed(true);
-            invalidateMerchantLogo(merchant);
+            onLogoError?.();
           }}
           style={{ width: size - logoPad * 2, height: size - logoPad * 2 }}
         />
@@ -77,6 +87,32 @@ export function MerchantMark({
         <Icon name={catIcon} size={iconSize ?? size * 0.47} color={glyphColor} stroke={1.6} />
       )}
     </View>
+  );
+}
+
+export function MerchantMark({
+  merchant,
+  catIcon = 'tag',
+  color,
+  size = 32,
+  iconColor,
+  iconSize,
+  logoEnabled = true,
+}: MerchantMarkProps) {
+  const logo = useMerchantLogo(merchant, logoEnabled);
+  const invalidateMerchantLogo = useInvalidateMerchantLogo();
+
+  return (
+    <ResolvedMerchantMark
+      logoUrl={logo?.logoUrl}
+      logoBgColor={logo?.bgColor}
+      catIcon={catIcon}
+      color={color}
+      size={size}
+      iconColor={iconColor}
+      iconSize={iconSize}
+      onLogoError={() => invalidateMerchantLogo(merchant)}
+    />
   );
 }
 

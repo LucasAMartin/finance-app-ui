@@ -1,4 +1,5 @@
 import { SQLiteAttachmentsRepo } from './attachments';
+import { SQLiteAutomationImportsRepo } from './automationImports';
 import { SQLiteBillsRepo } from './bills';
 import { SQLiteBudgetsRepo } from './budgets';
 import { SQLiteCategoriesRepo } from './categories';
@@ -131,6 +132,7 @@ export function createSQLiteRepositories(): Repositories {
   const recurringRulesRepo = new SQLiteRecurringRulesRepo();
   const attachmentsRepo = new SQLiteAttachmentsRepo();
   const merchantLogosRepo = new SQLiteMerchantLogosRepo();
+  const automationImportsRepo = new SQLiteAutomationImportsRepo();
   const refreshDomainRepos = () => {
     transactionsRepo.refresh();
     incomeRepo.refresh();
@@ -139,6 +141,7 @@ export function createSQLiteRepositories(): Repositories {
     categoriesRepo.refresh();
     recurringRulesRepo.refresh();
     attachmentsRepo.refresh();
+    automationImportsRepo.refresh();
   };
   const sessionRepo = new SQLiteSessionRepo(refreshDomainRepos);
 
@@ -152,6 +155,7 @@ export function createSQLiteRepositories(): Repositories {
     recurringRulesRepo,
     attachmentsRepo,
     merchantLogosRepo,
+    automationImportsRepo,
     devDataRepo: new SQLiteDevDataRepo(refreshDomainRepos),
     sessionRepo,
   };

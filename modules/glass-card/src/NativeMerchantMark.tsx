@@ -19,17 +19,23 @@ const NativeMerchantMarkView = requireNativeView<NativeMerchantMarkProps>('Glass
 
 export function NativeMerchantMark({
   modifiers,
+  logoUrl,
   size = 32,
   glyphSize,
   logoEnabled = true,
   ...restProps
 }: NativeMerchantMarkProps) {
+  const renderableLogoUrl = logoUrl?.startsWith('file://') || logoUrl?.startsWith('https://')
+    ? logoUrl
+    : undefined;
+
   return (
     <NativeMerchantMarkView
       modifiers={modifiers}
+      logoUrl={renderableLogoUrl}
       size={size}
       glyphSize={glyphSize ?? size * 0.47}
-      logoEnabled={logoEnabled}
+      logoEnabled={logoEnabled && !!renderableLogoUrl}
       {...(modifiers ? createViewModifierEventListener(modifiers) : undefined)}
       {...restProps}
     />

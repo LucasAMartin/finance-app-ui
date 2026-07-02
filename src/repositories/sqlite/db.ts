@@ -13,7 +13,7 @@ import type { AppSession, Ledger, LedgerMember, SyncFields, SyncStatus } from '.
 import { openSQLiteDatabaseSync, type SQLiteDatabaseLike } from './driver';
 
 const DB_NAME = 'finance-app.db';
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 export const DEFAULT_LEDGER_ID = 'ledger-default';
 export const DEFAULT_OWNER_USER_ID = 'alex';
 export const DEV_PARTNER_USER_ID = 'partner';
@@ -411,6 +411,37 @@ function migrate(database: SQLiteDatabaseLike) {
     if (version < 11) {
       removeSeededDevPartner(database);
     }
+    if (version < 12) {
+      database.execSync(`
+        CREATE TABLE IF NOT EXISTS automation_imports (
+          id TEXT PRIMARY KEY NOT NULL,
+          source TEXT NOT NULL,
+          raw_text TEXT,
+          amount_hint REAL,
+          merchant_hint TEXT,
+          category_hint TEXT,
+          occurred_at_hint TEXT,
+          card_last4_hint TEXT,
+          fingerprint TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          processed_transaction_id TEXT,
+          error TEXT,
+          received_at TEXT NOT NULL,
+          ledger_id TEXT NOT NULL DEFAULT '${DEFAULT_LEDGER_ID}',
+          created_by_user_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          meta TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_imports_fingerprint
+        ON automation_imports (fingerprint);
+
+        CREATE INDEX IF NOT EXISTS idx_automation_imports_ledger_status_received
+        ON automation_imports (ledger_id, status, received_at ASC, id ASC);
+      `);
+    }
     database.execSync(`PRAGMA user_version = ${DB_VERSION}`);
   });
   if (version > 0) {
@@ -499,6 +530,7 @@ function clearDomainData(database: SQLiteDatabaseLike) {
     DELETE FROM bills;
     DELETE FROM recurring_rules;
     DELETE FROM categories;
+    DELETE FROM automation_imports;
     DELETE FROM ledger_members;
     DELETE FROM ledgers;
   `);

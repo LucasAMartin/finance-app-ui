@@ -10,7 +10,7 @@ import type { MerchantLogo, MerchantLogoStatus, UpsertMerchantLogoInput } from '
 export const LOGO_CDN_HOST = 'img.logo.dev';
 
 export const RESOLVED_SOURCE = 'logo-dev-search-logo';
-export const RESOLVED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const RESOLVED_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 export const ERROR_RETRY_MS = 24 * 60 * 60 * 1000;
 
 const NON_MERCHANT_NAMES = new Set([
@@ -111,6 +111,35 @@ export function isSafeLogoUrl(value?: string): value is string {
   } catch {
     return false;
   }
+}
+
+export function cachedLogoUri(entry?: { meta?: Record<string, unknown> }): string | undefined {
+  const value = entry?.meta?.localLogoUri;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return value.startsWith('file://') ? value : undefined;
+}
+
+export function logoAssetRetryAfter(entry?: { meta?: Record<string, unknown> }): string | undefined {
+  const value = entry?.meta?.localLogoRetryAfter;
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+export function shouldCacheLogoAsset(entry: MerchantLogo | undefined, now: Date = new Date()): boolean {
+  if (!entry || entry.status !== 'resolved' || !isSafeLogoUrl(entry.logoUrl)) return false;
+  if (cachedLogoUri(entry)) return false;
+  const retryAfter = logoAssetRetryAfter(entry);
+  return !retryAfter || new Date(retryAfter).getTime() <= now.getTime();
+}
+
+export function renderableLogoUrl(entry: MerchantLogo): string | undefined {
+  const localUri = cachedLogoUri(entry);
+  if (localUri) return localUri;
+  return entry.logoUrl;
+}
+
+export function withRenderableLogoUrl(entry: MerchantLogo): MerchantLogo {
+  const logoUrl = renderableLogoUrl(entry);
+  return logoUrl !== entry.logoUrl ? { ...entry, logoUrl } : entry;
 }
 
 // Logo.dev image URLs embed a publishable token in the query string. It is safe

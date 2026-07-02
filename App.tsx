@@ -33,7 +33,7 @@ import {
   InsightDetailScreen,
   type InsightDetailTarget,
 } from './src/screens/InsightDetailScreen';
-import { ActivityScreen, type ActivityHandle } from './src/screens/ActivityScreen';
+import { ActivityScreen } from './src/screens/ActivityScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
 import { ThemeScreen } from './src/screens/ThemeScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -49,6 +49,7 @@ import {
   BillSheetMount, type BillSheetHandle,
 } from './src/components/sheetMounts';
 import { useLocalNotificationScheduler } from './src/notifications/scheduler';
+import { useAutomationImportProcessor } from './src/automation/useAutomationImportProcessor';
 import {
   activeLedgerSyncDiagnostics,
   cloudKitRouteForActiveLedger,
@@ -133,6 +134,13 @@ const AnimatedScreen = React.memo(function AnimatedScreen({
   );
 });
 
+function cloneActivityFilter(filter: ActivityInitialFilter): ActivityInitialFilter {
+  return {
+    ...filter,
+    catIds: filter.catIds ? [...filter.catIds] : undefined,
+  };
+}
+
 export function DashboardApp() {
   const { theme, dark, wallpaper, metaFlag, setMetaFlag } = useTheme();
   const {
@@ -179,8 +187,6 @@ export function DashboardApp() {
   const [goalContributeToken, setGoalContributeToken] = useState(0);
   const [pendingBudgetEditCategoryId, setPendingBudgetEditCategoryId] = useState<string | undefined>(undefined);
   const [activityFilter, setActivityFilter] = useState<ActivityInitialFilter | null>(null);
-  const [activityFilterToken, setActivityFilterToken] = useState(0);
-  const activityFilterTokenRef = useRef(0);
   const [insightTarget, setInsightTarget] = useState<InsightDetailTarget | null>(null);
   const [morphResetToken, setMorphResetToken] = useState(0);
   // Optimistic delete: store the ID of a transaction that should be hidden from
@@ -475,11 +481,11 @@ export function DashboardApp() {
     }).start();
   }, [tabBarAnim]);
 
-  const activityRef  = useRef<ActivityHandle>(null);
   const txSheetRef   = useRef<TxSheetHandle>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
   const prepareTx = useCallback((tx: Transaction) => txSheetRef.current?.prepare(tx), []);
   const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
+  useAutomationImportProcessor({ onOpenTransaction: openTx });
   const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
   const openIncomeRoute = useCallback((_source?: SourceRect) => {
     router.push('/income');
@@ -1050,17 +1056,10 @@ export function DashboardApp() {
 
   const navigateToActivity = useCallback((filter?: ActivityInitialFilter) => {
     if (filter) {
-      const nextToken = activityFilterTokenRef.current + 1;
-      activityFilterTokenRef.current = nextToken;
-      activityRef.current?.beginNavFilter(filter, nextToken);
-      setActivityFilter(filter);
-      setActivityFilterToken(nextToken);
-      if (activeRef.current !== 'activity') {
-        OP.activity.setValue(0);
-      }
+      setActivityFilter(cloneActivityFilter(filter));
     }
     navigate('activity');
-  }, [OP, navigate]);
+  }, [navigate]);
 
   const handleDrawerNav = useCallback((id: string) => {
     closeDrawer();
@@ -1139,10 +1138,8 @@ export function DashboardApp() {
     navigateToActivity(filter);
     handleOverlayOpenChange(false);
     if (insightClearTimerRef.current) clearTimeout(insightClearTimerRef.current);
-    insightClearTimerRef.current = setTimeout(() => {
-      insightClearTimerRef.current = null;
-      setInsightTarget(null);
-    }, FADE_DURATION + 40);
+    insightClearTimerRef.current = null;
+    setInsightTarget(null);
   }, [handleOverlayOpenChange, navigateToActivity]);
   const handleTabPress = useCallback((id: string) => {
     if      (id === 'home')     navigate('home');
@@ -1206,18 +1203,17 @@ export function DashboardApp() {
 
   const activityScreen = useMemo(() => (
     <MemoActivityScreen
-      ref={activityRef}
       theme={theme}
+      active={screen === 'activity'}
       onOpenDrawer={openDrawer}
       onOpenTx={openTx}
       onPrepareTx={prepareTx}
       onOverlayOpenChange={handleOverlayOpenChange}
       initialFilter={activityFilter}
-      filterToken={activityFilterToken}
       pendingDeleteId={pendingDeleteId}
       onRefreshSync={handleManualCloudRefresh}
     />
-  ), [activityFilter, activityFilterToken, handleManualCloudRefresh, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, theme]);
+  ), [activityFilter, handleManualCloudRefresh, handleOverlayOpenChange, openDrawer, openTx, pendingDeleteId, prepareTx, screen, theme]);
 
   const budgetScreen = useMemo(() => (
     <MemoBudgetScreen
