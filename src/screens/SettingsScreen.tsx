@@ -259,20 +259,6 @@ export function SettingsScreen({
     });
   };
 
-  const testApplePayImport = () => {
-    const sample = encodeURIComponent('Apple Pay: $12.50 at Lasang Pinoy');
-    Linking.openURL(`financeapp:///expense?source=wallet&preview=1&text=${sample}`).catch(() => {
-      Alert.alert('Could not open test import', 'The financeapp URL scheme is not available in this build yet.');
-    });
-  };
-
-  const testTextImport = () => {
-    const sample = encodeURIComponent('You made a purchase of $12.50 at SQ *LASANG PINOY with credit card ...7780. Reply STOP to end.');
-    Linking.openURL(`financeapp:///expense?source=sms&preview=1&text=${sample}`).catch(() => {
-      Alert.alert('Could not open test import', 'The financeapp URL scheme is not available in this build yet.');
-    });
-  };
-
   const showApplePaySetup = () => {
     setApplePayGuideOpen(true);
   };
@@ -380,15 +366,10 @@ export function SettingsScreen({
                   <SwiftText modifiers={[tag('off')]}>Off</SwiftText>
                 </Picker>
                 <SettingsActionRow
-                  label="Apple Pay Setup"
+                  label="Apple Pay Setup Guide"
                   systemImage="wand.and.stars"
-                  value={applePaySetupValue(applePayAutomationMode)}
+                  value="Open"
                   onPress={showApplePaySetup}
-                />
-                <SettingsActionRow
-                  label="Preview Import"
-                  systemImage="play.circle"
-                  onPress={testApplePayImport}
                 />
                 <Picker
                   label="Text Message Import"
@@ -405,15 +386,10 @@ export function SettingsScreen({
                   <SwiftText modifiers={[tag('off')]}>Off</SwiftText>
                 </Picker>
                 <SettingsActionRow
-                  label="Text Message Setup"
+                  label="Text Message Setup Guide"
                   systemImage="wand.and.stars"
-                  value={automationSetupValue(textAutomationMode)}
+                  value="Open"
                   onPress={showTextSetup}
-                />
-                <SettingsActionRow
-                  label="Preview Text Import"
-                  systemImage="play.circle"
-                  onPress={testTextImport}
                 />
               </SwiftSection>
 
@@ -442,7 +418,6 @@ export function SettingsScreen({
             insetsBottom={insets.bottom}
             onClose={() => setApplePayGuideOpen(false)}
             onCreateAutomation={openShortcuts}
-            onPreview={testApplePayImport}
             onSetMode={setApplePayAutomationMode}
             recentImports={recentApplePayImports}
             currencyCode={currencyCode}
@@ -457,7 +432,6 @@ export function SettingsScreen({
             insetsBottom={insets.bottom}
             onClose={() => setTextGuideOpen(false)}
             onCreateAutomation={openShortcuts}
-            onPreview={testTextImport}
             onSetMode={setTextAutomationMode}
             recentImports={recentTextImports}
             currencyCode={currencyCode}
@@ -469,16 +443,6 @@ export function SettingsScreen({
   );
 }
 
-function applePaySetupValue(mode: ApplePayAutomationMode) {
-  return automationSetupValue(mode);
-}
-
-function automationSetupValue(mode: TransactionAutomationMode) {
-  if (mode === 'autosave') return 'Auto-save';
-  if (mode === 'confirm') return 'Review first';
-  return 'Not set';
-}
-
 function ApplePayAutomationGuide({
   theme,
   mode,
@@ -486,7 +450,6 @@ function ApplePayAutomationGuide({
   insetsBottom,
   onClose,
   onCreateAutomation,
-  onPreview,
   onSetMode,
   recentImports,
   currencyCode,
@@ -498,7 +461,6 @@ function ApplePayAutomationGuide({
   insetsBottom: number;
   onClose: () => void;
   onCreateAutomation: () => void;
-  onPreview: () => void;
   onSetMode: (mode: ApplePayAutomationMode) => void;
   recentImports: Transaction[];
   currencyCode: string;
@@ -635,15 +597,6 @@ function ApplePayAutomationGuide({
           onPress={onCreateAutomation}
           theme={theme}
         />
-        <Pressable
-          onPress={onPreview}
-          style={[styles.secondaryButton, { backgroundColor: theme.chipBg }]}
-          accessibilityRole="button"
-          accessibilityLabel="Preview Apple Pay import"
-        >
-          <Icon name="play" size={16} color={theme.text} stroke={1.7} />
-          <Text style={[TYPE.body, { color: theme.text }]}>Preview Import</Text>
-        </Pressable>
       </View>
     </View>
   );
@@ -656,7 +609,6 @@ function TextMessageAutomationGuide({
   insetsBottom,
   onClose,
   onCreateAutomation,
-  onPreview,
   onSetMode,
   recentImports,
   currencyCode,
@@ -668,7 +620,6 @@ function TextMessageAutomationGuide({
   insetsBottom: number;
   onClose: () => void;
   onCreateAutomation: () => void;
-  onPreview: () => void;
   onSetMode: (mode: TransactionAutomationMode) => void;
   recentImports: Transaction[];
   currencyCode: string;
@@ -762,7 +713,7 @@ function TextMessageAutomationGuide({
             theme={theme}
             active={mode === 'autosave'}
             title="Auto-save"
-            detail="Recommended after one preview works. Captures matched alerts in the background, then saves on the next app open."
+            detail="Recommended after the first real import works. Captures matched alerts in the background, then saves on the next app open."
             onPress={() => onSetMode('autosave')}
           />
           <ModeChoice
@@ -817,15 +768,6 @@ function TextMessageAutomationGuide({
           onPress={onCreateAutomation}
           theme={theme}
         />
-        <Pressable
-          onPress={onPreview}
-          style={[styles.secondaryButton, { backgroundColor: theme.chipBg }]}
-          accessibilityRole="button"
-          accessibilityLabel="Preview text import"
-        >
-          <Icon name="play" size={16} color={theme.text} stroke={1.7} />
-          <Text style={[TYPE.body, { color: theme.text }]}>Preview Text Import</Text>
-        </Pressable>
       </View>
     </View>
   );
@@ -1757,14 +1699,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: SPACE.md,
     paddingHorizontal: LAYOUT.screenGutter,
-    gap: SPACE.sm,
-  },
-  secondaryButton: {
-    minHeight: 48,
-    borderRadius: RADIUS.button,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: SPACE.sm,
   },
 });

@@ -23,6 +23,8 @@ import { RepositoryProvider, useRepositories, useRepositoryList } from './src/re
 import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
 import { FirstRunPrompt } from './src/components/FirstRunPrompt';
 import { AppLockGate } from './src/components/AppLockGate';
+import { PaywallProvider } from './src/paywall/PaywallProvider';
+import { PaywallGate } from './src/paywall/PaywallGate';
 import { formatMoney } from './src/selectors/format';
 import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
@@ -1407,6 +1409,7 @@ export function DashboardApp() {
           onClose={closeTheme}
         />
 
+        <PaywallGate />
         <AppLockGate />
         </View>
       </View>
@@ -1425,7 +1428,9 @@ export default function App() {
         <ThemeProvider defaultDark={true} defaultAccent="ink" defaultCardStyle="flat">
           <SafeAreaProvider>
             <AppFeedbackProvider>
-              <DashboardApp />
+              <PaywallProvider>
+                <DashboardApp />
+              </PaywallProvider>
             </AppFeedbackProvider>
           </SafeAreaProvider>
         </ThemeProvider>

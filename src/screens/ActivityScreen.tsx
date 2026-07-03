@@ -1181,8 +1181,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
                   {amountFilterActive(amountFilter) && (
                     <Reanimated.View key="pill-amount" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
                       <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => removeFilter(() => setAmountFilter(null))} accessibilityLabel="Remove amount filter">
-                        <Icon name="wallet" size={10} color={p.text} stroke={1.7} />
-                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
+                        <Text numberOfLines={1} style={[S.filterPillText, S.filterPillAmountText, { color: p.text }]}>
                           {amountFilterLabel(amountFilter)}
                         </Text>
                         <Icon name="close" size={10} color={p.text} stroke={2} />
@@ -2294,6 +2293,7 @@ function FilterSheet({
       snapPoints={['88%']}
       animateOnMount={false}
       enableDynamicSizing={false}
+      enableContentPanningGesture={false}
       enablePanDownToClose
       onChange={handleSheetChange}
       onClose={markClosed}
@@ -2332,7 +2332,7 @@ function FilterSheet({
 
           <BottomSheetScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 440 }}
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, SPACE.lg) + SPACE.lg }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -2344,18 +2344,6 @@ function FilterSheet({
             </View>
 
             {/* ── Amount range ────────────────────────────────── */}
-            {hasAmountFilter && (
-              <View style={{ alignItems: 'flex-end', marginBottom: SPACE.sm }}>
-                <TouchableOpacity
-                  onPress={clearAmountFilter}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear amount filter"
-                >
-                  <Text style={[FS.amountClear, { color: theme.accent.dot }]}>Clear</Text>
-                </TouchableOpacity>
-              </View>
-            )}
             <View style={[FS.amountCard, { marginHorizontal: LAYOUT.cardPadX, marginTop: SPACE.lg, backgroundColor: theme.chipBg }]}>
               <AmountRangeField
                 label="Min"
@@ -3169,6 +3157,11 @@ const S = StyleSheet.create({
     flexShrink: 1,
     maxWidth: 150,
   },
+  filterPillAmountText: {
+    flexShrink: 0,
+    maxWidth: 220,
+    minWidth: 76,
+  },
   filterPillClearAll: {
     ...TYPE.captionEm,
     paddingRight: SPACE.xs,
@@ -3426,9 +3419,6 @@ const FS = StyleSheet.create({
     fontWeight: '500',
   },
 
-  amountClear: {
-    ...TYPE.bodySm,
-  },
   amountCard: {
     minHeight: 66,
     borderRadius: RADIUS.field,

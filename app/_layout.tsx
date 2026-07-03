@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 
 import { AppFeedbackProvider } from '../src/AppFeedbackProvider';
 import { useAppFonts, patchTextWithInter } from '../src/fonts';
+import { PaywallProvider } from '../src/paywall/PaywallProvider';
 import { RepositoryProvider } from '../src/repositories/RepositoryProvider';
 import { ThemeProvider } from '../src/ThemeProvider';
 
@@ -22,11 +23,13 @@ export default function RootLayout() {
         <ThemeProvider defaultDark={true} defaultAccent="ink" defaultCardStyle="flat">
           <SafeAreaProvider>
             <AppFeedbackProvider>
-              <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="index" />
-                <Stack.Screen name="income" />
-                <Stack.Screen name="expense" />
-              </Stack>
+              <PaywallProvider>
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="income" />
+                  <Stack.Screen name="expense" />
+                </Stack>
+              </PaywallProvider>
             </AppFeedbackProvider>
           </SafeAreaProvider>
         </ThemeProvider>
