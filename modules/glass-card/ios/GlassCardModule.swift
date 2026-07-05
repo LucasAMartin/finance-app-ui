@@ -22,8 +22,9 @@ public class GlassCardModule: Module {
     }
 
     ExpoUIView(NativeMerchantMarkView.self)
-    ExpoUIView(NativePaywallGradientView.self)
+    ExpoUIView(NativeRevenueCatPaywallView.self)
     ExpoUIView(NativeIOSStyleOnboardingView.self)
+    ExpoUIView(NativeBorderBeamMicButtonView.self)
 
     AsyncFunction("writeFinanceWidgetSnapshot") { (json: String) in
       guard let defaults = UserDefaults(suiteName: "group.com.lucasmartin.financeapp.widgets") else {

@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme } from '../theme';
 import { getActiveCurrency } from '../currency';
 import { Icon } from './Icon';
-import { GlassCircleButton, SUPPORTS_GLASS } from './GlassButton';
+import { SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
@@ -31,6 +31,7 @@ import {
   buttonStyle, controlSize, datePickerStyle, environment, frame, pickerStyle, tag, tint,
 } from '@expo/ui/swift-ui/modifiers';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { NativeBorderBeamMicButton } from '../../modules/glass-card/src/NativeBorderBeamMicButton';
 
 export interface SavedExpenseInfo {
   id: string;
@@ -428,13 +429,12 @@ export function ExpenseFlow({ theme, initialMode = 'voice', initialDraft, onClos
                     </View>
                   )}
                   {SUPPORTS_GLASS ? (
-                    <GlassCircleButton
+                    <NativeBorderBeamMicButton
                       onPress={onMicPress}
-                      systemImage={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
+                      systemName={mode === 'listening' ? 'stop.fill' : 'mic.fill'}
                       size={88}
                       iconSize={mode === 'listening' ? 30 : 32}
-                      iconColor={micColor}
-                      glassTint={micButtonColor}
+                      isDark={theme.dark}
                       accessibilityLabel={micLabel}
                     />
                   ) : (

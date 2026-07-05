@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import Purchases, { LOG_LEVEL, type CustomerInfo, type CustomerInfoUpdateListener } from 'react-native-purchases';
-import type { PurchasesOffering } from 'react-native-purchases';
+import type { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
 
 import {
   PAYWALL_ENTITLEMENT_ID,
@@ -35,6 +35,7 @@ interface PaywallContextValue {
   isBusy: boolean;
   customerInfo: CustomerInfo | null;
   offering: PurchasesOffering | null;
+  purchasePackage: (packageID: string) => Promise<boolean>;
   restorePurchases: () => Promise<boolean>;
   refreshCustomerInfo: () => Promise<void>;
 }
@@ -164,6 +165,36 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const purchasePackage = useCallback(async (packageID: string) => {
+    if (PAYWALL_MODE === 'off') return true;
+    if (!configuredRef.current || !offering) return false;
+
+    const selectedPackage: PurchasesPackage | undefined = offering.availablePackages.find(
+      pkg => pkg.identifier === packageID || pkg.product.identifier === packageID,
+    );
+
+    if (!selectedPackage) {
+      setError('That subscription option is no longer available.');
+      return false;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await Purchases.purchasePackage(selectedPackage);
+      logPaywallCustomerInfo(result.customerInfo, 'purchased customer info');
+      setCustomerInfo(result.customerInfo);
+      return customerHasEntitlement(result.customerInfo);
+    } catch (nextError) {
+      const maybePurchaseError = nextError as { userCancelled?: boolean; message?: string };
+      if (!maybePurchaseError.userCancelled) {
+        setError(maybePurchaseError.message || 'Could not complete purchase.');
+      }
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  }, [offering]);
+
   const value = useMemo<PaywallContextValue>(() => ({
     mode: PAYWALL_MODE,
     status,
@@ -172,6 +203,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     customerInfo,
     offering,
     isPremium: PAYWALL_MODE === 'off' || customerHasEntitlement(customerInfo),
+    purchasePackage,
     restorePurchases,
     refreshCustomerInfo,
   }), [
@@ -179,6 +211,7 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     error,
     isBusy,
     offering,
+    purchasePackage,
     refreshCustomerInfo,
     restorePurchases,
     status,

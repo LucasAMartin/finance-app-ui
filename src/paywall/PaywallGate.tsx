@@ -8,6 +8,10 @@ export function PaywallGate() {
     mode,
     status,
     isPremium,
+    isBusy,
+    offering,
+    purchasePackage,
+    restorePurchases,
   } = usePaywall();
   const [paywallAttempted, setPaywallAttempted] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
@@ -27,6 +31,16 @@ export function PaywallGate() {
     <MembershipPaywallPreview
       visible={paywallOpen}
       onClose={() => setPaywallOpen(false)}
+      packages={offering?.availablePackages}
+      isBusy={isBusy}
+      onPurchase={async (packageID) => {
+        const didPurchase = await purchasePackage(packageID);
+        if (didPurchase) setPaywallOpen(false);
+      }}
+      onRestore={async () => {
+        const didRestore = await restorePurchases();
+        if (didRestore) setPaywallOpen(false);
+      }}
     />
   ) : null;
 }

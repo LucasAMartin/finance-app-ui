@@ -11,6 +11,9 @@ Pod::Spec.new do |s|
   }
   s.source         = { git: '' }
   s.static_framework = true
+  s.resource_bundles = {
+    'GlassCardPaywall' => ['Resources/Paywall/*']
+  }
 
   s.dependency 'ExpoModulesCore'
   s.dependency 'ExpoUI'
