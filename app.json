@@ -18,6 +18,9 @@
         "CKSharingSupported": true
       },
       "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.lucasmartin.financeapp.widgets"
+        ],
         "com.apple.developer.icloud-container-identifiers": [
           "iCloud.com.lucasmartin.financeapp"
         ],

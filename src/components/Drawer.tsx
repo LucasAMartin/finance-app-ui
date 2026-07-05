@@ -12,7 +12,7 @@ import { Host, Image as SwiftUIImage } from '@expo/ui/swift-ui';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { Theme } from '../theme';
 import { ScreenExitButton } from './GlassButton';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { RADIUS } from '../radius';
 import type { LedgerMember } from '../repositories/types';
 
@@ -196,7 +196,7 @@ function DrawerNavItem({
           color={selected ? theme.text : item.highlight ? theme.accent.dot : theme.textSec}
         />
       </Host>
-      <Text style={[TYPE.subsectionTitle, { flex: 1, color: theme.text, fontWeight: selected ? '700' : TYPE.subsectionTitle.fontWeight }]}>
+      <Text style={[TYPE.subsectionTitle, { flex: 1, color: theme.text, fontWeight: selected ? FONT_WEIGHT.bold : TYPE.subsectionTitle.fontWeight }]}>
         {item.label}
       </Text>
       {item.badge != null && (

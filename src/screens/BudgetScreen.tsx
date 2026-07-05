@@ -38,7 +38,7 @@ import { BillSheetMount, type BillSheetHandle } from '../components/sheetMounts'
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { makeP, DARK_TEXT_SHADOW, makeScrim, deriveFloor, MEDIA, ONMEDIA_BORDER_LIGHT, WallpaperP as P } from '../wallpaperPalette';
@@ -3014,7 +3014,7 @@ function CategoryEditSheet({
             appearance={theme.dark ? 'dark' : 'light'}
             backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
             fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
-            activeFontStyle={{ color: theme.accent.ink, fontWeight: '600' }}
+            activeFontStyle={{ color: theme.accent.ink, fontWeight: FONT_WEIGHT.semibold }}
             accessibilityLabel="Budget group"
             style={[styles.catGroupSegmented, compactSheet && styles.catGroupSegmentedCompact]}
           />
@@ -3526,7 +3526,7 @@ const styles = StyleSheet.create({
   },
   catFieldInput: {
     ...TYPE.subsectionTitle,
-    fontWeight: '500' as const,
+    fontWeight: FONT_WEIGHT.medium,
     padding: 0,
   },
 });

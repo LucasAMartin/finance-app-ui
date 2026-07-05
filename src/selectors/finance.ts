@@ -205,16 +205,39 @@ export function upcomingBillsFromRecurring(rules: RecurringRule[], categories: C
     .sort((a, b) => a.daysUntil - b.daysUntil);
 }
 
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+export function stepRecurringDate(
+  rule: Pick<RecurringRule, 'cadence' | 'dayOfMonth' | 'monthOfYear'>,
+  date: Date,
+  dir: 1 | -1,
+): void {
+  if (rule.cadence === 'weekly') {
+    date.setDate(date.getDate() + 7 * dir);
+    return;
+  }
+
+  const targetDay = Math.max(1, rule.dayOfMonth ?? date.getDate());
+
+  if (rule.cadence === 'annual') {
+    const targetMonth = Math.max(0, Math.min(11, (rule.monthOfYear ?? date.getMonth() + 1) - 1));
+    const targetYear = date.getFullYear() + dir;
+    date.setFullYear(targetYear, targetMonth, Math.min(targetDay, daysInMonth(targetYear, targetMonth)));
+    return;
+  }
+
+  const next = new Date(date);
+  next.setDate(1);
+  next.setMonth(next.getMonth() + dir);
+  next.setDate(Math.min(targetDay, daysInMonth(next.getFullYear(), next.getMonth())));
+  date.setTime(next.getTime());
+}
+
 export function advanceDueDate(rule: RecurringRule): string {
   const d = new Date(rule.nextDueDate);
-  if (rule.cadence === 'weekly') {
-    d.setDate(d.getDate() + 7);
-  } else if (rule.cadence === 'annual') {
-    d.setFullYear(d.getFullYear() + 1);
-  } else {
-    d.setMonth(d.getMonth() + 1);
-    if (rule.dayOfMonth) d.setDate(Math.min(rule.dayOfMonth, 28));
-  }
+  stepRecurringDate(rule, d, 1);
   return d.toISOString();
 }
 
@@ -228,12 +251,7 @@ function nextDueDate(rule: RecurringRule, today: Date): Date {
 
   const next = new Date(due);
   while (next < startOfDay(today)) {
-    if (rule.cadence === 'weekly') next.setDate(next.getDate() + 7);
-    else if (rule.cadence === 'annual') next.setFullYear(next.getFullYear() + 1);
-    else {
-      next.setMonth(next.getMonth() + 1);
-      if (rule.dayOfMonth) next.setDate(Math.min(rule.dayOfMonth, 28));
-    }
+    stepRecurringDate(rule, next, 1);
   }
   return next;
 }

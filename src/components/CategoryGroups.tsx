@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Theme, getCardStyle, OVER_DOT, GROUP_COLORS } from '../theme';
 import { formatActiveCurrencyAmount } from '../currency';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import type { SpendGroup } from '../repositories/types';
 import { Icon } from './Icon';
 import { Collapsible } from './Collapsible';
@@ -89,7 +89,7 @@ function GroupRow({
         </Animated.View>
         <View style={{ flex: 1 }}>
           <View style={styles.groupTopRow}>
-            <Text style={[TYPE.body, { fontSize: 16, fontWeight: '700', letterSpacing: -0.4, color }]}>{group.label}</Text>
+            <Text style={[TYPE.groupPanelLabel, { fontWeight: FONT_WEIGHT.bold, color }]}>{group.label}</Text>
             <Text style={[TYPE.body, { color: theme.text }]}>
               {formatActiveCurrencyAmount(groupTotal, 0)}
             </Text>

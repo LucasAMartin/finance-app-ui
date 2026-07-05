@@ -1128,7 +1128,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
                   <ActivitySkeleton dark={theme.dark} />
                 ) : homeActivityGroups.length === 0 ? (
                   <Text style={[styles.emptyMonthText, { color: p.textTer }]}>
-                    No expenses logged yet. Tap + below to add one by voice or text.
+                    No expenses logged yet. Tap the microphone below to add one by voice or text.
                   </Text>
                 ) : (
                   homeActivityGroups.map(group => (
@@ -1934,7 +1934,7 @@ function NativeHomeActivitySection({
                 lineLimit(2),
               ]}
             >
-              No expenses logged yet. Tap + below to add one by voice or text.
+              No expenses logged yet. Tap the microphone below to add one by voice or text.
             </SwiftText>
           ) : (
             <VStack

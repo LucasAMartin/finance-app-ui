@@ -1,27 +1,32 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { usePaywall } from './PaywallProvider';
+import { MembershipPaywallPreview } from './MembershipPaywallPreview';
 
 export function PaywallGate() {
   const {
     mode,
     status,
     isPremium,
-    presentPaywall,
   } = usePaywall();
   const [paywallAttempted, setPaywallAttempted] = useState(false);
-  const presentingRef = useRef(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   useEffect(() => {
     if (mode !== 'live' || isPremium || status !== 'ready') return;
-    if (paywallAttempted || presentingRef.current) return;
-    presentingRef.current = true;
-    presentPaywall()
-      .finally(() => {
-        presentingRef.current = false;
-        setPaywallAttempted(true);
-      });
-  }, [isPremium, mode, paywallAttempted, presentPaywall, status]);
+    if (paywallAttempted) return;
+    setPaywallOpen(true);
+    setPaywallAttempted(true);
+  }, [isPremium, mode, paywallAttempted, status]);
 
-  return null;
+  useEffect(() => {
+    if (mode !== 'live' || isPremium) setPaywallOpen(false);
+  }, [isPremium, mode]);
+
+  return paywallOpen ? (
+    <MembershipPaywallPreview
+      visible={paywallOpen}
+      onClose={() => setPaywallOpen(false)}
+    />
+  ) : null;
 }

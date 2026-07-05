@@ -20,7 +20,7 @@ import * as Haptics from 'expo-haptics';
 
 import { formatActiveCurrencyAmount } from '../../currency';
 import { GROUP_COLORS, OVER_DOT, type Theme } from '../../theme';
-import { TYPE } from '../../typography';
+import { FONT_WEIGHT, TYPE } from '../../typography';
 import type { ActivityInitialFilter } from '../../selectors/spending';
 import type { SnapshotVizSpec } from './SnapshotViz';
 
@@ -336,7 +336,7 @@ export function InsightBarChart({
                 textAnchor="middle"
                 fill={isActive ? theme.text : theme.textTer}
                 fontSize={10}
-                fontWeight={isActive ? '700' : '500'}
+                fontWeight={isActive ? FONT_WEIGHT.bold : FONT_WEIGHT.medium}
               >
                 {b.label}
               </SvgText>
@@ -375,7 +375,7 @@ export function InsightBarChart({
               textAnchor="middle"
               fill={theme.bg}
               fontSize={11}
-              fontWeight="700"
+              fontWeight={FONT_WEIGHT.bold}
             >
               {fmtMoney(active.value, active.value < 100 ? 2 : 0)}
             </SvgText>
@@ -550,7 +550,7 @@ export function InsightPaceChart({
               textAnchor="middle"
               fill={i === activeIdx ? theme.text : theme.textTer}
               fontSize={10}
-              fontWeight={i === activeIdx ? '700' : '500'}
+              fontWeight={i === activeIdx ? FONT_WEIGHT.bold : FONT_WEIGHT.medium}
             >
               {p.label}
             </SvgText>
@@ -582,7 +582,7 @@ export function InsightPaceChart({
               textAnchor="middle"
               fill={active.actual > active.plan ? '#FDF7F3' : theme.bg}
               fontSize={11}
-              fontWeight="700"
+              fontWeight={FONT_WEIGHT.bold}
             >
               {fmtMoney(active.actual)}
             </SvgText>

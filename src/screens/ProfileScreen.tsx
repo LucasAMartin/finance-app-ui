@@ -33,10 +33,10 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 
 import { ScreenExitButton } from '../components/GlassButton';
+import { Icon } from '../components/Icon';
 import type { LedgerMember } from '../repositories/types';
 import { Theme } from '../theme';
-import { TYPE } from '../typography';
-import { RADIUS } from '../radius';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { LAYOUT, SPACE } from '../spacing';
 
 interface Props {
@@ -71,8 +71,10 @@ export function ProfileScreen({
   const displayName = member?.displayName ?? 'You';
   const initial = displayName.trim().slice(0, 1).toUpperCase() || 'U';
   const profileImageDataUri = memberProfileImageDataUri(member);
-  const accessLabel = member?.role === 'owner' ? 'Can manage sharing' : 'Shared member';
-  const profileSubtitle = 'Personal profile';
+  const sharingRoleLabel = member?.role === 'owner' ? 'Owner' : 'Member';
+  const itemEditingLabel = member?.allowOthersToEditMyItems
+    ? 'Others can edit items you add'
+    : 'Only you can edit items you add';
 
   const editName = React.useCallback(() => {
     Alert.prompt(
@@ -160,17 +162,6 @@ export function ProfileScreen({
     onOpenSharing();
   }, [onClose, onOpenSharing]);
 
-  const handleSignOut = React.useCallback(() => {
-    Alert.alert('Sign Out', "You'll need to sign in again to reach your data.", [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: () => Alert.alert('Sign Out', 'This will be available in a future update.'),
-      },
-    ]);
-  }, []);
-
   return (
     <Animated.View
       pointerEvents={visible ? 'auto' : 'none'}
@@ -215,20 +206,25 @@ export function ProfileScreen({
                     <Pressable
                       onPress={openPhotoActions}
                       accessibilityRole="button"
-                      accessibilityLabel="Edit profile photo"
+                      accessibilityLabel={profileImageDataUri ? 'Change profile photo' : 'Add profile photo'}
+                      accessibilityHint="Opens photo options"
                       style={({ pressed }) => [
-                        styles.avatar,
-                        {
-                          backgroundColor: theme.accent.fill,
-                          transform: [{ scale: pressed ? 0.985 : 1 }],
-                        },
+                        styles.avatarTapTarget,
+                        { transform: [{ scale: pressed ? 0.985 : 1 }] },
                       ]}
                     >
-                      {profileImageDataUri ? (
-                        <RNImage source={{ uri: profileImageDataUri }} style={styles.avatarImage} />
-                      ) : (
-                        <Text style={[styles.avatarInitial, { color: theme.accent.ink }]}>{initial}</Text>
-                      )}
+                      <View style={[styles.avatar, { backgroundColor: theme.accent.fill }]}>
+                        {profileImageDataUri ? (
+                          <RNImage source={{ uri: profileImageDataUri }} style={styles.avatarImage} />
+                        ) : (
+                          <Text style={[styles.avatarInitial, { color: theme.accent.ink }]}>{initial}</Text>
+                        )}
+                      </View>
+                      <View
+                        style={[styles.avatarBadge, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
+                      >
+                        <Icon name="chevDown" size={8} color={theme.textTer} stroke={2.4} />
+                      </View>
                     </Pressable>
                     <Pressable
                       onPress={editName}
@@ -240,9 +236,6 @@ export function ProfileScreen({
                         {displayName}
                       </Text>
                     </Pressable>
-                    <Text style={[TYPE.bodyRegular, styles.subtitle, { color: theme.textSec }]} numberOfLines={1}>
-                      {profileSubtitle}
-                    </Text>
                   </View>
                 </RNHostView>
               </SwiftGroup>
@@ -250,47 +243,28 @@ export function ProfileScreen({
                 <LabeledContent label="Display Name">
                   <SwiftButton label={displayName} onPress={editName} />
                 </LabeledContent>
-                <LabeledContent label="Profile Photo">
-                  <SwiftButton
-                    label={profileImageDataUri ? 'Edit' : 'Add'}
-                    onPress={openPhotoActions}
-                  />
-                </LabeledContent>
-                <LabeledContent label="Shown On">
+                <LabeledContent label="Visible In">
                   <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
                     Shared ledgers
                   </SwiftText>
                 </LabeledContent>
               </SwiftSection>
               <SwiftSection>
-                <LabeledContent label="Ledger Access">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {accessLabel}
-                  </SwiftText>
-                </LabeledContent>
-                <LabeledContent label="Edit Access">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {member?.allowOthersToEditMyItems ? 'Others can edit my items' : 'Only I can edit my items'}
-                  </SwiftText>
-                </LabeledContent>
                 <SwiftButton
                   label="Data & Sharing"
                   systemImage="person.2.badge.gearshape"
                   onPress={openSharingAndClose}
                 />
-              </SwiftSection>
-              {profileImageDataUri && (
-                <SwiftSection>
-                  <SwiftButton label="Remove Photo" systemImage="trash" role="destructive" onPress={removePhoto} />
-                </SwiftSection>
-              )}
-              <SwiftSection>
-                <SwiftButton
-                  label="Sign Out"
-                  systemImage="rectangle.portrait.and.arrow.right"
-                  role="destructive"
-                  onPress={handleSignOut}
-                />
+                <LabeledContent label="Sharing Role">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+                    {sharingRoleLabel}
+                  </SwiftText>
+                </LabeledContent>
+                <LabeledContent label="Item Editing">
+                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
+                    {itemEditingLabel}
+                  </SwiftText>
+                </LabeledContent>
               </SwiftSection>
             </SwiftForm>
           </Host>
@@ -344,6 +318,10 @@ const styles = StyleSheet.create({
     paddingTop: SPACE.sm,
     paddingBottom: SPACE.sm,
   },
+  avatarTapTarget: {
+    width: 116,
+    height: 116,
+  },
   avatar: {
     width: 116,
     height: 116,
@@ -352,23 +330,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  avatarBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarImage: {
     width: 116,
     height: 116,
   },
   avatarInitial: {
     fontSize: 46,
-    fontWeight: '600',
-    letterSpacing: -1.2,
+    fontWeight: FONT_WEIGHT.semibold,
+    letterSpacing: 0,
   },
   name: {
     marginTop: SPACE.md,
     textAlign: 'center',
     maxWidth: 300,
-  },
-  subtitle: {
-    marginTop: SPACE.xs,
-    textAlign: 'center',
   },
   formHost: {
     flex: 1,

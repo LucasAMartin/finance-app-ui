@@ -13,7 +13,7 @@ import { Icon } from './Icon';
 import { ScreenExitButton, SUPPORTS_GLASS } from './GlassButton';
 import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
@@ -590,9 +590,9 @@ export function VoiceSheet({ theme, visible, onClose, onSaved, initialMode = 'vo
                     {k === 'del' ? (
                       <Icon name="backspace" size={20} color={theme.text} stroke={1.5} />
                     ) : k === 'clear' ? (
-                      <Text style={[TYPE.body, { fontWeight: '600', color: theme.textSec }]}>Clear</Text>
+                      <Text style={[TYPE.body, { fontWeight: FONT_WEIGHT.semibold, color: theme.textSec }]}>Clear</Text>
                     ) : (
-                      <Text style={[TYPE.headline, { fontWeight: '500', color: theme.text }]}>{k}</Text>
+                      <Text style={[TYPE.headline, { fontWeight: FONT_WEIGHT.medium, color: theme.text }]}>{k}</Text>
                     )}
                   </KeyButton>
                 ))}
@@ -892,7 +892,7 @@ const S = StyleSheet.create({
   },
   fieldInput: {
     ...TYPE.subsectionTitle,
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium,
     textAlign: 'right',
     padding: 0,
   },
@@ -909,14 +909,14 @@ const S = StyleSheet.create({
   },
   manualAmountSign: {
     fontSize: 24,
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium,
     letterSpacing: -0.3,
     lineHeight: 30,
     marginRight: 5,
   },
   manualAmountValue: {
     fontSize: 46,
-    fontWeight: '600',
+    fontWeight: FONT_WEIGHT.semibold,
     letterSpacing: -1.2,
     lineHeight: 52,
     fontVariant: ['tabular-nums'],
@@ -952,7 +952,7 @@ const S = StyleSheet.create({
   },
   subcatMenuText: {
     ...TYPE.body,
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium,
     flexShrink: 1,
   },
   keypad: {

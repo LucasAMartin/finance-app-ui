@@ -6,7 +6,7 @@ import { frame, glassEffect, foregroundStyle, font, contentShape, shapes, disabl
 import { Theme } from '../theme';
 import { useTheme } from '../ThemeProvider';
 import { currencyDecimals } from '../currency';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE, type FontWeightToken } from '../typography';
 import { LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { OVER_DOT } from '../theme';
@@ -59,13 +59,13 @@ export function ProgressBar({ pct, color, trackColor, height }: ProgressBarProps
 interface MoneyProps {
   value: number;
   size?: number;
-  weight?: '400' | '500' | '600' | '700';
+  weight?: FontWeightToken;
   color?: string;
   prefix?: string;
   theme: Theme;
 }
 
-export function Money({ value, size = 16, weight = '600', color, prefix = '−$', theme }: MoneyProps) {
+export function Money({ value, size = 16, weight = FONT_WEIGHT.semibold, color, prefix = '−$', theme }: MoneyProps) {
   const { currency } = useTheme();
   const abs = Math.abs(value);
   const decimals = currencyDecimals(currency);

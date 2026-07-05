@@ -5,6 +5,7 @@ import { Theme } from '../theme';
 import { categoryGroupColor } from '../repositories/categoryUtils';
 import type { Category } from '../repositories/types';
 import { Icon } from './Icon';
+import { FONT_WEIGHT } from '../typography';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const MONTH_NAMES = [
@@ -264,7 +265,7 @@ export const TransactionCalendar = React.memo(function TransactionCalendar({
                       <Text style={[
                         styles.dayNum,
                         { color: isSelected ? clr.selectedText : clr.text },
-                        isToday && !isSelected && { fontWeight: '700' },
+                        isToday && !isSelected && { fontWeight: FONT_WEIGHT.bold },
                       ]}>
                         {day}
                       </Text>
@@ -304,7 +305,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   monthTitle: {
-    fontSize: 16, fontWeight: '700', letterSpacing: -0.3,
+    fontSize: 16, fontWeight: FONT_WEIGHT.bold, letterSpacing: -0.3,
   },
   monthPickerBtn: {
     flex: 1,
@@ -318,14 +319,14 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', paddingVertical: 3,
   },
   weekday: {
-    fontSize: 9.5, fontWeight: '700', letterSpacing: 0.3, marginBottom: 4,
+    fontSize: 9.5, fontWeight: FONT_WEIGHT.bold, letterSpacing: 0.3, marginBottom: 4,
   },
   dayCircle: {
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center',
   },
   dayNum: {
-    fontSize: 13, fontWeight: '500', letterSpacing: -0.2,
+    fontSize: 13, fontWeight: FONT_WEIGHT.medium, letterSpacing: -0.2,
   },
   dotRow: {
     flexDirection: 'row', gap: 3,

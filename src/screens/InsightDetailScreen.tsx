@@ -73,7 +73,7 @@ import {
   type ActivityInitialFilter,
 } from '../selectors/spending';
 import { buildSavedMetric } from '../selectors/savings';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -763,7 +763,7 @@ export function InsightDetailScreen({ theme, target, onClose, onSeeAll }: Props)
                     }}
                     activeFontStyle={{
                       color: theme.accent.ink,
-                      fontWeight: '600',
+                      fontWeight: FONT_WEIGHT.semibold,
                     }}
                     style={styles.pickerSeg}
                   />
@@ -1019,7 +1019,7 @@ function DetailDayGroup({
               <Money
                 value={tx.amount}
                 size={13}
-                weight="500"
+                weight={FONT_WEIGHT.medium}
                 theme={theme}
                 prefix={isIncome ? '+$' : '−$'}
                 color={isIncome ? incomeColor : p.text}

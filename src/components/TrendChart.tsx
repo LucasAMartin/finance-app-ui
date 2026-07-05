@@ -2,6 +2,7 @@ import React from 'react';
 import Svg, { Path, Circle, Line, Text as SvgText, Rect, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Theme, OVER_DOT } from '../theme';
 import type { TrendPoint } from '../selectors/types';
+import { FONT_WEIGHT } from '../typography';
 
 interface TrendChartProps {
   data: TrendPoint[];
@@ -57,10 +58,10 @@ export function TrendChart({ data, theme, width, height = 180, budget }: TrendCh
         x1={pad.l} y1={budgetY} x2={pad.l + W} y2={budgetY}
         stroke={theme.accent.dot} strokeWidth={1.2} strokeDasharray="5 5" opacity={0.85}
       />
-      <SvgText x={pad.l + W + 6} y={budgetY + 3} fontSize={9.5} fontWeight="700" fill={theme.accent.dot} letterSpacing={0.4}>
+      <SvgText x={pad.l + W + 6} y={budgetY + 3} fontSize={9.5} fontWeight={FONT_WEIGHT.bold} fill={theme.accent.dot} letterSpacing={0.4}>
         BUDGET
       </SvgText>
-      <SvgText x={pad.l + W + 6} y={budgetY + 16} fontSize={10} fontWeight="600" fill={theme.text}>
+      <SvgText x={pad.l + W + 6} y={budgetY + 16} fontSize={10} fontWeight={FONT_WEIGHT.semibold} fill={theme.text}>
         {fmt(budget)}
       </SvgText>
 
@@ -84,7 +85,7 @@ export function TrendChart({ data, theme, width, height = 180, budget }: TrendCh
       {/* Tooltip on last point */}
       <Rect x={last.x - 26} y={last.y - 28} width={52} height={18} rx={9}
         fill={lastOver ? OVER_DOT : theme.text} />
-      <SvgText x={last.x} y={last.y - 15} textAnchor="middle" fontSize={10} fontWeight="700"
+      <SvgText x={last.x} y={last.y - 15} textAnchor="middle" fontSize={10} fontWeight={FONT_WEIGHT.bold}
         fill={lastOver ? '#fff' : theme.bg}>
         {fmt(last.v)}
       </SvgText>
@@ -94,7 +95,7 @@ export function TrendChart({ data, theme, width, height = 180, budget }: TrendCh
         const isLast = i === pts.length - 1;
         return (
           <SvgText key={i} x={p.x} y={height - 4} textAnchor="middle"
-            fontSize={10} fontWeight={isLast ? '700' : '500'}
+            fontSize={10} fontWeight={isLast ? FONT_WEIGHT.bold : FONT_WEIGHT.medium}
             fill={isLast ? theme.text : theme.textSec}>
             {p.label}
           </SvgText>

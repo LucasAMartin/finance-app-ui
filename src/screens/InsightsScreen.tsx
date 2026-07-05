@@ -41,6 +41,7 @@ import {
   frame,
   glassEffect,
   lineLimit,
+  multilineTextAlignment,
   padding,
   pickerStyle,
   shapes,
@@ -110,7 +111,7 @@ import {
   type InsightDetail,
 } from '../components/charts/InsightsCharts';
 import { SnapshotViz, type SnapshotVizSpec } from '../components/charts/SnapshotViz';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { RADIUS } from '../radius';
 import { SPACE, LAYOUT } from '../spacing';
 import { merchantLogoKey, useMerchantLogoMap } from '../merchantLogos';
@@ -708,6 +709,79 @@ function EmptyState({
         {body}
       </Text>
     </View>
+  );
+}
+
+const NATIVE_INSIGHTS_EMPTY_HEIGHT = 166;
+
+function NativeInsightEmptyState({
+  title,
+  body,
+  theme,
+  p,
+}: {
+  title: string;
+  body: string;
+  theme: Theme;
+  p: ReturnType<typeof makeP>;
+}) {
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: NATIVE_INSIGHTS_EMPTY_HEIGHT }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="center"
+          spacing={SPACE.sm}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, minHeight: NATIVE_INSIGHTS_EMPTY_HEIGHT, alignment: 'center' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: nativeInsightGlassTint(theme.dark) },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <SwiftImage
+            systemName="chart.bar"
+            size={18}
+            color={p.textTer}
+            modifiers={[
+              frame({ width: 40, height: 40 }),
+              background(p.hairline, shapes.circle()),
+            ]}
+          />
+          <SwiftText
+            modifiers={[
+              font({ size: 14, weight: 'semibold' }),
+              foregroundStyle(p.text),
+              lineLimit(2),
+              multilineTextAlignment('center'),
+            ]}
+          >
+            {title}
+          </SwiftText>
+          <SwiftText
+            modifiers={[
+              font({ size: 12 }),
+              foregroundStyle(p.textSec),
+              lineLimit(3),
+              multilineTextAlignment('center'),
+            ]}
+          >
+            {body}
+          </SwiftText>
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
   );
 }
 
@@ -2013,7 +2087,7 @@ export function InsightsScreen({
                   }}
                   activeFontStyle={{
                     color: theme.accent.ink,
-                    fontWeight: '600',
+                    fontWeight: FONT_WEIGHT.semibold,
                   }}
                   style={styles.timeframeSeg}
                 />
@@ -2278,7 +2352,7 @@ export function InsightsScreen({
                       fontStyle={{ color: theme.textSec }}
                       activeFontStyle={{
                         color: ON_GROUP_ICON,
-                        fontWeight: '600',
+                        fontWeight: FONT_WEIGHT.semibold,
                       }}
                       style={styles.whereSeg}
                     />
@@ -2389,6 +2463,13 @@ export function InsightsScreen({
                     </View>
                   </BentoTile>
                 )
+              ) : SUPPORTS_GLASS ? (
+                <NativeInsightEmptyState
+                  theme={theme}
+                  p={p}
+                  title="No spending yet this period"
+                  body="Log an expense to see your top categories and merchants here."
+                />
               ) : (
                 <BentoTile dark={theme.dark} tier="secondary">
                   <EmptyState

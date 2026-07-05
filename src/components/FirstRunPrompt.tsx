@@ -10,7 +10,7 @@ import {
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS } from '../theme';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { MEDIA } from '../wallpaperPalette';
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACE.md,
   },
   primaryBtnText: {
-    fontWeight: '600',
+    fontWeight: FONT_WEIGHT.semibold,
   },
   skipBtn: {
     alignItems: 'center',

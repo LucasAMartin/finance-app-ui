@@ -1,5 +1,6 @@
 import type { Transaction, Category, Budget, RecurringRule, SpendSeriesPoint, SpendBucket } from '../repositories/types';
 import type { Period } from './finance';
+import { stepRecurringDate } from './finance';
 import { UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
@@ -135,14 +136,7 @@ export function fixedMonthlyTotal(rules: RecurringRule[]): number {
 }
 
 function stepRule(rule: RecurringRule, cursor: Date, dir: 1 | -1): void {
-  if (rule.cadence === 'weekly') {
-    cursor.setDate(cursor.getDate() + 7 * dir);
-  } else if (rule.cadence === 'annual') {
-    cursor.setFullYear(cursor.getFullYear() + dir);
-  } else {
-    cursor.setMonth(cursor.getMonth() + dir);
-    if (rule.dayOfMonth) cursor.setDate(Math.min(rule.dayOfMonth, 28));
-  }
+  stepRecurringDate(rule, cursor, dir);
 }
 
 /** Every due date for a rule that falls within [from, to]. */

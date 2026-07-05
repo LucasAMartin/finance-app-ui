@@ -43,7 +43,7 @@ import {
 import { RADIUS } from '../radius';
 import { Icon } from '../components/Icon';
 import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 
 const UPLOAD_TAB_ID = 'upload';
 const GRID_COLS = 3;
@@ -710,7 +710,7 @@ const styles = StyleSheet.create({
   },
   applyText: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: FONT_WEIGHT.bold,
     letterSpacing: -0.3,
   },
 });

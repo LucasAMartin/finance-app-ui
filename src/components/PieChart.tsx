@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Theme, catPastel } from '../theme';
 import { UNCATEGORIZED_LABEL } from '../repositories/categoryUtils';
+import { FONT_WEIGHT, TYPE } from '../typography';
 
 export interface PieSlice {
   cat: string;
@@ -109,10 +110,10 @@ export function PieChart({ data, theme, size = 240, selected, cats = {}, onSelec
           pointerEvents="none"
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}
         >
-          <Text style={{ fontSize: 22, fontWeight: '700', color: theme.text, letterSpacing: -1 }}>
+          <Text style={[TYPE.headline, { fontWeight: FONT_WEIGHT.bold, color: theme.text, letterSpacing: -1 }]}>
             {centerAmt}
           </Text>
-          <Text style={{ fontSize: 12, color: theme.textSec, marginTop: 2, fontWeight: '500' }}>
+          <Text style={[TYPE.captionEm, { color: theme.textSec, marginTop: 2 }]}>
             {centerSub}
           </Text>
         </View>

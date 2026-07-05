@@ -65,6 +65,7 @@ import {
   frame,
   glassEffect,
   lineLimit,
+  multilineTextAlignment,
   padding,
   pickerStyle,
   shapes,
@@ -89,7 +90,8 @@ const NOW            = new Date();
 const CALENDAR_YEAR  = NOW.getFullYear();
 const CALENDAR_MONTH = NOW.getMonth();
 const ACTIVITY_PAGE_SIZE = 40;
-const FILTER_COMMIT_DELAY_MS = 90;
+const FILTER_COMMIT_DELAY_MS = 160;
+const CALENDAR_DAY_CLOSE_DELAY_MS = 120;
 const RANGE_CLOSE_DELAY_MS = 420;
 const FILTER_WORK_OPACITY = 0.65;
 
@@ -112,7 +114,7 @@ import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/head
 import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Theme, GROUP_COLORS, OVER_DOT, cautionBg, cautionText, ON_GROUP_ICON } from '../theme';
 import { MEDIA, DARK_TEXT_SHADOW, makeP, makeScrim, deriveFloor, ONMEDIA_BORDER_LIGHT } from '../wallpaperPalette';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { useTheme } from '../ThemeProvider';
@@ -600,6 +602,12 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
     setSelectedDay(null);
     calendarSheetRef.current?.resetSelection?.();
   }, []);
+
+  const clearEmptyStateFilters = useCallback(() => {
+    clearAllFilters();
+    setQuery('');
+    setSortBy('date-desc');
+  }, [clearAllFilters]);
 
   // Optimistic delete: hide the row immediately (via pendingUndo filter in
   // `grouped`) without touching the repo. The actual delete fires when the toast
@@ -1244,7 +1252,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
                         ) : (
                           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 0 }}>
                             <Text style={[S.summaryLabel, { color: p.textSec }]}>{dayDetail.txs.length} transactions · </Text>
-                            <Money value={dayDetailSpend} theme={theme} size={12} color={p.textSec} />
+                            <Money value={dayDetailSpend} theme={theme} size={TYPE.subsectionTitle.fontSize} color={p.textSec} />
                             <Text style={[S.summaryLabel, { color: p.textSec }]}> total</Text>
                           </View>
                         )}
@@ -1271,14 +1279,23 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
               </SectionCard>
             ) : (
               dayKeys.length === 0 ? (
-                <SectionCard dark={theme.dark}>
-                  <EmptyState
+                SUPPORTS_GLASS ? (
+                  <NativeActivityEmptyState
                     theme={theme}
                     p={p}
                     isFiltered={isFiltered}
-                    onClearFilters={() => { setQuery(''); setCatFilter([]); setDateFilter(null); setAmountFilter(null); setSelectedDay(null); setSortBy('date-desc'); }}
+                    onClearFilters={clearEmptyStateFilters}
                   />
-                </SectionCard>
+                ) : (
+                  <SectionCard dark={theme.dark}>
+                    <EmptyState
+                      theme={theme}
+                      p={p}
+                      isFiltered={isFiltered}
+                      onClearFilters={clearEmptyStateFilters}
+                    />
+                  </SectionCard>
+                )
               ) : (
                 <>
                   {isFiltered && (
@@ -1438,6 +1455,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   const [previewSelection, setPreviewSelection] = useState<CalendarPreviewSelection>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (activeRange) {
@@ -1454,6 +1472,10 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     if (commitTimerRef.current !== null) {
       clearTimeout(commitTimerRef.current);
       commitTimerRef.current = null;
+    }
+    if (commitFrameRef.current !== null) {
+      cancelAnimationFrame(commitFrameRef.current);
+      commitFrameRef.current = null;
     }
   }, []);
 
@@ -1478,6 +1500,20 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       clearTimeout(commitTimerRef.current);
       commitTimerRef.current = null;
     }
+    if (commitFrameRef.current !== null) {
+      cancelAnimationFrame(commitFrameRef.current);
+      commitFrameRef.current = null;
+    }
+    markClosed();
+    setPreviewSelection(null);
+    sheetRef.current?.close();
+  }, [markClosed]);
+
+  const closeAfterSelection = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     markClosed();
     setPreviewSelection(null);
     sheetRef.current?.close();
@@ -1491,6 +1527,10 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     if (commitTimerRef.current !== null) {
       clearTimeout(commitTimerRef.current);
       commitTimerRef.current = null;
+    }
+    if (commitFrameRef.current !== null) {
+      cancelAnimationFrame(commitFrameRef.current);
+      commitFrameRef.current = null;
     }
     setMode('day');
     setDraftRange({});
@@ -1559,23 +1599,28 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
         clearTimeout(commitTimerRef.current);
         commitTimerRef.current = null;
       }
-      requestAnimationFrame(() => {
+      if (commitFrameRef.current !== null) {
+        cancelAnimationFrame(commitFrameRef.current);
+        commitFrameRef.current = null;
+      }
+      commitFrameRef.current = requestAnimationFrame(() => {
+        commitFrameRef.current = null;
         commitTimerRef.current = setTimeout(() => {
           commitTimerRef.current = null;
           commit();
-        }, 0);
+        }, FILTER_COMMIT_DELAY_MS);
       });
     };
 
     if (mode === 'day') {
       setPreviewSelection({ kind: 'day', dateId });
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null;
+        closeAfterSelection();
+      }, CALENDAR_DAY_CLOSE_DELAY_MS);
       commitSelection(() => {
         onSelectDate(dateId);
-        if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = setTimeout(() => {
-          closeTimerRef.current = null;
-          close();
-        }, 160);
       });
       return;
     }
@@ -1603,10 +1648,10 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
       closeTimerRef.current = setTimeout(() => {
         closeTimerRef.current = null;
-        close();
+        closeAfterSelection();
       }, RANGE_CLOSE_DELAY_MS);
     });
-  }, [close, mode, onSelectDate, onSelectRange, rangeEndId, rangeStartId]);
+  }, [closeAfterSelection, mode, onSelectDate, onSelectRange, rangeEndId, rangeStartId]);
   const handleClear = useCallback(() => {
     setDraftRange({});
     setPreviewSelection(null);
@@ -2906,7 +2951,7 @@ const TxRow = React.memo(function TxRow({
       <Money
         value={tx.amount}
         size={13}
-        weight="500"
+        weight={FONT_WEIGHT.medium}
         theme={theme}
         prefix={isIncome ? '+$' : '−$'}
         color={isIncome ? incomeColor : p.textSec}
@@ -2947,7 +2992,7 @@ function BillRow({ bill, theme, categories, p, last }: { bill: Bill; theme: Them
         <Money
           value={bill.amount}
           size={13}
-          weight="500"
+          weight={FONT_WEIGHT.medium}
           theme={theme}
           color={p.text}
           prefix="$"
@@ -3035,6 +3080,88 @@ function TxListSkeleton({ dark }: { dark: boolean }) {
 }
 
 // ─── EmptyState ──────────────────────────────────────────────────────────────
+
+const NATIVE_ACTIVITY_EMPTY_HEIGHT = 236;
+
+function NativeActivityEmptyState({ theme, p, isFiltered, onClearFilters }: {
+  theme: Theme;
+  p: WallpaperP;
+  isFiltered: boolean;
+  onClearFilters?: () => void;
+}) {
+  const title = isFiltered ? 'No results' : 'No transactions yet';
+  const body = isFiltered
+    ? 'Try adjusting your filters.'
+    : 'Tap the add button below to record your first expense.';
+  const systemImage: SFSymbol = isFiltered ? 'magnifyingglass' : 'tray';
+  const glassTint = theme.dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
+
+  return (
+    <Host
+      ignoreSafeArea="all"
+      colorScheme={theme.dark ? 'dark' : 'light'}
+      style={{ width: '100%', height: NATIVE_ACTIVITY_EMPTY_HEIGHT }}
+    >
+      <GlassEffectContainer>
+        <VStack
+          alignment="center"
+          spacing={SPACE.sm}
+          modifiers={[
+            padding({
+              leading: LAYOUT.cardPadX,
+              trailing: LAYOUT.cardPadX,
+              top: LAYOUT.cardPadTop,
+              bottom: LAYOUT.cardPadBottom,
+            }),
+            frame({ maxWidth: 10000, minHeight: NATIVE_ACTIVITY_EMPTY_HEIGHT, alignment: 'center' }),
+            glassEffect({
+              glass: { variant: 'regular', interactive: true, tint: glassTint },
+              shape: 'roundedRectangle',
+              cornerRadius: RADIUS.card,
+            }),
+          ]}
+        >
+          <SwiftImage
+            systemName={systemImage}
+            size={20}
+            color={p.textTer}
+            modifiers={[
+              frame({ width: 44, height: 44 }),
+              background(p.hairline, shapes.circle()),
+            ]}
+          />
+          <SwiftText
+            modifiers={[
+              font({ size: 15, weight: 'semibold' }),
+              foregroundStyle(p.text),
+              lineLimit(2),
+              multilineTextAlignment('center'),
+            ]}
+          >
+            {title}
+          </SwiftText>
+          <SwiftText
+            modifiers={[
+              font({ size: 13 }),
+              foregroundStyle(p.textSec),
+              lineLimit(3),
+              multilineTextAlignment('center'),
+            ]}
+          >
+            {body}
+          </SwiftText>
+          {isFiltered && onClearFilters ? (
+            <SwiftButton
+              label="Clear filters"
+              onPress={onClearFilters}
+              modifiers={[tint(p.text)]}
+            />
+          ) : null}
+        </VStack>
+      </GlassEffectContainer>
+    </Host>
+  );
+}
 
 function EmptyState({ theme, p, isFiltered, onClearFilters }: {
   theme: Theme;
@@ -3347,7 +3474,7 @@ const CS = StyleSheet.create({
   dayCount: {
     ...TYPE.labelPlain,
     marginLeft: SPACE.xs,
-    fontWeight: '600',
+    fontWeight: FONT_WEIGHT.semibold,
   },
 });
 
@@ -3416,7 +3543,7 @@ const FS = StyleSheet.create({
   },
   menuTriggerText: {
     ...TYPE.body,
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium,
   },
 
   amountCard: {

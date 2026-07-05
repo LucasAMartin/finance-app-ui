@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Theme, getCardStyle, OVER_DOT, overBg, overText, GROUP_COLORS, CAUTION_AMBER } from '../theme';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { Money } from './shared';
 
 interface Props {
@@ -120,7 +120,7 @@ export function MonthlySpendingTracker({
               },
             ]}
           >
-            <Text style={[TYPE.labelPlain, { fontWeight: '700', color: statusFg }]}>{statusText}</Text>
+            <Text style={[TYPE.labelPlain, { fontWeight: FONT_WEIGHT.bold, color: statusFg }]}>{statusText}</Text>
           </View>
         )}
       </View>
@@ -131,7 +131,7 @@ export function MonthlySpendingTracker({
           <Money
             value={available}
             size={24}
-            weight="600"
+            weight={FONT_WEIGHT.semibold}
             prefix="$"
             theme={theme}
             color={availableColor}
@@ -139,7 +139,7 @@ export function MonthlySpendingTracker({
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={[TYPE.labelLg, { color: theme.textSec, marginBottom: 4 }]}>Spending limit</Text>
-          <Money value={budget} size={24} weight="600" prefix="$" theme={theme} />
+          <Money value={budget} size={24} weight={FONT_WEIGHT.semibold} prefix="$" theme={theme} />
         </View>
       </View>
 

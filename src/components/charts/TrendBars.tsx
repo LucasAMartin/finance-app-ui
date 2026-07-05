@@ -11,6 +11,8 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 
+import { FONT_WEIGHT } from '../../typography';
+
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 // Per-bar stagger: each bar starts its grow a beat after the one to its left,
@@ -221,7 +223,7 @@ export function TrendBars({
             y={height - 3}
             textAnchor="middle"
             fontSize={9}
-            fontWeight={i === selectedIdx ? '700' : '500'}
+            fontWeight={i === selectedIdx ? FONT_WEIGHT.bold : FONT_WEIGHT.medium}
             fill={i === selectedIdx ? selectedLabelColor : labelColor}
           >
             {label}

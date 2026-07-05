@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, Animated, Easing } from 'react-nativ
 import * as Haptics from 'expo-haptics';
 import { Icon } from './Icon';
 import { Theme } from '../theme';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 
 // A custom numeric entry pad that stands in for the system decimal keyboard.
 // It's stateless: it only emits the key that was pressed (`onKey`). The owner
@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   keyLabel: {
     ...TYPE.pageTitle,
     fontSize: 28,
-    fontWeight: '400',
+    fontWeight: FONT_WEIGHT.regular,
     lineHeight: 34,
   },
 });

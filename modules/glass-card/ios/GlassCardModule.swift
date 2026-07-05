@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import ExpoUI
+import WidgetKit
 
 public class GlassCardModule: Module {
   public func definition() -> ModuleDefinition {
@@ -21,5 +22,20 @@ public class GlassCardModule: Module {
     }
 
     ExpoUIView(NativeMerchantMarkView.self)
+    ExpoUIView(NativePaywallGradientView.self)
+    ExpoUIView(NativeIOSStyleOnboardingView.self)
+
+    AsyncFunction("writeFinanceWidgetSnapshot") { (json: String) in
+      guard let defaults = UserDefaults(suiteName: "group.com.lucasmartin.financeapp.widgets") else {
+        return
+      }
+      defaults.set(json, forKey: "finance_widget_snapshot")
+      defaults.set(Date().timeIntervalSince1970, forKey: "finance_widget_snapshot_updated_at")
+      defaults.synchronize()
+
+      if #available(iOS 14.0, *) {
+        WidgetCenter.shared.reloadAllTimelines()
+      }
+    }
   }
 }

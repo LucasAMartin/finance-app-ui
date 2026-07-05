@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { Theme, catPastel } from '../theme';
+import { FONT_WEIGHT, TYPE } from '../typography';
 
 interface DonutData {
   cat: string;
@@ -62,12 +63,12 @@ export function Donut({ data, theme, size = 168, thickness = 16, centerTop, cent
       {/* Center text overlay */}
       <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }}>
         {centerTop && (
-          <Text style={{ fontSize: 9, color: theme.textSec, letterSpacing: 0.4, textTransform: 'uppercase', fontWeight: '600' }}>
+          <Text style={[TYPE.labelSm, { color: theme.textSec, letterSpacing: 0.4 }]}>
             {centerTop}
           </Text>
         )}
         {centerLabel && (
-          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginTop: 2 }}>
+          <Text style={[TYPE.bodySmEm, { fontWeight: FONT_WEIGHT.semibold, color: theme.text, marginTop: 2 }]}>
             {centerLabel}
           </Text>
         )}

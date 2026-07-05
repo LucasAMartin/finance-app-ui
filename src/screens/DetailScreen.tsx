@@ -11,6 +11,7 @@ import { ScreenExitButton } from '../components/GlassButton';
 import { Money } from '../components/shared';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { applyKeypadKey } from '../components/NumericKeypad';
+import { FONT_WEIGHT } from '../typography';
 
 interface Props {
   tx: Transaction | null;
@@ -104,7 +105,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           fallbackBg={theme.surface}
           accessibilityLabel="Back"
         />
-        <Text style={{ fontSize: 12, color: theme.textSec, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+        <Text style={{ fontSize: 12, color: theme.textSec, fontWeight: FONT_WEIGHT.semibold, letterSpacing: 0.4, textTransform: 'uppercase' }}>
           {cat?.label ?? UNCATEGORIZED_LABEL}
         </Text>
         <TouchableOpacity
@@ -116,7 +117,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           hitSlop={{ top: 60, bottom: 16, left: 16, right: 16 }}
           style={[styles.circleBtn, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
         >
-          <Text style={{ color: theme.text, fontSize: 16, fontWeight: '700', letterSpacing: 2 }}>···</Text>
+          <Text style={{ color: theme.text, fontSize: 16, fontWeight: FONT_WEIGHT.bold, letterSpacing: 2 }}>···</Text>
         </TouchableOpacity>
       </View>
 
@@ -132,14 +133,14 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
         <View style={[styles.catIcon, { backgroundColor: `${categoryGroupColor(currentTx.cat, categories, theme.dark)}26` }]}>
           <Icon name={cat?.icon} size={22} color={categoryGroupColor(currentTx.cat, categories, theme.dark)} stroke={1.5} />
         </View>
-        <Text style={{ fontSize: 22, fontWeight: '700', letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 16 }}>
+        <Text style={{ fontSize: 22, fontWeight: FONT_WEIGHT.bold, letterSpacing: -0.5, color: theme.text, textAlign: 'center', marginTop: 16 }}>
           {currentTx.merchant}
         </Text>
         <Text style={{ fontSize: 13, color: theme.textSec, marginTop: 4, textAlign: 'center' }}>
           {currentTx.date} · {currentTx.time}
         </Text>
         <View style={{ marginTop: 16 }}>
-          <Money value={currentTx.amount} size={42} weight="700" prefix="−$" theme={theme} />
+          <Money value={currentTx.amount} size={42} weight={FONT_WEIGHT.bold} prefix="−$" theme={theme} />
         </View>
       </View>
 
@@ -183,11 +184,11 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
                     editable={canEdit}
                     placeholderTextColor={theme.textTer}
                     onFocus={() => setAmountKeypadOpen(false)}
-                    style={{ fontSize: 13, color: theme.text, fontWeight: '500', textAlign: 'right', flex: 1, padding: 0 }}
+                    style={{ fontSize: 13, color: theme.text, fontWeight: FONT_WEIGHT.medium, textAlign: 'right', flex: 1, padding: 0 }}
                   />
                 )
               ) : (
-                <Text style={{ fontSize: 13, color: theme.text, fontWeight: '500' }}>{r.value}</Text>
+                <Text style={{ fontSize: 13, color: theme.text, fontWeight: FONT_WEIGHT.medium }}>{r.value}</Text>
               )}
             </View>
           ))}
@@ -201,7 +202,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
 	          ).map(a => (
             <TouchableOpacity key={a.label} onPress={a.onPress} accessibilityRole="button" style={[card, styles.actionBtn]}>
               {a.icon && <Icon name={a.icon} size={16} color={theme.text} stroke={1.5} />}
-              <Text style={{ fontSize: 13, fontWeight: '600', color: a.danger ? OVER_DOT : theme.text, marginLeft: a.icon ? 8 : 0 }}>{a.label}</Text>
+              <Text style={{ fontSize: 13, fontWeight: FONT_WEIGHT.semibold, color: a.danger ? OVER_DOT : theme.text, marginLeft: a.icon ? 8 : 0 }}>{a.label}</Text>
             </TouchableOpacity>
           ))}
 	        </View>
@@ -216,7 +217,7 @@ export function DetailScreen({ tx, theme, onBack }: Props) {
           <View style={styles.catContextRow}>
             <Text style={{ fontSize: 13, color: theme.textSec }}>{cat?.label ?? UNCATEGORIZED_LABEL} this month</Text>
             <Text style={{ fontSize: 13, color: theme.text }}>
-              <Text style={{ fontWeight: '600' }}>${catTotal.toFixed(0)}</Text>
+              <Text style={{ fontWeight: FONT_WEIGHT.semibold }}>${catTotal.toFixed(0)}</Text>
               <Text style={{ color: theme.textSec }}> of ${catBudget}</Text>
             </Text>
           </View>
@@ -284,7 +285,7 @@ const styles = StyleSheet.create({
   },
   amountText: {
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium,
     textAlign: 'right',
   },
   visaChip: {

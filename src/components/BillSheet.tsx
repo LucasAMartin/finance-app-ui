@@ -31,7 +31,7 @@ import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
 import { Money, SheetPrimaryButton, SheetTextButton, FIELD_CARD, FIELD_ROW } from './shared';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 
 const SCREEN_H = Dimensions.get('window').height;
 const COMPACT_SNAP_PCT = 60;
@@ -386,7 +386,7 @@ export function BillSheet({
                   : null}
               </Text>
               <View style={{ marginTop: 16 }}>
-                <Money value={b.amount} size={32} weight="600" prefix="$" theme={theme} />
+                <Money value={b.amount} size={32} weight={FONT_WEIGHT.semibold} prefix="$" theme={theme} />
               </View>
             </View>
 

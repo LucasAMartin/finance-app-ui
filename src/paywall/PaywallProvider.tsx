@@ -9,7 +9,6 @@ import React, {
 } from 'react';
 import Purchases, { LOG_LEVEL, type CustomerInfo, type CustomerInfoUpdateListener } from 'react-native-purchases';
 import type { PurchasesOffering } from 'react-native-purchases';
-import RevenueCatUI, { PAYWALL_RESULT } from 'react-native-purchases-ui';
 
 import {
   PAYWALL_ENTITLEMENT_ID,
@@ -36,7 +35,6 @@ interface PaywallContextValue {
   isBusy: boolean;
   customerInfo: CustomerInfo | null;
   offering: PurchasesOffering | null;
-  presentPaywall: () => Promise<boolean>;
   restorePurchases: () => Promise<boolean>;
   refreshCustomerInfo: () => Promise<void>;
 }
@@ -59,12 +57,6 @@ function logPaywallCustomerInfo(info: CustomerInfo | null, label: string) {
       hasExpectedEntitlement: activeEntitlements.includes(PAYWALL_ENTITLEMENT_ID),
     },
   );
-}
-
-function purchaseResultUnlocks(result: PAYWALL_RESULT): boolean {
-  return result === PAYWALL_RESULT.PURCHASED
-    || result === PAYWALL_RESULT.RESTORED
-    || result === PAYWALL_RESULT.NOT_PRESENTED;
 }
 
 export function PaywallProvider({ children }: { children: React.ReactNode }) {
@@ -153,29 +145,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const presentPaywall = useCallback(async () => {
-    if (PAYWALL_MODE === 'off') return true;
-    if (!configuredRef.current) return false;
-
-    setIsBusy(true);
-    try {
-      const result = await RevenueCatUI.presentPaywallIfNeeded({
-        requiredEntitlementIdentifier: PAYWALL_ENTITLEMENT_ID,
-        offering: offering ?? undefined,
-        displayCloseButton: true,
-      });
-      if (__DEV__) console.log('[Paywall] RevenueCat paywall result', result);
-      await refreshCustomerInfo();
-      return purchaseResultUnlocks(result);
-    } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : 'Could not present the paywall.';
-      setError(message);
-      return false;
-    } finally {
-      setIsBusy(false);
-    }
-  }, [offering, refreshCustomerInfo]);
-
   const restorePurchases = useCallback(async () => {
     if (PAYWALL_MODE === 'off') return true;
     if (!configuredRef.current) return false;
@@ -203,7 +172,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     customerInfo,
     offering,
     isPremium: PAYWALL_MODE === 'off' || customerHasEntitlement(customerInfo),
-    presentPaywall,
     restorePurchases,
     refreshCustomerInfo,
   }), [
@@ -211,7 +179,6 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
     error,
     isBusy,
     offering,
-    presentPaywall,
     refreshCustomerInfo,
     restorePurchases,
     status,

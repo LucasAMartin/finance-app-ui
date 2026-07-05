@@ -45,6 +45,7 @@ import { useRepositories, useRepositoryList } from '../repositories/RepositoryPr
 import type { Transaction } from '../repositories/types';
 import { getNotificationPrefs, notificationSummary } from '../notifications/preferences';
 import { CURRENCY_OPTIONS } from '../currency';
+import { EMPTY_STATE_PREVIEW_META_KEY } from '../emptyStatePreview';
 import { formatMoney } from '../selectors/format';
 import { ScreenExitButton } from '../components/GlassButton';
 import { suppressNextAppLockPrompt } from '../components/AppLockGate';
@@ -85,8 +86,12 @@ interface Props {
   onClose: () => void;
   onOpenAppearance: () => void;
   onOpenNotifications: () => void;
+  onOpenWidgets: () => void;
   onOpenIncome: () => void;
   onOpenSharing: (intent?: 'overview' | 'members' | 'invite') => void;
+  onOpenOnboarding?: () => void;
+  onOpenIOSStyleOnboarding?: () => void;
+  onOpenPaywallPreview?: () => void;
   cloudSyncState: CloudSyncUiState;
 }
 
@@ -96,8 +101,12 @@ export function SettingsScreen({
   onClose,
   onOpenAppearance,
   onOpenNotifications,
+  onOpenWidgets,
   onOpenIncome,
   onOpenSharing,
+  onOpenOnboarding,
+  onOpenIOSStyleOnboarding,
+  onOpenPaywallPreview,
   cloudSyncState,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -315,6 +324,12 @@ export function SettingsScreen({
                   value={notificationSummary(notifications)}
                   onPress={onOpenNotifications}
                 />
+                <SettingsActionRow
+                  label="Widgets"
+                  systemImage="rectangle.stack.badge.plus"
+                  value="4 available"
+                  onPress={onOpenWidgets}
+                />
               </SwiftSection>
 
               <SwiftSection>
@@ -325,6 +340,36 @@ export function SettingsScreen({
                   onIsOnChange={handleAppLockChange}
                   modifiers={appLockUpdating ? [disabled(true)] : undefined}
                 />
+                <SwiftToggle
+                  label="Empty State Preview"
+                  systemImage="tray"
+                  isOn={metaFlag(EMPTY_STATE_PREVIEW_META_KEY)}
+                  onIsOnChange={(enabled) => setMetaFlag(EMPTY_STATE_PREVIEW_META_KEY, enabled)}
+                />
+                {__DEV__ && onOpenOnboarding ? (
+                  <SettingsActionRow
+                    label="Preview Onboarding"
+                    systemImage="sparkles"
+                    value="Open"
+                    onPress={onOpenOnboarding}
+                  />
+                ) : null}
+                {__DEV__ && onOpenIOSStyleOnboarding ? (
+                  <SettingsActionRow
+                    label="Preview iOS Style Onboarding"
+                    systemImage="iphone.gen3.radiowaves.left.and.right"
+                    value="Open"
+                    onPress={onOpenIOSStyleOnboarding}
+                  />
+                ) : null}
+                {__DEV__ && onOpenPaywallPreview ? (
+                  <SettingsActionRow
+                    label="Preview Paywall"
+                    systemImage="crown"
+                    value="Open"
+                    onPress={onOpenPaywallPreview}
+                  />
+                ) : null}
               </SwiftSection>
 
               <SwiftSection>

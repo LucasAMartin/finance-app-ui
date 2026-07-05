@@ -52,7 +52,7 @@ import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
 import { ScreenExitButton, EXIT_FLOAT_STYLE } from './GlassButton';
 import { Theme, GROUP_COLORS } from '../theme';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 
 const GROUP_KEYS: GroupKey[] = ['needs', 'wants', 'savings'];
@@ -595,7 +595,7 @@ function SheetBody({
         {tx.time}
       </Text>
       <View style={{ marginTop: isExpanded ? 12 : 18 }}>
-        <Money value={tx.amount} size={isExpanded ? 28 : 32} weight="600" prefix="−$" theme={theme} />
+        <Money value={tx.amount} size={isExpanded ? 28 : 32} weight={FONT_WEIGHT.semibold} prefix="−$" theme={theme} />
       </View>
     </View>
   );
@@ -812,7 +812,7 @@ function EditSection({
           appearance={theme.dark ? 'dark' : 'light'}
           backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
           fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
-          activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
+          activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: FONT_WEIGHT.semibold }}
           style={S.groupSegmented}
         />
 
@@ -948,13 +948,13 @@ const S = StyleSheet.create({
   },
   editTitle: {
     ...TYPE.labelLg,
-    fontWeight: '600',
+    fontWeight: FONT_WEIGHT.semibold,
     marginBottom: 12,
   },
   fieldCard: FIELD_CARD,
   fieldRow: FIELD_ROW,
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
-  fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
+  fieldInput: { ...TYPE.subsectionTitle, fontWeight: FONT_WEIGHT.medium, textAlign: 'right', padding: 0 },
   amountDisplay: {
     flex: 1,
     alignItems: 'flex-end',
@@ -1006,7 +1006,7 @@ const S = StyleSheet.create({
   },
   subcatMenuText: {
     ...TYPE.body,
-    fontWeight: '500',
+    fontWeight: FONT_WEIGHT.medium,
     flexShrink: 1,
   },
   saveBtn: {

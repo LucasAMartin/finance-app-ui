@@ -74,7 +74,7 @@ import {
   glassTintForTheme,
   SUPPORTS_GLASS,
 } from '../components/GlassButton';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
 import { RADIUS } from '../radius';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
@@ -1560,7 +1560,7 @@ function ContributionRow({
       <Money
         value={contribution.amount}
         size={13}
-        weight="500"
+        weight={FONT_WEIGHT.medium}
         prefix="−$"
         color={tint}
         theme={theme}
@@ -2105,7 +2105,7 @@ function ContributionSheet({
             <Text style={[TYPE.bodySm, { color: theme.textSec, textAlign: 'center', marginBottom: SPACE.xl }]}>
               {goal.label}
             </Text>
-            <Text style={{ fontSize: 40, fontWeight: '600', letterSpacing: -1.4, color: theme.text, textAlign: 'center' }}>
+            <Text style={{ fontSize: 40, fontWeight: FONT_WEIGHT.semibold, letterSpacing: -1.4, color: theme.text, textAlign: 'center' }}>
               ${amount || '0'}
             </Text>
             <SheetPrimaryButton

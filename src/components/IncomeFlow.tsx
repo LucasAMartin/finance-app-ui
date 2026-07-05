@@ -9,7 +9,7 @@ import { Theme, OVER_DOT } from '../theme';
 import { formatActiveCurrencyAmount, getActiveCurrency } from '../currency';
 import { Icon } from './Icon';
 import { SheetPrimaryButton, FIELD_CARD, FIELD_ROW } from './shared';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
 import { useLedgerMembers, useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
@@ -62,7 +62,7 @@ const CUSTOM_UNITS: { value: CustomUnit; label: string }[] = [
 const CUSTOM_MAX = 60;
 const perYearFrom = (count: number, unit: CustomUnit) => (unit === 'month' ? count * 12 : count);
 
-const CURRENT_MONTH = new Date().toISOString().slice(0, 7);
+const currentMonthKey = () => new Date().toISOString().slice(0, 7);
 
 const dateFromYMD = (s: string): Date => new Date(`${s}T12:00:00`);
 const toYMD = (d: Date): string => d.toISOString().slice(0, 10);
@@ -90,6 +90,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const incomes = useRepositoryList(incomeRepo);
   const ledgerMembers = useLedgerMembers();
   const insets = useSafeAreaInsets();
+  const currentMonth = currentMonthKey();
 
   const regularIncomes = useMemo(
     () => incomes.filter(i => (i.kind ?? 'regular') === 'regular'),
@@ -98,12 +99,12 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
   const oneTimeIncomes = useMemo(
     () => incomes
       .filter(i => i.kind === 'irregular')
-      .filter(i => (i.receivedAt ?? i.startDate).slice(0, 7) === CURRENT_MONTH)
+      .filter(i => (i.receivedAt ?? i.startDate).slice(0, 7) === currentMonth)
       .sort((a, b) => (b.receivedAt ?? b.startDate).localeCompare(a.receivedAt ?? a.startDate)),
-    [incomes],
+    [currentMonth, incomes],
   );
 
-  const totalMonthlyIncome = useMemo(() => monthlyIncome(incomes, CURRENT_MONTH), [incomes]);
+  const totalMonthlyIncome = useMemo(() => monthlyIncome(incomes, currentMonth), [currentMonth, incomes]);
   const oneTimeTotal = useMemo(
     () => oneTimeIncomes.reduce((s, i) => s + i.amount, 0),
     [oneTimeIncomes],
@@ -283,7 +284,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
             {fmtMoney(totalMonthlyIncome + oneTimeTotal)}
           </Text>
           <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2 }]}>
-            {monthLabel(CURRENT_MONTH)}
+            {monthLabel(currentMonth)}
           </Text>
           {oneTimeTotal > 0 && (
             <Text style={[TYPE.caption, { color: theme.textSec, marginTop: 2, textAlign: 'center' }]}>
@@ -305,7 +306,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
           appearance={theme.dark ? 'dark' : 'light'}
           backgroundColor={theme.dark ? 'rgba(242,244,245,0.08)' : 'rgba(11,13,16,0.045)'}
           fontStyle={{ color: theme.dark ? 'rgba(242,244,245,0.68)' : 'rgba(11,13,16,0.62)' }}
-          activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: '600' }}
+          activeFontStyle={{ color: theme.dark ? '#080A0D' : '#F2F4F5', fontWeight: FONT_WEIGHT.semibold }}
           style={{ marginBottom: 2 }}
         />
 
@@ -474,7 +475,7 @@ export function IncomeFlow({ theme, onClose, onSaved }: IncomeFlowProps) {
                     </Pressable>
                   </View>
                 ) : (
-                  <Pressable onPress={() => { if (canEditIncome) setEndDate(monthEndDate(CURRENT_MONTH)); }} accessibilityRole="button" disabled={!canEditIncome} style={{ minHeight: 34, justifyContent: 'center' }}>
+                  <Pressable onPress={() => { if (canEditIncome) setEndDate(monthEndDate(currentMonth)); }} accessibilityRole="button" disabled={!canEditIncome} style={{ minHeight: 34, justifyContent: 'center' }}>
                     <Text style={[TYPE.bodySm, { color: theme.accent.dot }]}>Set end date</Text>
                   </Pressable>
                 )}
@@ -621,7 +622,7 @@ const S = StyleSheet.create({
   fieldCard: FIELD_CARD,
   fieldRow: FIELD_ROW,
   fieldLabel: { ...TYPE.body, flexShrink: 0 },
-  fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', padding: 0 },
+  fieldInput: { ...TYPE.subsectionTitle, fontWeight: FONT_WEIGHT.medium, padding: 0 },
   amountValue: {
     ...TYPE.subsectionTitle,
     textAlign: 'right',
@@ -636,7 +637,7 @@ const S = StyleSheet.create({
     width: 180, height: 28, flexDirection: 'row', alignItems: 'center',
     gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1,
   },
-  menuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
+  menuText: { ...TYPE.body, fontWeight: FONT_WEIGHT.medium, flexShrink: 1 },
   stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   stepBtn: {
     width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',

@@ -22,12 +22,23 @@ import { useAppFonts, patchTextWithInter } from './src/fonts';
 import { RepositoryProvider, useRepositories, useRepositoryList } from './src/repositories/RepositoryProvider';
 import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
 import { FirstRunPrompt } from './src/components/FirstRunPrompt';
+import { OnboardingFlow, type OnboardingDraft } from './src/components/OnboardingFlow';
 import { AppLockGate } from './src/components/AppLockGate';
 import { PaywallProvider } from './src/paywall/PaywallProvider';
 import { PaywallGate } from './src/paywall/PaywallGate';
+import { MembershipPaywallPreview } from './src/paywall/MembershipPaywallPreview';
+import { EMPTY_STATE_PREVIEW_META_KEY } from './src/emptyStatePreview';
+import {
+  ONBOARDING_V1_COMPLETED_AT_META_KEY,
+  ONBOARDING_V1_COMPLETED_META_KEY,
+  ONBOARDING_V1_SHARE_INTENT_META_KEY,
+} from './src/onboarding';
+import { DEFAULT_MONTHLY_INCOME } from './src/data';
 import { formatMoney } from './src/selectors/format';
 import { txToCreateInput } from './src/selectors/finance';
 import type { ActivityInitialFilter } from './src/selectors/spending';
+import { buildWidgetSnapshot } from './src/widgets/buildWidgetSnapshot';
+import { writeFinanceWidgetSnapshot } from './src/widgets/writeWidgetSnapshot';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InsightsScreen } from './src/screens/InsightsScreen';
@@ -42,6 +53,8 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { NotificationSettingsScreen } from './src/screens/NotificationSettingsScreen';
 import { SharingSettingsScreen } from './src/screens/SharingSettingsScreen';
+import { WidgetsSetupScreen } from './src/screens/WidgetsSetupScreen';
+import { IOSStyleOnboardingPreview } from './src/screens/IOSStyleOnboardingPreview';
 import { GoalsScreen } from './src/screens/GoalsScreen';
 import { TabBar } from './src/components/TabBar';
 import { Drawer } from './src/components/Drawer';
@@ -144,7 +157,7 @@ function cloneActivityFilter(filter: ActivityInitialFilter): ActivityInitialFilt
 }
 
 export function DashboardApp() {
-  const { theme, dark, wallpaper, metaFlag, setMetaFlag } = useTheme();
+  const { theme, dark, wallpaper, metaFlag, setMetaFlag, currencyCode } = useTheme();
   const {
     transactionsRepo,
     devDataRepo,
@@ -165,13 +178,15 @@ export function DashboardApp() {
   const settings = useRepositoryList(settingsRepo)[0];
   const { showToast } = useAppFeedback();
   const iCloudSyncEnabled = metaFlag('icloudSync');
+  const emptyStatePreview = metaFlag(EMPTY_STATE_PREVIEW_META_KEY);
 
   // Show the income prompt once: on first open when no income has been set and
   // the prompt hasn't been dismissed before. We wait for repos to settle (at
   // least one render with an empty list) rather than on the very first render
   // before the DB has loaded, so the flag check is stable.
+  const onboardingCompleted = metaFlag(ONBOARDING_V1_COMPLETED_META_KEY);
   const incomePromptShown = metaFlag('incomePromptShown');
-  const showIncomePrompt = !incomePromptShown && incomes.length === 0;
+  const showIncomePrompt = !emptyStatePreview && onboardingCompleted && !incomePromptShown && incomes.length === 0;
 
   // `screen` is only used for TabBar active state and pointerEvents.
   // The actual visual positions are driven imperatively via TX refs.
@@ -179,9 +194,13 @@ export function DashboardApp() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
+  const [iosStyleOnboardingPreviewOpen, setIOSStyleOnboardingPreviewOpen] = useState(false);
+  const [paywallPreviewOpen, setPaywallPreviewOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
   const [sharingSettingsOpen, setSharingSettingsOpen] = useState(false);
+  const [widgetsSetupOpen, setWidgetsSetupOpen] = useState(false);
   const [sharingInviteNoticeToken, setSharingInviteNoticeToken] = useState(0);
   const [sharingInviteBusy, setSharingInviteBusy] = useState(false);
   const [cloudSyncState, setCloudSyncState] = useState<CloudSyncUiState>(CLOUD_SYNC_OFF);
@@ -208,6 +227,29 @@ export function DashboardApp() {
   const currentMember = ledgerMembers.find(member => member.userId === session.currentUserId);
   const activeLedgerIsSharedParticipant = activeLedgerMeta.cloudDatabaseScope === 'shared';
   const canInviteToActiveLedger = !activeLedgerIsSharedParticipant && currentMember?.role === 'owner';
+  const shouldAutoShowOnboarding = !emptyStatePreview && !onboardingCompleted;
+  const showOnboarding = shouldAutoShowOnboarding || onboardingPreviewOpen;
+  const onboardingMonthKey = currentMonthKey();
+  const initialOnboardingIncome = incomes.find(income => income.kind === 'regular')?.amount
+    ?? incomes[0]?.amount
+    ?? DEFAULT_MONTHLY_INCOME;
+  const initialOnboardingBudgetAmounts = useMemo(() => {
+    const amounts: Record<string, number> = {};
+    categories.forEach(category => {
+      const monthBudget = budgets.find(budget => (
+        budget.month === onboardingMonthKey &&
+        budget.category === category.id
+      ));
+      amounts[category.id] = monthBudget?.amount ?? category.defaultBudget;
+    });
+    budgets
+      .filter(budget => budget.month === onboardingMonthKey && budget.category)
+      .forEach(budget => {
+        if (!budget.category || amounts[budget.category] !== undefined) return;
+        amounts[budget.category] = budget.amount;
+      });
+    return amounts;
+  }, [budgets, categories, onboardingMonthKey]);
   const cloudConflictItems = useMemo(
     () => listActiveLedgerSyncConflicts().map(syncConflictToUiItem),
     [cloudSyncState, session.activeLedgerId],
@@ -455,6 +497,19 @@ export function DashboardApp() {
     recurringRules,
     incomes,
   });
+
+  useEffect(() => {
+    const snapshot = buildWidgetSnapshot({
+      transactions,
+      budgets,
+      incomes,
+      categories,
+      recurringRules,
+      dark,
+      currencyCode,
+    });
+    writeFinanceWidgetSnapshot(snapshot).catch(() => {});
+  }, [budgets, categories, currencyCode, dark, incomes, recurringRules, transactions]);
 
   // The inline budget keypad asks us to hide the floating tab bar so the pad has
   // the bottom of the screen to itself (the pad mirrors the system keyboard slot).
@@ -1108,6 +1163,8 @@ export function DashboardApp() {
   const closeProfile = useCallback(() => setProfileOpen(false), []);
   const openNotificationSettings = useCallback(() => setNotificationSettingsOpen(true), []);
   const closeNotificationSettings = useCallback(() => setNotificationSettingsOpen(false), []);
+  const openWidgetsSetup = useCallback(() => setWidgetsSetupOpen(true), []);
+  const closeWidgetsSetup = useCallback(() => setWidgetsSetupOpen(false), []);
   const openSharingSettings = useCallback((intent?: 'overview' | 'members' | 'invite') => {
     setSharingSettingsOpen(true);
     if (intent === 'invite') {
@@ -1117,6 +1174,173 @@ export function DashboardApp() {
   const closeSharingSettings = useCallback(() => setSharingSettingsOpen(false), []);
   const closeGoals = useCallback(() => setGoalsOpen(false), []);
   const openIncomeFromSettings = useCallback(() => router.push('/income'), []);
+  const openOnboardingPreview = useCallback(() => {
+    setSettingsOpen(false);
+    setOnboardingPreviewOpen(true);
+  }, []);
+  const openIOSStyleOnboardingPreview = useCallback(() => {
+    setSettingsOpen(false);
+    setIOSStyleOnboardingPreviewOpen(true);
+  }, []);
+  const openPaywallPreview = useCallback(() => {
+    setSettingsOpen(false);
+    setPaywallPreviewOpen(true);
+  }, []);
+  const updateSettingsMeta = useCallback((patch: Record<string, unknown>) => {
+    const fallbackSettings = {
+      id: 'settings' as const,
+      themeDark: dark,
+      accentKey: 'ink' as const,
+      cardStyle: theme.cardStyle,
+    };
+    const latest = settingsRepo.get('settings') ?? settings ?? fallbackSettings;
+    const nextMeta = { ...(latest.meta ?? {}), ...patch };
+    settingsRepo.update('settings', { meta: nextMeta })
+      ?? settingsRepo.create({ ...latest, meta: nextMeta });
+  }, [dark, settings, settingsRepo, theme.cardStyle]);
+  const markOnboardingCompleted = useCallback((shareIntent: OnboardingDraft['shareIntent']) => {
+    updateSettingsMeta({
+      [ONBOARDING_V1_COMPLETED_META_KEY]: true,
+      [ONBOARDING_V1_COMPLETED_AT_META_KEY]: new Date().toISOString(),
+      [ONBOARDING_V1_SHARE_INTENT_META_KEY]: shareIntent,
+      incomePromptShown: true,
+    });
+  }, [updateSettingsMeta]);
+  const handleOnboardingSkip = useCallback(() => {
+    if (!onboardingPreviewOpen) {
+      markOnboardingCompleted('solo');
+    }
+    setOnboardingPreviewOpen(false);
+  }, [markOnboardingCompleted, onboardingPreviewOpen]);
+  const handleOnboardingComplete = useCallback((draft: OnboardingDraft) => {
+    const now = new Date();
+    const month = currentMonthKey(now);
+    const monthStart = localDateString(new Date(now.getFullYear(), now.getMonth(), 1));
+    const trimmedName = draft.name.trim();
+    const member = ledgerMembers.find(item => item.userId === session.currentUserId);
+
+    if (member && trimmedName.length > 0 && trimmedName !== member.displayName) {
+      sessionRepo.updateMember(member.id, { displayName: trimmedName });
+    }
+
+    if (draft.monthlyIncome > 0) {
+      const primaryIncome = incomes.find(item => item.kind === 'regular' && item.source === 'Primary income')
+        ?? incomes.find(item => item.kind === 'regular')
+        ?? incomes[0];
+      const incomePayload = {
+        kind: 'regular' as const,
+        amount: draft.monthlyIncome,
+        source: primaryIncome?.source ?? 'Primary income',
+        cadence: 'monthly' as const,
+        startDate: primaryIncome?.startDate ?? monthStart,
+        meta: { ...(primaryIncome?.meta ?? {}), onboardingV1: true },
+      };
+      if (primaryIncome) {
+        incomeRepo.update(primaryIncome.id, incomePayload);
+      } else {
+        incomeRepo.create(incomePayload);
+      }
+    }
+
+    const categoryIdByDraftId: Record<string, string> = {};
+    draft.budgets.forEach((item) => {
+      const existingCategory = categories.find(category => category.id === item.id)
+        ?? categories.find(category => category.label.trim().toLowerCase() === item.label.toLowerCase());
+      const categoryPayload = {
+        label: item.label,
+        icon: item.icon,
+        group: item.group,
+        defaultBudget: item.amount,
+        sortOrder: existingCategory?.sortOrder ?? sortOrderForOnboardingCategory(item.group),
+        archived: false,
+        meta: { ...(existingCategory?.meta ?? {}), onboardingV1: true },
+      };
+      const savedCategory = existingCategory
+        ? categoriesRepo.update(existingCategory.id, categoryPayload) ?? existingCategory
+        : categoriesRepo.create(categoryPayload);
+      categoryIdByDraftId[item.id] = savedCategory.id;
+    });
+
+    draft.budgets.forEach((item) => {
+      const categoryId = categoryIdByDraftId[item.id] ?? item.id;
+      const existingBudget = budgets.find(budget => budget.month === month && budget.category === categoryId)
+        ?? budgets.find(budget => budget.month === month && budget.label?.trim().toLowerCase() === item.label.toLowerCase());
+      const budgetPayload = {
+        month,
+        group: item.group,
+        category: categoryId,
+        label: item.label,
+        icon: item.icon,
+        amount: item.amount,
+        meta: { ...(existingBudget?.meta ?? {}), onboardingV1: true },
+      };
+      if (existingBudget) {
+        budgetsRepo.update(existingBudget.id, budgetPayload);
+      } else {
+        budgetsRepo.create(budgetPayload);
+      }
+    });
+
+    draft.recurringRules.forEach((ruleDraft) => {
+      const categoryId = categoryIdByDraftId[ruleDraft.categoryId] ?? ruleDraft.categoryId;
+      const merchantKey = ruleDraft.merchant.trim().toLowerCase();
+      const existingRule = recurringRules.find(rule => (
+        typeof rule.meta?.onboardingCategoryId === 'string' &&
+        rule.meta.onboardingCategoryId === ruleDraft.categoryId
+      )) ?? recurringRules.find(rule => (
+        rule.cat === categoryId &&
+        rule.merchant.trim().toLowerCase() === merchantKey
+      ));
+      const rulePayload = {
+        merchant: ruleDraft.merchant,
+        cat: categoryId,
+        amount: ruleDraft.amount,
+        cadence: 'monthly' as const,
+        startDate: monthStart,
+        nextDueDate: nextMonthlyDueDate(ruleDraft.dayOfMonth, now),
+        dayOfMonth: ruleDraft.dayOfMonth,
+        estimate: true,
+        active: true,
+        meta: {
+          ...(existingRule?.meta ?? {}),
+          onboardingV1: true,
+          onboardingCategoryId: ruleDraft.categoryId,
+        },
+      };
+      if (existingRule) {
+        recurringRulesRepo.update(existingRule.id, rulePayload);
+      } else {
+        recurringRulesRepo.create(rulePayload);
+      }
+    });
+
+    markOnboardingCompleted(draft.shareIntent);
+    setOnboardingPreviewOpen(false);
+    refreshSessionState();
+
+    if (draft.iCloudSyncEnabled !== iCloudSyncEnabled) {
+      handleICloudSyncChange(draft.iCloudSyncEnabled);
+    }
+
+    showToast('Setup saved');
+  }, [
+    budgets,
+    budgetsRepo,
+    categories,
+    categoriesRepo,
+    handleICloudSyncChange,
+    iCloudSyncEnabled,
+    incomeRepo,
+    incomes,
+    ledgerMembers,
+    markOnboardingCompleted,
+    recurringRules,
+    recurringRulesRepo,
+    refreshSessionState,
+    session.currentUserId,
+    sessionRepo,
+    showToast,
+  ]);
   const closeInsight = useCallback(() => {
     insightOpenTokenRef.current += 1;
     if (insightOpenFrameRef.current !== null) {
@@ -1359,8 +1583,12 @@ export function DashboardApp() {
           onClose={closeSettings}
           onOpenAppearance={openTheme}
           onOpenNotifications={openNotificationSettings}
+          onOpenWidgets={openWidgetsSetup}
           onOpenIncome={openIncomeFromSettings}
           onOpenSharing={openSharingSettings}
+          onOpenOnboarding={openOnboardingPreview}
+          onOpenIOSStyleOnboarding={openIOSStyleOnboardingPreview}
+          onOpenPaywallPreview={openPaywallPreview}
           cloudSyncState={cloudSyncState}
         />
 
@@ -1377,6 +1605,12 @@ export function DashboardApp() {
           theme={theme}
           visible={notificationSettingsOpen}
           onClose={closeNotificationSettings}
+        />
+
+        <WidgetsSetupScreen
+          theme={theme}
+          visible={widgetsSetupOpen}
+          onClose={closeWidgetsSetup}
         />
 
         <SharingSettingsScreen
@@ -1409,7 +1643,38 @@ export function DashboardApp() {
           onClose={closeTheme}
         />
 
-        <PaywallGate />
+        {showOnboarding ? (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 110 }]}>
+            <OnboardingFlow
+              theme={theme}
+              visible={showOnboarding}
+              allowDismiss={onboardingPreviewOpen}
+              memberName={currentMember?.displayName}
+              initialMonthlyIncome={initialOnboardingIncome}
+              initialBudgetAmounts={initialOnboardingBudgetAmounts}
+              iCloudSyncEnabled={iCloudSyncEnabled}
+              onComplete={handleOnboardingComplete}
+              onSkip={handleOnboardingSkip}
+              onClose={() => setOnboardingPreviewOpen(false)}
+            />
+          </View>
+        ) : null}
+
+        {paywallPreviewOpen ? (
+          <MembershipPaywallPreview
+            visible={paywallPreviewOpen}
+            onClose={() => setPaywallPreviewOpen(false)}
+          />
+        ) : null}
+
+        {iosStyleOnboardingPreviewOpen ? (
+          <IOSStyleOnboardingPreview
+            visible={iosStyleOnboardingPreviewOpen}
+            onClose={() => setIOSStyleOnboardingPreviewOpen(false)}
+          />
+        ) : null}
+
+        {!showOnboarding && !paywallPreviewOpen && !iosStyleOnboardingPreviewOpen && <PaywallGate />}
         <AppLockGate />
         </View>
       </View>
@@ -1437,6 +1702,41 @@ export default function App() {
       </RepositoryProvider>
     </GestureHandlerRootView>
   );
+}
+
+function currentMonthKey(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function localDateString(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function nextMonthlyDueDate(dayOfMonth: number, from = new Date()): string {
+  const clampedDay = Math.max(1, Math.min(31, Math.round(dayOfMonth)));
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const thisMonthDay = Math.min(clampedDay, daysInMonth(from.getFullYear(), from.getMonth()));
+  let due = new Date(from.getFullYear(), from.getMonth(), thisMonthDay);
+  if (due < today) {
+    const nextMonth = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+    const nextMonthDay = Math.min(clampedDay, daysInMonth(nextMonth.getFullYear(), nextMonth.getMonth()));
+    due = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), nextMonthDay);
+  }
+  return localDateString(due);
+}
+
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function sortOrderForOnboardingCategory(group: OnboardingDraft['budgets'][number]['group']): number {
+  if (group === 'needs') return 100;
+  if (group === 'wants') return 200;
+  return 300;
 }
 
 function syncConflictToUiItem(conflict: StoredSyncConflict): CloudSyncConflictItem {

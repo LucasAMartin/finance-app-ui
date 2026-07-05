@@ -85,19 +85,18 @@ export function SharingSettingsScreen({
   const insets = useSafeAreaInsets();
   const currentMember = ledgerMembers.find(member => member.userId === currentUserId);
   const memberCountLabel = ledgerMembers.length === 1 ? '1 member' : `${ledgerMembers.length} members`;
-  const accessLabel = cloudShared
-    ? `Shared with you${participantPermission ? ` · ${permissionLabel(participantPermission)}` : ''}`
-      : canInvite
-        ? 'You own this ledger'
-        : 'Member access';
-  const inviteLabel = inviteBusy
-    ? 'Preparing iCloud sharing...'
-    : canInvite
-      ? 'Manage iCloud Sharing'
-      : 'Sharing managed by owner';
+  const accessLabel = canInvite ? 'Owner' : cloudShared ? 'Shared with you' : 'Member';
+  const syncFooter = iCloudSyncEnabled
+    ? cloudSyncState.detail
+    : 'Turn on iCloud Sync to keep this ledger available on devices signed in to your iCloud account.';
+  const inviteLabel = inviteBusy ? 'Preparing...' : 'Manage Sharing';
   const sharingFooter = cloudShared
     ? 'This ledger syncs through the owner\'s shared iCloud database.'
-    : 'Use Apple\'s iCloud sharing sheet to invite people, remove access, or update permissions.';
+    : canInvite
+      ? 'Invite people, remove access, or update permissions with the native iCloud sharing sheet.'
+      : 'Only the ledger owner can change sharing access.';
+  const showStopSharingAction = cloudShared || canInvite;
+  const showAdvancedSection = showStopSharingAction || (__DEV__ && onResetSyncedSampleData);
 
   const anim = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
@@ -153,26 +152,23 @@ export function SharingSettingsScreen({
                 tint(theme.accent.dot),
               ]}
             >
-              <SwiftSection>
-                <LabeledContent label="Ledger">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {activeLedgerName ?? 'Shared ledger'}
-                  </SwiftText>
-                </LabeledContent>
-                <LabeledContent label="Members">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {memberCountLabel}
-                  </SwiftText>
+              <SwiftSection title="Ledger">
+                <LabeledContent label="Name">
+                  <SecondaryValue>{activeLedgerName ?? 'Shared ledger'}</SecondaryValue>
                 </LabeledContent>
                 <LabeledContent label="Access">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {accessLabel}
-                  </SwiftText>
+                  <SecondaryValue>{accessLabel}</SecondaryValue>
                 </LabeledContent>
+                {participantPermission && (
+                  <LabeledContent label="Permission">
+                    <SecondaryValue>{permissionLabel(participantPermission)}</SecondaryValue>
+                  </LabeledContent>
+                )}
               </SwiftSection>
 
               <SwiftSection
-                footer={<SwiftText>{cloudSyncState.detail}</SwiftText>}
+                title="iCloud Sync"
+                footer={<SwiftText>{syncFooter}</SwiftText>}
               >
                 <SwiftToggle
                   label="iCloud Sync"
@@ -181,101 +177,108 @@ export function SharingSettingsScreen({
                   onIsOnChange={onICloudSyncChange}
                 />
                 <LabeledContent label="Status">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: cloudSyncState.conflictedRecords > 0 ? 'primary' : 'secondary' })]}>
+                  <SecondaryValue emphasis={cloudSyncState.conflictedRecords > 0}>
                     {cloudSyncState.label}
-                  </SwiftText>
+                  </SecondaryValue>
                 </LabeledContent>
-                <LabeledContent label="Last Update">
-                  <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                    {cloudSyncLastUpdateLabel(cloudSyncState)}
-                  </SwiftText>
-                </LabeledContent>
-                {cloudSyncState.pendingRecords > 0 && (
-                  <LabeledContent label="Pending">
-                    <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                      {cloudSyncState.pendingRecords} change{cloudSyncState.pendingRecords === 1 ? '' : 's'}
-                    </SwiftText>
+                {iCloudSyncEnabled && (
+                  <LabeledContent label="Last Synced">
+                    <SecondaryValue>{cloudSyncLastUpdateLabel(cloudSyncState)}</SecondaryValue>
                   </LabeledContent>
                 )}
-                <SwiftButton
-                  label="Sync Now"
-                  systemImage="arrow.clockwise.icloud"
-                  onPress={onManualCloudRefresh}
-                />
-              </SwiftSection>
-
-              <SwiftSection footer={<SwiftText>{sharingFooter}</SwiftText>}>
-                <SwiftButton
-                  label={inviteLabel}
-                  systemImage={canInvite ? 'person.2.badge.gearshape' : 'person.crop.circle.badge.checkmark'}
-                  onPress={() => {
-                    if (!inviteBusy && canInvite) onInviteSomeone();
-                  }}
-                  modifiers={inviteBusy || !canInvite ? [disabled(true)] : undefined}
-                />
+                {cloudSyncState.pendingRecords > 0 && (
+                  <LabeledContent label="Waiting">
+                    <SecondaryValue>
+                      {cloudSyncState.pendingRecords} change{cloudSyncState.pendingRecords === 1 ? '' : 's'}
+                    </SecondaryValue>
+                  </LabeledContent>
+                )}
+                {iCloudSyncEnabled && (
+                  <SwiftButton
+                    label="Sync Now"
+                    systemImage="arrow.clockwise.icloud"
+                    onPress={onManualCloudRefresh}
+                  />
+                )}
               </SwiftSection>
 
               {cloudSyncState.conflictedRecords > 0 && cloudConflicts.length === 0 && (
-                <SwiftSection footer={<SwiftText>{cloudSyncState.detail}</SwiftText>}>
-                  {cloudSyncState.conflictedRecords > 0 && (
-                    <LabeledContent label="Review Needed">
-                      <SwiftText>
-                        {cloudSyncState.conflictedRecords} item{cloudSyncState.conflictedRecords === 1 ? '' : 's'}
-                      </SwiftText>
-                    </LabeledContent>
-                  )}
+                <SwiftSection title="Review Needed" footer={<SwiftText>{cloudSyncState.detail}</SwiftText>}>
+                  <LabeledContent label="Conflicts">
+                    <SecondaryValue emphasis>
+                      {cloudSyncState.conflictedRecords} item{cloudSyncState.conflictedRecords === 1 ? '' : 's'}
+                    </SecondaryValue>
+                  </LabeledContent>
                 </SwiftSection>
               )}
 
-              {cloudConflicts.map((conflict, index) => (
+              {cloudConflicts.length > 0 && (
                 <SwiftSection
-                  key={conflict.recordName}
-                  footer={index === cloudConflicts.length - 1
-                    ? <SwiftText>For locked items, discard the blocked device change and refresh from iCloud. For edit conflicts, pick the version to keep.</SwiftText>
-                    : undefined}
+                  title="Review Needed"
+                  footer={<SwiftText>For locked items, discard the blocked device change and refresh from iCloud. For edit conflicts, pick the version to keep.</SwiftText>}
                 >
-                  <LabeledContent label={conflict.title}>
-                    <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                      {conflict.detail}
-                    </SwiftText>
-                  </LabeledContent>
-                  {conflict.requiresDiscardLocal && (
-                    <LabeledContent label="This Device">
-                      <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                        {conflict.localLabel}
-                      </SwiftText>
-                    </LabeledContent>
-                  )}
-                  {conflict.requiresDiscardLocal && (
-                    <LabeledContent label="Action">
-                      <SwiftButton
-                        label="Discard blocked change"
-                        onPress={() => resolveCloudConflict(conflict.recordName, 'discardLocal')}
-                      />
-                    </LabeledContent>
-                  )}
-                  {!conflict.requiresDiscardLocal && (
-                    <LabeledContent label="Keep iCloud">
-                      <SwiftButton
-                        label={conflict.remoteLabel ?? 'Unavailable'}
-                        onPress={() => resolveCloudConflict(conflict.recordName, 'remote')}
-                        modifiers={conflict.hasRemote ? undefined : [disabled(true)]}
-                      />
-                    </LabeledContent>
-                  )}
-                  {!conflict.requiresDiscardLocal && (
-                    <LabeledContent label="Keep This Device">
-                      <SwiftButton
-                        label={conflict.localLabel}
-                        onPress={() => resolveCloudConflict(conflict.recordName, 'local')}
-                        modifiers={conflict.canKeepLocal ? undefined : [disabled(true)]}
-                      />
-                    </LabeledContent>
-                  )}
+                  {cloudConflicts.map(conflict => (
+                    <React.Fragment key={conflict.recordName}>
+                      <LabeledContent label={conflict.title}>
+                        <SecondaryValue>{conflict.detail}</SecondaryValue>
+                      </LabeledContent>
+                      {conflict.requiresDiscardLocal && (
+                        <LabeledContent label="This Device">
+                          <SecondaryValue>{conflict.localLabel}</SecondaryValue>
+                        </LabeledContent>
+                      )}
+                      {conflict.requiresDiscardLocal && (
+                        <LabeledContent label="Resolve">
+                          <SwiftButton
+                            label="Discard blocked change"
+                            onPress={() => resolveCloudConflict(conflict.recordName, 'discardLocal')}
+                          />
+                        </LabeledContent>
+                      )}
+                      {!conflict.requiresDiscardLocal && (
+                        <LabeledContent label="Keep iCloud">
+                          <SwiftButton
+                            label={conflict.remoteLabel ?? 'Unavailable'}
+                            onPress={() => resolveCloudConflict(conflict.recordName, 'remote')}
+                            modifiers={conflict.hasRemote ? undefined : [disabled(true)]}
+                          />
+                        </LabeledContent>
+                      )}
+                      {!conflict.requiresDiscardLocal && (
+                        <LabeledContent label="Keep This Device">
+                          <SwiftButton
+                            label={conflict.localLabel}
+                            onPress={() => resolveCloudConflict(conflict.recordName, 'local')}
+                            modifiers={conflict.canKeepLocal ? undefined : [disabled(true)]}
+                          />
+                        </LabeledContent>
+                      )}
+                    </React.Fragment>
+                  ))}
                 </SwiftSection>
-              ))}
+              )}
 
-              <SwiftSection>
+              <SwiftSection title="Sharing" footer={<SwiftText>{sharingFooter}</SwiftText>}>
+                {canInvite ? (
+                  <SwiftButton
+                    label={inviteLabel}
+                    systemImage="person.2.badge.gearshape"
+                    onPress={() => {
+                      if (!inviteBusy) onInviteSomeone();
+                    }}
+                    modifiers={inviteBusy ? [disabled(true)] : undefined}
+                  />
+                ) : (
+                  <LabeledContent label="Management">
+                    <SecondaryValue>Owner only</SecondaryValue>
+                  </LabeledContent>
+                )}
+              </SwiftSection>
+
+              <SwiftSection title="Members">
+                <LabeledContent label="Total">
+                  <SecondaryValue>{memberCountLabel}</SecondaryValue>
+                </LabeledContent>
                 {ledgerMembers.length > 0 ? (
                   ledgerMembers.map(member => (
                     <MemberFormRow
@@ -295,39 +298,39 @@ export function SharingSettingsScreen({
 
               {currentMember && (
                 <SwiftSection
+                  title="Your Items"
                   footer={<SwiftText>Turning this off protects items you create from changes by other members. You can still edit your own items.</SwiftText>}
                 >
-                  <LabeledContent label="Viewing As">
-                    <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-                      {currentMember.displayName}
-                    </SwiftText>
-                  </LabeledContent>
                   <SwiftToggle
                     label="Others Can Edit My Items"
-                    systemImage="lock.open"
+                    systemImage={currentMember.allowOthersToEditMyItems ? 'lock.open' : 'lock'}
                     isOn={currentMember.allowOthersToEditMyItems}
                     onIsOnChange={onCurrentMemberEditLockChange}
                   />
                 </SwiftSection>
               )}
 
-              <SwiftSection>
-                <SwiftButton
-                  label={cloudShared ? 'Leave Shared Ledger' : 'Stop iCloud Sharing'}
-                  systemImage={cloudShared ? 'rectangle.portrait.and.arrow.right' : 'person.2.slash'}
-                  role="destructive"
-                  onPress={onLeaveOrManageSharing}
-                  modifiers={inviteBusy || (!cloudShared && !canInvite) ? [disabled(true)] : undefined}
-                />
-                {__DEV__ && onResetSyncedSampleData && (
-                  <SwiftButton
-                    label="Reset Synced Sample Data"
-                    systemImage="arrow.counterclockwise.icloud"
-                    role="destructive"
-                    onPress={onResetSyncedSampleData}
-                  />
-                )}
-              </SwiftSection>
+              {showAdvancedSection && (
+                <SwiftSection title="Advanced">
+                  {showStopSharingAction && (
+                    <SwiftButton
+                      label={cloudShared ? 'Leave Shared Ledger' : 'Stop iCloud Sharing'}
+                      systemImage={cloudShared ? 'rectangle.portrait.and.arrow.right' : 'person.2.slash'}
+                      role="destructive"
+                      onPress={onLeaveOrManageSharing}
+                      modifiers={inviteBusy ? [disabled(true)] : undefined}
+                    />
+                  )}
+                  {__DEV__ && onResetSyncedSampleData && (
+                    <SwiftButton
+                      label="Reset Synced Sample Data"
+                      systemImage="arrow.counterclockwise.icloud"
+                      role="destructive"
+                      onPress={onResetSyncedSampleData}
+                    />
+                  )}
+                </SwiftSection>
+              )}
             </SwiftForm>
           </Host>
         </View>
@@ -353,7 +356,21 @@ function cloudSyncLastUpdateLabel(state: CloudSyncUiState) {
   if (state.lastSyncedAt) {
     return new Date(state.lastSyncedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
-  return state.detail;
+  return 'Not synced yet';
+}
+
+function SecondaryValue({
+  children,
+  emphasis = false,
+}: {
+  children: React.ReactNode;
+  emphasis?: boolean;
+}) {
+  return (
+    <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: emphasis ? 'primary' : 'secondary' })]}>
+      {children}
+    </SwiftText>
+  );
 }
 
 function MemberFormRow({
@@ -370,9 +387,7 @@ function MemberFormRow({
 
   return (
     <LabeledContent label={label}>
-      <SwiftText modifiers={[foregroundStyle({ type: 'hierarchical', style: 'secondary' })]}>
-        {role} · {permission}
-      </SwiftText>
+      <SecondaryValue>{role} · {permission}</SecondaryValue>
     </LabeledContent>
   );
 }

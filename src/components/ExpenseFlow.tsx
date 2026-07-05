@@ -14,7 +14,7 @@ import { DictationText } from './DictationText';
 import { SheetPrimaryButton } from './shared';
 import { PopupNumericKeypad } from './PopupNumericKeypad';
 import { applyKeypadKey } from './NumericKeypad';
-import { TYPE } from '../typography';
+import { FONT_WEIGHT, TYPE } from '../typography';
 import { LAYOUT } from '../spacing';
 import { useRepositories, useRepositoryList } from '../repositories/RepositoryProvider';
 import { categoryGroupFor, categoryMap } from '../repositories/categoryUtils';
@@ -93,11 +93,25 @@ const VOICE_EXAMPLES = [
 ];
 
 // nextDueDate for a freshly-created rule: one cadence interval past the start.
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
 function nextDueAfter(start: Date, cadence: 'weekly' | 'monthly' | 'annual'): string {
   const d = new Date(start);
   if (cadence === 'weekly') d.setDate(d.getDate() + 7);
-  else if (cadence === 'annual') d.setFullYear(d.getFullYear() + 1);
-  else d.setMonth(d.getMonth() + 1);
+  else {
+    const targetDay = d.getDate();
+    if (cadence === 'annual') {
+      const targetYear = d.getFullYear() + 1;
+      const targetMonth = d.getMonth();
+      d.setFullYear(targetYear, targetMonth, Math.min(targetDay, daysInMonth(targetYear, targetMonth)));
+    } else {
+      d.setDate(1);
+      d.setMonth(d.getMonth() + 1);
+      d.setDate(Math.min(targetDay, daysInMonth(d.getFullYear(), d.getMonth())));
+    }
+  }
   return d.toISOString();
 }
 
@@ -278,6 +292,8 @@ export function ExpenseFlow({ theme, initialMode = 'voice', initialDraft, onClos
         cadence: manualRepeat,
         startDate: manualDate.toISOString().slice(0, 10),
         nextDueDate: nextDueAfter(manualDate, manualRepeat),
+        dayOfMonth: manualRepeat === 'monthly' || manualRepeat === 'annual' ? manualDate.getDate() : undefined,
+        monthOfYear: manualRepeat === 'annual' ? manualDate.getMonth() + 1 : undefined,
         active: true, estimate: false,
         createdByUserId: 'local', updatedByUserId: 'local',
       });
@@ -844,10 +860,10 @@ const S = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hintExample: { fontSize: 20, fontWeight: '500', letterSpacing: -0.4, lineHeight: 27, textAlign: 'center' },
-  hintText: { fontSize: 16, fontWeight: '500', letterSpacing: -0.3, lineHeight: 24, textAlign: 'center' },
-  listeningText: { fontSize: 22, fontWeight: '500', letterSpacing: -0.4, lineHeight: 28, textAlign: 'center' },
-  transcriptLive: { fontSize: 26, fontWeight: '600', letterSpacing: -0.5, lineHeight: 33, textAlign: 'center' },
+  hintExample: { fontSize: 20, fontWeight: FONT_WEIGHT.medium, letterSpacing: -0.4, lineHeight: 27, textAlign: 'center' },
+  hintText: { fontSize: 16, fontWeight: FONT_WEIGHT.medium, letterSpacing: -0.3, lineHeight: 24, textAlign: 'center' },
+  listeningText: { fontSize: 22, fontWeight: FONT_WEIGHT.medium, letterSpacing: -0.4, lineHeight: 28, textAlign: 'center' },
+  transcriptLive: { fontSize: 26, fontWeight: FONT_WEIGHT.semibold, letterSpacing: -0.5, lineHeight: 33, textAlign: 'center' },
   errorActions: { flexDirection: 'row', alignItems: 'center', gap: 20 },
 
   // Manual layout. With the keypad now summoned on demand, the form reclaims the
@@ -864,8 +880,8 @@ const S = StyleSheet.create({
     borderColor: 'transparent',
   },
   manualAmountRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center' },
-  manualAmountSign: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, marginRight: 3 },
-  manualAmountValue: { fontSize: 46, fontWeight: '600', letterSpacing: -1.2, lineHeight: 52, fontVariant: ['tabular-nums'] },
+  manualAmountSign: { fontSize: 46, fontWeight: FONT_WEIGHT.semibold, letterSpacing: -1.2, lineHeight: 52, marginRight: 3 },
+  manualAmountValue: { fontSize: 46, fontWeight: FONT_WEIGHT.semibold, letterSpacing: -1.2, lineHeight: 52, fontVariant: ['tabular-nums'] },
   amountChars: { flexDirection: 'row', alignItems: 'flex-end' },
   amountSubline: { marginTop: 6 },
   heardRow: {
@@ -877,7 +893,7 @@ const S = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: LAYOUT.rowPadY, paddingHorizontal: 16, gap: 12, minHeight: 54,
   },
-  fieldInput: { ...TYPE.subsectionTitle, fontWeight: '500', textAlign: 'right', padding: 0 },
+  fieldInput: { ...TYPE.subsectionTitle, fontWeight: FONT_WEIGHT.medium, textAlign: 'right', padding: 0 },
   categoryPanel: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   categoryWrap: { marginBottom: 12 },
   categoryGroupHost: { width: '100%', height: 42 },
@@ -886,5 +902,5 @@ const S = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 13, borderTopWidth: StyleSheet.hairlineWidth,
   },
   subcatMenuTrigger: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingLeft: 8, flexShrink: 1 },
-  subcatMenuText: { ...TYPE.body, fontWeight: '500', flexShrink: 1 },
+  subcatMenuText: { ...TYPE.body, fontWeight: FONT_WEIGHT.medium, flexShrink: 1 },
 });
