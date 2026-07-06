@@ -28,6 +28,7 @@ import { AppLockGate } from './src/components/AppLockGate';
 import { PaywallProvider } from './src/paywall/PaywallProvider';
 import { PaywallGate } from './src/paywall/PaywallGate';
 import { MembershipPaywallPreview } from './src/paywall/MembershipPaywallPreview';
+import { NativePayWallStoreKitDemo } from './modules/glass-card/src/NativePayWallStoreKitDemo';
 import { EMPTY_STATE_PREVIEW_META_KEY } from './src/emptyStatePreview';
 import {
   ONBOARDING_V1_COMPLETED_AT_META_KEY,
@@ -199,6 +200,7 @@ export function DashboardApp() {
   const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
   const [iosStyleOnboardingPreviewOpen, setIOSStyleOnboardingPreviewOpen] = useState(false);
   const [paywallPreviewOpen, setPaywallPreviewOpen] = useState(false);
+  const [payWallStoreKitDemoOpen, setPayWallStoreKitDemoOpen] = useState(false);
   const [paywallGateOpen, setPaywallGateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
@@ -1067,7 +1069,7 @@ export function DashboardApp() {
   const drawerOpenRef = useRef(false);
   const sideMenuPanStartsExpandedRef = useRef(false);
   const sideMenuPanOffsetRef = useRef(0);
-  const paywallOpen = paywallPreviewOpen || paywallGateOpen;
+  const paywallOpen = paywallPreviewOpen || paywallGateOpen || payWallStoreKitDemoOpen;
   const sidebarSwipeOpenEnabled = SIDEBAR_SWIPE_SCREENS.includes(screen)
     && !goalsOpen
     && !settingsOpen
@@ -1271,6 +1273,10 @@ export function DashboardApp() {
   const openPaywallPreview = useCallback(() => {
     setSettingsOpen(false);
     setPaywallPreviewOpen(true);
+  }, []);
+  const openPayWallStoreKitDemo = useCallback(() => {
+    setSettingsOpen(false);
+    setPayWallStoreKitDemoOpen(true);
   }, []);
   const updateSettingsMeta = useCallback((patch: Record<string, unknown>) => {
     const fallbackSettings = {
@@ -1699,6 +1705,7 @@ export function DashboardApp() {
           onOpenOnboarding={openOnboardingPreview}
           onOpenIOSStyleOnboarding={openIOSStyleOnboardingPreview}
           onOpenPaywallPreview={openPaywallPreview}
+          onOpenPayWallStoreKitDemo={openPayWallStoreKitDemo}
           cloudSyncState={cloudSyncState}
         />
 
@@ -1777,6 +1784,12 @@ export function DashboardApp() {
           />
         ) : null}
 
+        {payWallStoreKitDemoOpen ? (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 130, backgroundColor: '#000' }]}>
+            <NativePayWallStoreKitDemo style={StyleSheet.absoluteFill} />
+          </View>
+        ) : null}
+
         {iosStyleOnboardingPreviewOpen ? (
           <IOSStyleOnboardingPreview
             visible={iosStyleOnboardingPreviewOpen}
@@ -1784,7 +1797,7 @@ export function DashboardApp() {
           />
         ) : null}
 
-        {!showOnboarding && !paywallPreviewOpen && !iosStyleOnboardingPreviewOpen && (
+        {!showOnboarding && !paywallPreviewOpen && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && (
           <PaywallGate onOpenChange={setPaywallGateOpen} />
         )}
         <AppLockGate />

@@ -92,6 +92,7 @@ interface Props {
   onOpenOnboarding?: () => void;
   onOpenIOSStyleOnboarding?: () => void;
   onOpenPaywallPreview?: () => void;
+  onOpenPayWallStoreKitDemo?: () => void;
   cloudSyncState: CloudSyncUiState;
 }
 
@@ -107,6 +108,7 @@ export function SettingsScreen({
   onOpenOnboarding,
   onOpenIOSStyleOnboarding,
   onOpenPaywallPreview,
+  onOpenPayWallStoreKitDemo,
   cloudSyncState,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -368,6 +370,14 @@ export function SettingsScreen({
                     systemImage="crown"
                     value="Open"
                     onPress={onOpenPaywallPreview}
+                  />
+                ) : null}
+                {__DEV__ && onOpenPayWallStoreKitDemo ? (
+                  <SettingsActionRow
+                    label="Demo StoreKit Paywall"
+                    systemImage="storefront"
+                    value="Open"
+                    onPress={onOpenPayWallStoreKitDemo}
                   />
                 ) : null}
               </SwiftSection>

@@ -25,6 +25,7 @@ public class GlassCardModule: Module {
 
     ExpoUIView(NativeMerchantMarkView.self)
     ExpoUIView(NativeStoreKitPaywallView.self)
+    ExpoUIView(NativePayWallStoreKitDemoView.self)
     ExpoUIView(NativeIOSStyleOnboardingView.self)
     ExpoUIView(NativeBorderBeamMicButtonView.self)
     ExpoUIView(NativeCustomGlassTabBarView.self)
