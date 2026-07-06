@@ -8,6 +8,8 @@ import {
   Animated,
   ImageBackground,
   Dimensions,
+  RefreshControl,
+  InteractionManager,
   useWindowDimensions,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -106,6 +108,7 @@ import type { InsightDetailTarget } from './InsightDetailScreen';
 import { HeaderIcon, useHeaderScroll, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
+import { Skeleton } from '../components/Skeleton';
 import {
   type InsightBin,
   type InsightDetail,
@@ -1018,6 +1021,7 @@ interface Props {
   onOpenDrawer: () => void;
   onViewActivity: (filter: ActivityInitialFilter) => void;
   onOpenInsight: (target: InsightDetailTarget) => void;
+  onRefreshSync?: () => Promise<void>;
 }
 
 export function InsightsScreen({
@@ -1026,6 +1030,7 @@ export function InsightsScreen({
   onOpenDrawer,
   onViewActivity,
   onOpenInsight,
+  onRefreshSync,
 }: Props) {
   const { transactionsRepo, categoriesRepo, budgetsRepo, recurringRulesRepo, incomeRepo } =
     useRepositories();
@@ -1040,6 +1045,8 @@ export function InsightsScreen({
   const pWall = makeP(true);
   const p = makeP(theme.dark);
   const shadow = DARK_TEXT_SHADOW;
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Responsive tile geometry — recomputed when the device rotates.
   const cardW = screenW - CARD_OUTER_PAD * 2;
@@ -1902,6 +1909,45 @@ export function InsightsScreen({
     if (chartArmFrameRef.current !== null) cancelAnimationFrame(chartArmFrameRef.current);
   }, []);
 
+  useEffect(() => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setLoading(false);
+    };
+    const task = InteractionManager.runAfterInteractions(finish);
+    const fallback = setTimeout(finish, 450);
+    return () => {
+      settled = true;
+      task.cancel();
+      clearTimeout(fallback);
+    };
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setLoading(true);
+    void (async () => {
+      try {
+        await onRefreshSync?.();
+      } finally {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          setLoading(false);
+          setRefreshing(false);
+        };
+        const task = InteractionManager.runAfterInteractions(finish);
+        setTimeout(() => {
+          task.cancel();
+          finish();
+        }, 450);
+      }
+    })();
+  }, [onRefreshSync]);
+
   const chartReplayKey = `${chartKey}-${timeframe}-${dateIdx}`;
 
   // ── Bento summary tiles ───────────────────────────────────────────
@@ -2058,9 +2104,28 @@ export function InsightsScreen({
             { useNativeDriver: true },
           )}
           scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              progressViewOffset={insets.top + 44}
+              tintColor={pWall.textSec}
+              colors={[theme.accent.dot]}
+              progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
+            />
+          }
         >
           {/* ─── Bento ─────────────────────────────── */}
           <View style={styles.sectionStack}>
+            {loading ? (
+              <InsightsSkeleton
+                dark={theme.dark}
+                halfHeight={Math.round(halfW)}
+                changeCount={changeSnapshots.length}
+                hasSpending={hasSpending}
+                whereCount={whereItems.length}
+              />
+            ) : (
             <View style={styles.bento}>
               {/* Control row: small timeframe chips (left) + month menu (right),
                   sitting right above the chart like the reference. */}
@@ -2480,6 +2545,7 @@ export function InsightsScreen({
                 </BentoTile>
               )}
             </View>
+            )}
 
           </View>
         </Animated.ScrollView>
@@ -2491,6 +2557,95 @@ export function InsightsScreen({
           onViewActivity={onViewActivity}
           onViewSpendingChart={() => onOpenInsight({ title: 'Spending', subtitle: rangeContextLabel, icon: 'chart' })}
         />
+    </View>
+  );
+}
+
+function InsightsSkeleton({
+  dark,
+  halfHeight,
+  changeCount,
+  hasSpending,
+  whereCount,
+}: {
+  dark: boolean;
+  halfHeight: number;
+  changeCount: number;
+  hasSpending: boolean;
+  whereCount: number;
+}) {
+  const safeChangeCount = Math.min(Math.max(changeCount, 0), 3);
+  const safeWhereCount = hasSpending ? Math.min(Math.max(whereCount, 1), 4) : 0;
+
+  return (
+    <View style={styles.bento}>
+      <View style={styles.bentoControls}>
+        <Skeleton width={200} height={30} radius={RADIUS.field} onMedia={dark} />
+        <Skeleton width={118} height={18} radius={5} onMedia={dark} />
+      </View>
+
+      <BentoTile dark={dark} style={styles.tileHero}>
+        <Skeleton width={72} height={11} radius={4} onMedia={dark} />
+        <Skeleton width={176} height={38} radius={8} onMedia={dark} style={{ marginTop: SPACE.md }} />
+        <View style={styles.insightSkeletonChart}>
+          <Skeleton width="100%" height={112} radius={RADIUS.field} onMedia={dark} />
+        </View>
+      </BentoTile>
+
+      <View style={styles.bentoRow}>
+        {[0, 1].map(index => (
+          <BentoTile key={index} dark={dark} style={[styles.tileHalf, { minHeight: halfHeight }]}>
+            <Skeleton width={index === 0 ? 78 : 92} height={11} radius={4} onMedia={dark} />
+            <Skeleton width={index === 0 ? 112 : 86} height={24} radius={6} onMedia={dark} style={{ marginTop: SPACE.md }} />
+            <Skeleton width={92} height={12} radius={4} onMedia={dark} style={{ marginTop: SPACE.xs }} />
+            <View style={styles.insightSkeletonMiniChart}>
+              <Skeleton width="100%" height={index === 0 ? 40 : 64} radius={10} onMedia={dark} />
+            </View>
+          </BentoTile>
+        ))}
+      </View>
+
+      {safeChangeCount > 0 ? (
+        <BentoTile dark={dark} tier="secondary">
+          <Skeleton width={128} height={18} radius={5} onMedia={dark} style={{ marginBottom: SPACE.md }} />
+          {Array.from({ length: safeChangeCount }).map((_, index) => (
+            <View key={index} style={styles.insightSkeletonRow}>
+              <Skeleton width={32} height={32} radius={16} onMedia={dark} />
+              <View style={{ flex: 1, gap: SPACE.sm }}>
+                <Skeleton width={index === 1 ? '48%' : '62%'} height={13} radius={4} onMedia={dark} />
+                <Skeleton width="100%" height={5} radius={3} onMedia={dark} />
+              </View>
+              <Skeleton width={54} height={14} radius={4} onMedia={dark} />
+            </View>
+          ))}
+        </BentoTile>
+      ) : null}
+
+      <BentoTile dark={dark} tier="secondary">
+        <View style={styles.bentoControls}>
+          <Skeleton width={118} height={18} radius={5} onMedia={dark} />
+          {hasSpending ? <Skeleton width={128} height={30} radius={RADIUS.field} onMedia={dark} /> : null}
+        </View>
+        {safeWhereCount > 0 ? (
+          Array.from({ length: safeWhereCount }).map((_, index) => (
+            <View key={index} style={styles.insightSkeletonRow}>
+              <Skeleton width={32} height={32} radius={16} onMedia={dark} />
+              <View style={{ flex: 1, gap: SPACE.sm }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: SPACE.md }}>
+                  <Skeleton width={index === 2 ? '42%' : '56%'} height={13} radius={4} onMedia={dark} />
+                  <Skeleton width={50} height={13} radius={4} onMedia={dark} />
+                </View>
+                <Skeleton width="100%" height={5} radius={3} onMedia={dark} />
+              </View>
+            </View>
+          ))
+        ) : (
+          <View style={{ paddingTop: SPACE.lg, gap: SPACE.sm }}>
+            <Skeleton width="62%" height={14} radius={4} onMedia={dark} />
+            <Skeleton width="88%" height={12} radius={4} onMedia={dark} />
+          </View>
+        )}
+      </BentoTile>
     </View>
   );
 }
@@ -2570,6 +2725,14 @@ const styles = StyleSheet.create({
   heroChart: { flex: 1, maxHeight: 150, marginTop: 8 },
   tileMiniChart: { marginTop: 'auto', height: 40 },
   tileTrendChart: { marginTop: 'auto', height: 64 },
+  insightSkeletonChart: { flex: 1, justifyContent: 'flex-end', marginTop: SPACE.lg },
+  insightSkeletonMiniChart: { marginTop: 'auto' },
+  insightSkeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.md,
+    paddingVertical: LAYOUT.rowPadY,
+  },
   bentoSection: { ...TYPE.sectionTitle, marginTop: 4 },
   // "Where it went" category rows — flat rows inside one frosted tile.
   catRow: {

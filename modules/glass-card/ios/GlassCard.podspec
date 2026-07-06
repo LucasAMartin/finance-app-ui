@@ -12,7 +12,8 @@ Pod::Spec.new do |s|
   s.source         = { git: '' }
   s.static_framework = true
   s.resource_bundles = {
-    'GlassCardPaywall' => ['Resources/Paywall/*']
+    'GlassCardPaywall' => ['Resources/Paywall/*'],
+    'GlassCardShaders' => ['LiquidLens.metal']
   }
 
   s.dependency 'ExpoModulesCore'

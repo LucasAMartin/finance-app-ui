@@ -3,14 +3,18 @@ import React, { useEffect, useState } from 'react';
 import { usePaywall } from './PaywallProvider';
 import { MembershipPaywallPreview } from './MembershipPaywallPreview';
 
-export function PaywallGate() {
+interface PaywallGateProps {
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function PaywallGate({ onOpenChange }: PaywallGateProps = {}) {
   const {
     mode,
     status,
     isPremium,
     isBusy,
-    offering,
-    purchasePackage,
+    products,
+    purchaseProduct,
     restorePurchases,
   } = usePaywall();
   const [paywallAttempted, setPaywallAttempted] = useState(false);
@@ -27,14 +31,22 @@ export function PaywallGate() {
     if (mode !== 'live' || isPremium) setPaywallOpen(false);
   }, [isPremium, mode]);
 
+  useEffect(() => {
+    onOpenChange?.(paywallOpen);
+  }, [onOpenChange, paywallOpen]);
+
+  useEffect(() => () => {
+    onOpenChange?.(false);
+  }, [onOpenChange]);
+
   return paywallOpen ? (
     <MembershipPaywallPreview
       visible={paywallOpen}
       onClose={() => setPaywallOpen(false)}
-      packages={offering?.availablePackages}
+      products={products}
       isBusy={isBusy}
-      onPurchase={async (packageID) => {
-        const didPurchase = await purchasePackage(packageID);
+      onPurchase={async (productID) => {
+        const didPurchase = await purchaseProduct(productID);
         if (didPurchase) setPaywallOpen(false);
       }}
       onRestore={async () => {

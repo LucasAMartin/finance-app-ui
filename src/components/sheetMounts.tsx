@@ -3,6 +3,7 @@ import { useTheme } from '../ThemeProvider';
 import { VoiceSheet, type SavedExpenseInfo } from './VoiceSheet';
 import { TxSheet } from './TxSheet';
 import { BillSheet } from './BillSheet';
+import { NativeDynamicHeightSheetDemo } from '../../modules/glass-card/src/NativeDynamicHeightSheetDemo';
 import type { Bill, Transaction } from '../repositories/types';
 
 // Each sheet owns its own visibility/data state inside a leaf mount, exposed via
@@ -83,4 +84,24 @@ export const BillSheetMount = forwardRef<BillSheetHandle, {}>(function BillSheet
   }), []);
 
   return <BillSheet bill={bill} theme={theme} onClose={() => setBill(null)} />;
+});
+
+export interface DynamicHeightSheetDemoHandle {
+  open: () => void;
+}
+
+export const DynamicHeightSheetDemoMount = forwardRef<DynamicHeightSheetDemoHandle, {}>(function DynamicHeightSheetDemoMount(_props, ref) {
+  const { theme } = useTheme();
+  const [presentationToken, setPresentationToken] = useState(0);
+
+  useImperativeHandle(ref, () => ({
+    open: () => setPresentationToken(token => token + 1),
+  }), []);
+
+  return (
+    <NativeDynamicHeightSheetDemo
+      presentationToken={presentationToken}
+      isDark={theme.dark}
+    />
+  );
 });

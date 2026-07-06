@@ -9,23 +9,8 @@ import {
   Animated,
   useWindowDimensions,
 } from 'react-native';
-import {
-  Button as SwiftButton,
-  GlassEffectContainer,
-  Host,
-  LazyHStack,
-  ScrollView as SwiftScrollView,
-  Text as SwiftText,
-} from '@expo/ui/swift-ui';
-import {
-  buttonStyle,
-  font,
-  foregroundStyle,
-  glassEffect,
-  padding,
-  scrollIndicators,
-} from '@expo/ui/swift-ui/modifiers';
 import * as ImagePicker from 'expo-image-picker';
+import { Asset } from 'expo-asset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
@@ -44,12 +29,15 @@ import { RADIUS } from '../radius';
 import { Icon } from '../components/Icon';
 import { GlassCircleButton, ScreenExitButton, SUPPORTS_GLASS, glassTintForTheme } from '../components/GlassButton';
 import { FONT_WEIGHT, TYPE } from '../typography';
+import { NativeWallpaperCarousel, type NativeWallpaperCarouselItem } from '../../modules/glass-card/src/NativeWallpaperCarousel';
+import { NativeGlassSegmentedControl, SUPPORTS_GS_CONTROL } from '../../modules/glass-card/src/NativeGlassSegmentedControl';
 
 const UPLOAD_TAB_ID = 'upload';
+const UPLOAD_PLACEHOLDER_ID = 'upload-placeholder';
 const GRID_COLS = 3;
 const GRID_HPAD = 16;
 const GRID_GAP = 10;
-const RAIL_H = 52;
+const RAIL_H = 58;
 
 type LocalWallpaper = Wallpaper & { customUri?: string };
 type ThemeTab = {
@@ -77,9 +65,10 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     removeCustomWallpaperUri,
   } = useTheme();
   const insets = useSafeAreaInsets();
-  const { width: screenW } = useWindowDimensions();
+  const { width: screenW, height: screenH } = useWindowDimensions();
   const tileW = (screenW - GRID_HPAD * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
   const tileH = tileW * (19.5 / 9);
+  const carouselH = Math.max(520, screenH - insets.top - insets.bottom - 64 - RAIL_H - 4);
   const [previewDark, setPreviewDark] = useState<boolean>(dark);
   const screenTheme = useMemo(
     () => (previewDark === dark ? theme : makeTheme(previewDark, accentKey, cardStyle)),
@@ -96,7 +85,9 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
 
   // Local selection state — only commit to context on Apply.
   const [pendingId, setPendingId] = useState<string>(currentResolvedId);
+  const [carouselSelectionId, setCarouselSelectionId] = useState<string>(currentResolvedId);
   const [tabId, setTabId] = useState<string>(initialTab);
+  const [wallpaperAssetUris, setWallpaperAssetUris] = useState<Record<string, string>>({});
 
   // Reset local state every time the screen is opened.
   const wasVisible = React.useRef(visible);
@@ -104,6 +95,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     if (visible && !wasVisible.current) {
       setPreviewDark(dark);
       setPendingId(currentResolvedId);
+      setCarouselSelectionId(currentResolvedId);
       setTabId(customWallpaperUriFromId(currentResolvedId) ? UPLOAD_TAB_ID : findTabForWallpaper(currentResolvedId).id);
     }
     wasVisible.current = visible;
@@ -141,7 +133,94 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     ],
     [uploadItems],
   );
+  const bundledWallpaperSources = useMemo(
+    () => Array.from(new Set(
+      tabs
+        .flatMap(tab => tab.items)
+        .map(wallpaper => wallpaper.source)
+        .filter((source): source is number => typeof source === 'number'),
+    )),
+    [tabs],
+  );
+  const allWallpaperUris = useMemo(
+    () => tabs
+      .flatMap(tab => tab.items)
+      .map(wallpaper => resolveWallpaperUri(wallpaper.source, wallpaperAssetUris))
+      .filter(uri => uri.length > 0),
+    [tabs, wallpaperAssetUris],
+  );
   const activeTab = tabs.find(t => t.id === tabId) ?? tabs[0];
+  const carouselItems = useMemo<NativeWallpaperCarouselItem[]>(
+    () => {
+      const items = activeTab.items.map(wallpaper => ({
+        id: wallpaper.id,
+        title: wallpaper.name,
+        image: resolveWallpaperUri(wallpaper.source, wallpaperAssetUris),
+      })).filter(item => item.image.length > 0);
+
+      if (activeTab.id !== UPLOAD_TAB_ID) {
+        return items;
+      }
+
+      return [
+        {
+          id: UPLOAD_PLACEHOLDER_ID,
+          title: 'Upload',
+          image: '',
+          isUploadPlaceholder: true,
+        },
+        ...items,
+      ];
+    },
+    [activeTab.id, activeTab.items, wallpaperAssetUris],
+  );
+  const carouselSelectedId = useMemo(() => {
+    if (carouselItems.some(item => item.id === carouselSelectionId)) {
+      return carouselSelectionId;
+    }
+
+    return carouselItems[0]?.id ?? '';
+  }, [carouselItems, carouselSelectionId]);
+
+  React.useEffect(() => {
+    if (!SUPPORTS_GLASS || bundledWallpaperSources.length === 0) return;
+
+    let cancelled = false;
+
+    Promise.all(bundledWallpaperSources.map(async (source) => {
+      const asset = Asset.fromModule(source);
+      if (!asset.localUri) {
+        await asset.downloadAsync();
+      }
+      return [assetSourceKey(source), asset.localUri ?? asset.uri] as const;
+    }))
+      .then(entries => {
+        if (cancelled) return;
+        setWallpaperAssetUris(prev => {
+          let changed = false;
+          const next = { ...prev };
+          entries.forEach(([key, uri]) => {
+            if (uri && next[key] !== uri) {
+              next[key] = uri;
+              changed = true;
+            }
+          });
+          return changed ? next : prev;
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bundledWallpaperSources]);
+
+  React.useEffect(() => {
+    if (!SUPPORTS_GLASS) return;
+    allWallpaperUris.forEach(uri => {
+      Image.prefetch(uri).catch(() => {});
+    });
+  }, [allWallpaperUris]);
 
   const wallpaperDirty = pendingId !== currentResolvedId;
   const modeDirty = previewDark !== dark;
@@ -151,6 +230,7 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     if (w.id === pendingId) return;
     Haptics.selectionAsync().catch(() => {});
     setPendingId(w.id);
+    setCarouselSelectionId(w.id);
   };
 
   const handleUpload = async () => {
@@ -166,7 +246,9 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
     Haptics.selectionAsync().catch(() => {});
     addCustomWallpaperUri(uri);
     setTabId(UPLOAD_TAB_ID);
-    setPendingId(customWallpaperId(uri));
+    const nextId = customWallpaperId(uri);
+    setPendingId(nextId);
+    setCarouselSelectionId(nextId);
   };
 
   const handleApply = () => {
@@ -201,6 +283,24 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
       if (!customWallpaperUriFromId(nextId)) {
         setTabId(findTabForWallpaper(nextId).id);
       }
+      setCarouselSelectionId(nextId);
+    }
+  };
+
+  const handleSelectTab = (id: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    setTabId(id);
+
+    const nextTab = tabs.find(tab => tab.id === id);
+    if (id === UPLOAD_TAB_ID) {
+      setCarouselSelectionId(UPLOAD_PLACEHOLDER_ID);
+      return;
+    }
+
+    const firstWallpaper = nextTab?.items[0];
+    if (firstWallpaper) {
+      setPendingId(firstWallpaper.id);
+      setCarouselSelectionId(firstWallpaper.id);
     }
   };
 
@@ -240,9 +340,11 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
 
         <RNScrollView
           style={{ flex: 1 }}
+          scrollEnabled={!SUPPORTS_GLASS}
+          directionalLockEnabled
           contentContainerStyle={{
             paddingTop: insets.top + 64 + 20,
-            paddingBottom: insets.bottom + 110,
+            paddingBottom: SUPPORTS_GLASS ? insets.bottom + 20 : insets.bottom + 110,
           }}
           showsVerticalScrollIndicator={false}
         >
@@ -250,88 +352,119 @@ export function ThemeScreen({ theme, visible, onClose }: Props) {
             tabs={tabs}
             selectedId={activeTab.id}
             theme={screenTheme}
-            onSelect={(id) => {
-              Haptics.selectionAsync().catch(() => {});
-              setTabId(id);
-            }}
+            onSelect={handleSelectTab}
           />
 
-          <View style={styles.gridStack}>
-            {tabs.map(tab => {
-              const isActive = tab.id === activeTab.id;
-              return (
-                <View
-                  key={tab.id}
-                  style={[
-                    styles.grid,
-                    !isActive && styles.gridHidden,
-                  ]}
-                  pointerEvents={isActive ? 'auto' : 'none'}
-                >
-                  {tab.id === UPLOAD_TAB_ID && (
-                    <UploadTile
-                      theme={screenTheme}
-                      tileW={tileW}
-                      tileH={tileH}
-                      onPress={handleUpload}
-                    />
-                  )}
-                  {tab.items.map(w => {
-                    const selected = w.id === pendingId;
-                    const customUri = w.customUri;
-                    return (
-                      <Tile
-                        key={w.id}
-                        wallpaper={w}
-                        selected={selected}
-                        dark={screenTheme.dark}
-                        accentFill={screenTheme.accent.fill}
-                        accentInk={screenTheme.accent.ink}
+          {SUPPORTS_GLASS ? (
+            <NativeWallpaperCarousel
+              wallpapers={carouselItems}
+              selectedId={carouselSelectedId}
+              resetKey={activeTab.id}
+              isDark={screenTheme.dark}
+              onSelect={(id) => {
+                setCarouselSelectionId(id);
+                if (id === UPLOAD_PLACEHOLDER_ID) return;
+                const wallpaper = activeTab.items.find(item => item.id === id);
+                if (wallpaper) handleSelect(wallpaper);
+              }}
+              onApply={handleApply}
+              onAdd={handleUpload}
+              bottomInset={insets.bottom}
+              backgroundColor={screenTheme.surface}
+              style={{ height: carouselH }}
+            />
+          ) : (
+            <View style={styles.gridStack}>
+              {tabs.map(tab => {
+                const isActive = tab.id === activeTab.id;
+                return (
+                  <View
+                    key={tab.id}
+                    style={[
+                      styles.grid,
+                      !isActive && styles.gridHidden,
+                    ]}
+                    pointerEvents={isActive ? 'auto' : 'none'}
+                  >
+                    {tab.id === UPLOAD_TAB_ID && (
+                      <UploadTile
+                        theme={screenTheme}
                         tileW={tileW}
                         tileH={tileH}
-                        onPress={() => handleSelect(w)}
-                        onDelete={customUri ? () => handleDeleteCustom(customUri) : undefined}
+                        onPress={handleUpload}
                       />
-                    );
-                  })}
-                </View>
-              );
-            })}
-          </View>
+                    )}
+                    {tab.items.map(w => {
+                      const selected = w.id === pendingId;
+                      const customUri = w.customUri;
+                      return (
+                        <Tile
+                          key={w.id}
+                          wallpaper={w}
+                          selected={selected}
+                          dark={screenTheme.dark}
+                          accentFill={screenTheme.accent.fill}
+                          accentInk={screenTheme.accent.ink}
+                          tileW={tileW}
+                          tileH={tileH}
+                          onPress={() => handleSelect(w)}
+                          onDelete={customUri ? () => handleDeleteCustom(customUri) : undefined}
+                        />
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </RNScrollView>
 
-        <View
-          style={[
-            styles.applyWrap,
-            {
-              paddingBottom: insets.bottom + 14,
-              paddingTop: 14,
-              backgroundColor: screenTheme.surface,
-              borderTopColor: screenTheme.hairline,
-            },
-          ]}
-          pointerEvents="box-none"
-        >
-          <Pressable
-            onPress={handleApply}
-            accessibilityRole="button"
-            accessibilityLabel={dirty ? 'Apply selected appearance' : 'Close'}
-            style={({ pressed }) => [
-              styles.applyBtn,
+        {!SUPPORTS_GLASS && (
+          <View
+            style={[
+              styles.applyWrap,
               {
-                backgroundColor: screenTheme.accent.fill,
-                opacity: pressed ? 0.85 : 1,
+                paddingBottom: insets.bottom + 14,
+                paddingTop: 14,
+                backgroundColor: screenTheme.surface,
+                borderTopColor: screenTheme.hairline,
               },
             ]}
+            pointerEvents="box-none"
           >
-            <Text style={[styles.applyText, { color: screenTheme.accent.ink }]}>
-              {dirty ? 'Apply' : 'Done'}
-            </Text>
-          </Pressable>
-        </View>
+            <Pressable
+              onPress={handleApply}
+              accessibilityRole="button"
+              accessibilityLabel={dirty ? 'Apply selected appearance' : 'Close'}
+              style={({ pressed }) => [
+                styles.applyBtn,
+                {
+                  backgroundColor: screenTheme.accent.fill,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+            >
+              <Text style={[styles.applyText, { color: screenTheme.accent.ink }]}>
+                {dirty ? 'Apply' : 'Done'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </Animated.View>
   );
+}
+
+function assetSourceKey(source: number): string {
+  return String(source);
+}
+
+function resolveWallpaperUri(source: Wallpaper['source'], assetUris: Record<string, string> = {}): string {
+  if (typeof source === 'number') {
+    return assetUris[assetSourceKey(source)] ?? Image.resolveAssetSource(source)?.uri ?? '';
+  }
+
+  return source.uri;
 }
 
 function ThemeModeButton({
@@ -387,52 +520,15 @@ function ThemeCategoryRail({
   theme: Theme;
   onSelect: (id: string) => void;
 }) {
-  if (SUPPORTS_GLASS) {
+  if (SUPPORTS_GS_CONTROL) {
     return (
-      <Host ignoreSafeArea="all" colorScheme={theme.dark ? 'dark' : 'light'} style={styles.railHost}>
-        <GlassEffectContainer>
-          <SwiftScrollView
-            axes="horizontal"
-            showsIndicators={false}
-            modifiers={[scrollIndicators('hidden', 'horizontal')]}
-          >
-            <LazyHStack spacing={10} alignment="center" modifiers={[padding({ horizontal: GRID_HPAD })]}>
-              {tabs.map(tab => {
-                const selected = tab.id === selectedId;
-                return (
-                  <SwiftButton
-                    key={tab.id}
-                    onPress={() => onSelect(tab.id)}
-                    modifiers={[
-                      buttonStyle('plain'),
-                      padding({ horizontal: selected ? 14 : 4, vertical: 8 }),
-                      ...(selected
-                        ? [glassEffect({
-                            glass: {
-                              variant: 'regular',
-                              interactive: true,
-                              tint: glassTintForTheme(theme.dark),
-                            },
-                            shape: 'capsule',
-                          })]
-                        : []),
-                    ]}
-                  >
-                    <SwiftText
-                      modifiers={[
-                        font({ size: 15, weight: selected ? 'semibold' : 'medium' }),
-                        foregroundStyle(selected ? theme.text : theme.textSec),
-                      ]}
-                    >
-                      {tab.label}
-                    </SwiftText>
-                  </SwiftButton>
-                );
-              })}
-            </LazyHStack>
-          </SwiftScrollView>
-        </GlassEffectContainer>
-      </Host>
+      <NativeGlassSegmentedControl
+        tabs={tabs.map(tab => ({ id: tab.id, title: tab.label }))}
+        selectedId={selectedId}
+        isDark={theme.dark}
+        onSelect={onSelect}
+        style={styles.railHost}
+      />
     );
   }
 
@@ -489,15 +585,14 @@ function UploadTile({
           width: tileW,
           height: tileH,
           borderColor: theme.hairline,
-          backgroundColor: theme.chipBg,
+          backgroundColor: theme.surface2,
           transform: [{ scale: pressed ? 0.97 : 1 }],
         },
       ]}
     >
-      <View style={[styles.uploadGlyph, { backgroundColor: theme.surface2 }]}>
-        <Icon name="plus" size={22} color={theme.text} stroke={2} />
+      <View style={[styles.uploadGlyph, { backgroundColor: theme.chipBg }]}>
+        <Icon name="plus" size={30} color={theme.textSec} stroke={1.9} />
       </View>
-      <Text style={[styles.uploadTileText, { color: theme.textSec }]}>Upload</Text>
     </Pressable>
   );
 }
@@ -655,18 +750,14 @@ const styles = StyleSheet.create({
   },
   uploadTile: {
     borderWidth: 1,
-    borderStyle: 'dashed',
-    gap: 10,
+    borderStyle: 'solid',
   },
   uploadGlyph: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  uploadTileText: {
-    ...TYPE.bodySmEm,
   },
   tileImage: {
     width: '100%',

@@ -4,37 +4,35 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { Link } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, Divider, HStack, Host, Image } from '@expo/ui/swift-ui';
-import { accessibilityLabel, buttonStyle, frame, glassEffect, padding } from '@expo/ui/swift-ui/modifiers';
 import { Icon } from './Icon';
-import { GlassCircleIcon, SUPPORTS_GLASS } from './GlassButton';
+import { SUPPORTS_GLASS } from './GlassButton';
 import { Theme } from '../theme';
 import type { SourceRect } from './ContainerTransform';
+import { NativeCustomGlassTabBar } from '../../modules/glass-card/src/NativeCustomGlassTabBar';
 
 export interface TabBarProps {
   theme: Theme;
   active: string;
-  onAdd: (source: SourceRect) => void;
+  onAdd: (source?: SourceRect) => void;
   onTabPress?: (id: string) => void;
 }
 
 // Each tab carries both a legacy RN icon name (fallback path) and the SF Symbol
 // names for the native Liquid Glass path (inactive outline / active filled).
 const TABS = [
-  { id: 'home',     icon: 'home',    inactive: 'house',     active: 'house.fill'     },
-  { id: 'spending', icon: 'chart',   inactive: 'chart.bar', active: 'chart.bar.fill' },
-  { id: 'budget',   icon: 'wallet',  inactive: 'chart.pie', active: 'chart.pie.fill' },
-  { id: 'activity', icon: 'list',    inactive: 'list.bullet.rectangle', active: 'list.bullet.rectangle.fill' },
+  { id: 'home',     icon: 'home'   },
+  { id: 'spending', icon: 'chart'  },
+  { id: 'budget',   icon: 'wallet' },
+  { id: 'activity', icon: 'list'   },
 ] as const;
 
 const TAB_W    = 52;  // tab button diameter
-const ADD_SIZE = 48;  // add button diameter — slightly larger to signal primary action
 const PILL_PAD = 8;   // glass capsule internal padding
 const TAB_GAP  = 4;   // spacing between buttons in the pill
 
 // ─── Liquid Glass tab bar (iOS 26+) ──────────────────────────────────────────
 
-function GlassTabBar({ theme, active, onTabPress }: TabBarProps) {
+function GlassTabBar({ theme, active, onTabPress, onAdd }: TabBarProps) {
   const insets  = useSafeAreaInsets();
 
   const handleTabPress = (id: string) => {
@@ -44,6 +42,7 @@ function GlassTabBar({ theme, active, onTabPress }: TabBarProps) {
 
   const handleAdd = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onAdd();
   };
 
   return (
@@ -51,75 +50,12 @@ function GlassTabBar({ theme, active, onTabPress }: TabBarProps) {
       style={[glassStyles.container, { bottom: Math.max(insets.bottom, 16) + 8 }]}
       accessibilityRole="tablist"
     >
-      <View collapsable={false} style={glassStyles.pillWrap}>
-        <Host matchContents ignoreSafeArea="all">
-          {/* One Liquid Glass capsule behind the whole row — the pill. The tab
-              icons are plain buttons sitting on it; only the + carries its own
-              prominent glass so it reads as the primary action. */}
-          <HStack
-            spacing={TAB_GAP}
-            alignment="center"
-            modifiers={[
-              padding({ all: PILL_PAD }),
-              glassEffect({ glass: { variant: 'regular', interactive: true }, shape: 'capsule' }),
-            ]}
-          >
-            {TABS.map(tab => {
-              const isActive = tab.id === active;
-              return (
-                <Button
-                  key={tab.id}
-                  onPress={() => handleTabPress(tab.id)}
-                  modifiers={[
-                    frame({ width: TAB_W, height: TAB_W }),
-                    buttonStyle('plain'),
-                    accessibilityLabel(tab.id),
-                  ]}
-                >
-                  <Image
-                    systemName={isActive ? tab.active : tab.inactive}
-                    size={22}
-                    color={isActive ? theme.text : theme.textSec}
-                  />
-                </Button>
-              );
-            })}
-
-            {/* Trailing padding biases the divider toward the tab icons, so it
-                sits centered in the visible gap between the last icon and the
-                larger + circle rather than between the two frame centers. */}
-            <Divider modifiers={[frame({ height: 24 }), padding({ trailing: 10 })]} />
-
-            {/* Add button — a circular accent-tinted glass marks it as the
-                primary action. Explicit circle shape (not glassProminent, which
-                renders a capsule/oval) keeps it perfectly round. */}
-            <Image systemName="mic.fill" size={1} color="transparent" modifiers={[frame({ width: ADD_SIZE, height: ADD_SIZE })]} />
-          </HStack>
-        </Host>
-        <Link href="/expense?mode=voice" asChild>
-          <Link.Trigger>
-            <Pressable
-              onPressIn={handleAdd}
-              pointerEvents="box-only"
-              accessibilityRole="button"
-              accessibilityLabel="Add expense"
-              style={glassStyles.addOverlay}
-            >
-              <Link.AppleZoom>
-                <View collapsable={false} style={glassStyles.addZoomSource}>
-                  <GlassCircleIcon
-                    systemImage="mic.fill"
-                    size={ADD_SIZE}
-                    iconSize={24}
-                    iconColor={theme.accent.ink}
-                    glassTint={theme.accent.dot}
-                  />
-                </View>
-              </Link.AppleZoom>
-            </Pressable>
-          </Link.Trigger>
-        </Link>
-      </View>
+      <NativeCustomGlassTabBar
+        activeTab={active}
+        isDark={theme.dark}
+        onTabSelect={handleTabPress}
+        onVoiceAction={handleAdd}
+      />
     </View>
   );
 }
@@ -131,24 +67,6 @@ const glassStyles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     zIndex: 30,
-  },
-  pillWrap: {
-    position: 'relative',
-  },
-  addOverlay: {
-    position: 'absolute',
-    right: PILL_PAD + 2,
-    top: PILL_PAD + 2,
-    width: ADD_SIZE,
-    height: ADD_SIZE,
-    borderRadius: ADD_SIZE / 2,
-  },
-  addZoomSource: {
-    width: ADD_SIZE,
-    height: ADD_SIZE,
-    borderRadius: ADD_SIZE / 2,
-    overflow: 'hidden',
-    backgroundColor: 'transparent',
   },
 });
 

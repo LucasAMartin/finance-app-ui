@@ -7,19 +7,25 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import type { PurchasesPackage } from 'react-native-purchases';
 
 import {
-  NativeRevenueCatPaywall,
-  type RevenueCatPaywallPlan,
-} from '../../modules/glass-card/src/NativeRevenueCatPaywall';
+  NativeStoreKitPaywall,
+  type StoreKitPaywallPlan,
+} from '../../modules/glass-card/src/NativeStoreKitPaywall';
+import type { StoreKitProduct } from '../../modules/glass-card/src/GlassCardModule';
+import {
+  PAYWALL_APP_NAME,
+  PAYWALL_CTA_LABEL,
+  PAYWALL_SUBTITLE,
+  PAYWALL_TITLE,
+} from './config';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  packages?: PurchasesPackage[];
+  products?: StoreKitProduct[];
   isBusy?: boolean;
-  onPurchase?: (packageID: string) => Promise<void> | void;
+  onPurchase?: (productID: string) => Promise<void> | void;
   onRestore?: () => Promise<void> | void;
   embedded?: boolean;
   layoutHeight?: number;
@@ -27,13 +33,12 @@ interface Props {
 
 const PAYWALL_PRESENT_MS = 320;
 
-const FALLBACK_PLANS: RevenueCatPaywallPlan[] = [
+const FALLBACK_PLANS: StoreKitPaywallPlan[] = [
   {
     id: 'pro_weekly',
     title: 'Weekly',
     price: '$0.99',
     cadence: '/week',
-    badge: 'YOUR PLAN',
     detail: 'Subscribe for a Week',
   },
   {
@@ -52,66 +57,50 @@ const FALLBACK_PLANS: RevenueCatPaywallPlan[] = [
   },
 ];
 
-function packageTitle(pkg: PurchasesPackage): string {
-  switch (pkg.packageType) {
-    case 'WEEKLY':
-      return 'Weekly';
-    case 'MONTHLY':
-      return 'Change Plan to Monthly';
-    case 'ANNUAL':
-      return 'Yearly';
-    case 'LIFETIME':
-      return 'Lifetime';
-    default:
-      return pkg.product.title || pkg.identifier;
-  }
-}
-
-function cadenceForPeriod(period: string | null): string {
-  switch (period) {
-    case 'P1W':
-      return '/week';
-    case 'P1M':
-      return '/month';
-    case 'P1Y':
-      return '/year';
-    case 'P6M':
-      return '/6 months';
-    case 'P3M':
-      return '/3 months';
+function cadenceForProduct(product: StoreKitProduct): string {
+  const value = product.subscriptionPeriodValue ?? 1;
+  switch (product.subscriptionPeriodUnit) {
+    case 'day':
+      return value === 1 ? '/day' : `/${value} days`;
+    case 'week':
+      return value === 1 ? '/week' : `/${value} weeks`;
+    case 'month':
+      return value === 1 ? '/month' : `/${value} months`;
+    case 'year':
+      return value === 1 ? '/year' : `/${value} years`;
     default:
       return '';
   }
 }
 
-function detailForPackage(pkg: PurchasesPackage): string {
-  switch (pkg.packageType) {
-    case 'WEEKLY':
+function fallbackDetail(product: StoreKitProduct): string {
+  switch (product.subscriptionPeriodUnit) {
+    case 'week':
       return 'Subscribe for a Week';
-    case 'MONTHLY':
+    case 'month':
       return 'Subscribe for a Month';
-    case 'ANNUAL':
+    case 'year':
       return 'Subscribe for a Year';
     default:
-      return pkg.product.description || 'Subscribe';
+      return 'Subscribe';
   }
 }
 
-function planFromPackage(pkg: PurchasesPackage, index: number): RevenueCatPaywallPlan {
+function planFromProduct(product: StoreKitProduct): StoreKitPaywallPlan {
   return {
-    id: pkg.identifier,
-    title: packageTitle(pkg),
-    price: pkg.product.priceString,
-    cadence: cadenceForPeriod(pkg.product.subscriptionPeriod),
-    badge: index === 0 ? 'YOUR PLAN' : pkg.packageType === 'ANNUAL' ? 'BEST VALUE' : null,
-    detail: detailForPackage(pkg),
+    id: product.id,
+    title: product.displayName || product.id,
+    price: product.displayPrice,
+    cadence: cadenceForProduct(product),
+    badge: null,
+    detail: product.description || fallbackDetail(product),
   };
 }
 
 export function MembershipPaywallPreview({
   visible,
   onClose,
-  packages,
+  products,
   isBusy = false,
   onPurchase,
   onRestore,
@@ -137,16 +126,16 @@ export function MembershipPaywallPreview({
 
   if (!visible) return null;
 
-  const plans = packages?.length
-    ? packages.map(planFromPackage)
+  const plans = products?.length
+    ? products.map(planFromProduct)
     : FALLBACK_PLANS;
 
-  const handleSubscribe = (packageID: string) => {
+  const handleSubscribe = (productID: string) => {
     Haptics.selectionAsync().catch(() => {});
     if (__DEV__) {
-      console.log('[Paywall] Subscribe pressed', { packageID });
+      console.log('[Paywall] Subscribe pressed', { productID });
     }
-    void onPurchase?.(packageID);
+    void onPurchase?.(productID);
   };
 
   const handleRestore = () => {
@@ -161,8 +150,12 @@ export function MembershipPaywallPreview({
         ? [styles.sheetRoot, { height }]
         : [styles.root, { height }, animatedStyle]}
     >
-      <NativeRevenueCatPaywall
+      <NativeStoreKitPaywall
         style={styles.paywall}
+        appName={PAYWALL_APP_NAME}
+        title={PAYWALL_TITLE}
+        subtitle={PAYWALL_SUBTITLE}
+        ctaLabel={PAYWALL_CTA_LABEL}
         plans={plans}
         isBusy={isBusy}
         onClose={onClose}

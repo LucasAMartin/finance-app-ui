@@ -4,18 +4,18 @@ import React, {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
-import Purchases, { LOG_LEVEL, type CustomerInfo, type CustomerInfoUpdateListener } from 'react-native-purchases';
-import type { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
+import { AppState } from 'react-native';
 
+import GlassCardModule, {
+  type StoreKitEntitlementStatus,
+  type StoreKitProduct,
+} from '../../modules/glass-card/src/GlassCardModule';
 import {
-  PAYWALL_ENTITLEMENT_ID,
   PAYWALL_MODE,
-  REVENUECAT_OFFERING_ID,
-  revenueCatApiKeyForPlatform,
-  supportsNativePurchases,
+  STOREKIT_PRODUCT_IDS,
+  supportsStoreKitPurchases,
   type PaywallMode,
 } from './config';
 
@@ -33,186 +33,159 @@ interface PaywallContextValue {
   error: string | null;
   isPremium: boolean;
   isBusy: boolean;
-  customerInfo: CustomerInfo | null;
-  offering: PurchasesOffering | null;
-  purchasePackage: (packageID: string) => Promise<boolean>;
+  products: StoreKitProduct[];
+  entitlementStatus: StoreKitEntitlementStatus | null;
+  purchaseProduct: (productID: string) => Promise<boolean>;
   restorePurchases: () => Promise<boolean>;
-  refreshCustomerInfo: () => Promise<void>;
+  refreshEntitlementStatus: () => Promise<void>;
 }
 
 const PaywallContext = createContext<PaywallContextValue | null>(null);
 
-function customerHasEntitlement(info: CustomerInfo | null): boolean {
-  return Boolean(info?.entitlements.active[PAYWALL_ENTITLEMENT_ID]);
+function isPremiumStatus(status: StoreKitEntitlementStatus | null): boolean {
+  return Boolean(status?.isPremium);
 }
 
-function logPaywallCustomerInfo(info: CustomerInfo | null, label: string) {
-  if (!__DEV__ || !info) return;
-  const activeEntitlements = Object.keys(info.entitlements.active);
-  console.log(
-    `[Paywall] ${label}`,
-    {
-      expectedEntitlement: PAYWALL_ENTITLEMENT_ID,
-      activeEntitlements,
-      activeSubscriptions: info.activeSubscriptions,
-      hasExpectedEntitlement: activeEntitlements.includes(PAYWALL_ENTITLEMENT_ID),
-    },
-  );
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 export function PaywallProvider({ children }: { children: React.ReactNode }) {
-  const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
+  const [entitlementStatus, setEntitlementStatus] = useState<StoreKitEntitlementStatus | null>(null);
   const [status, setStatus] = useState<PaywallStatus>(() => {
     if (PAYWALL_MODE === 'off') return 'off';
     return 'configuring';
   });
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
-  const [offering, setOffering] = useState<PurchasesOffering | null>(null);
-  const configuredRef = useRef(false);
+  const [products, setProducts] = useState<StoreKitProduct[]>([]);
 
-  const refreshCustomerInfo = useCallback(async () => {
-    if (PAYWALL_MODE !== 'live' || !configuredRef.current) return;
-    const info = await Purchases.getCustomerInfo();
-    logPaywallCustomerInfo(info, 'refreshed customer info');
-    setCustomerInfo(info);
+  const refreshEntitlementStatus = useCallback(async () => {
+    if (PAYWALL_MODE !== 'live' || !supportsStoreKitPurchases()) return;
+    const nextStatus = await GlassCardModule.getStoreKitEntitlementStatus(STOREKIT_PRODUCT_IDS);
+    setEntitlementStatus(nextStatus);
   }, []);
 
   useEffect(() => {
     if (PAYWALL_MODE !== 'live') return undefined;
 
     let cancelled = false;
-    let listener: CustomerInfoUpdateListener | null = null;
 
-    async function configureRevenueCat() {
-      if (!supportsNativePurchases()) {
+    async function configureStoreKit() {
+      if (!supportsStoreKitPurchases()) {
         setStatus('unsupported');
-        setError('Native subscriptions are available in iOS and Android builds.');
+        setError('StoreKit subscriptions are available in iOS builds.');
         return;
       }
 
-      const apiKey = revenueCatApiKeyForPlatform();
-      if (!apiKey) {
+      if (STOREKIT_PRODUCT_IDS.length === 0) {
         setStatus('missing-config');
-        setError('Add your RevenueCat API key before enabling live paywall mode.');
+        setError('Add StoreKit product IDs before enabling live paywall mode.');
         return;
       }
 
       try {
         setStatus('configuring');
         setError(null);
-        await Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.INFO);
-        const alreadyConfigured = await Purchases.isConfigured().catch(() => false);
-        if (!alreadyConfigured) {
-          Purchases.configure({ apiKey });
-        }
-        configuredRef.current = true;
 
-        const [info, offerings] = await Promise.all([
-          Purchases.getCustomerInfo(),
-          Purchases.getOfferings(),
+        const [nextProducts, nextEntitlementStatus] = await Promise.all([
+          GlassCardModule.getStoreKitProducts(STOREKIT_PRODUCT_IDS),
+          GlassCardModule.getStoreKitEntitlementStatus(STOREKIT_PRODUCT_IDS),
         ]);
         if (cancelled) return;
 
-        const selectedOffering = offerings.all[REVENUECAT_OFFERING_ID] ?? null;
-        if (!selectedOffering) {
+        if (nextProducts.length === 0) {
           setStatus('error');
-          setError(`RevenueCat offering "${REVENUECAT_OFFERING_ID}" was not found.`);
+          setError(`StoreKit returned no products for: ${STOREKIT_PRODUCT_IDS.join(', ')}`);
           return;
         }
 
-        setCustomerInfo(info);
-        logPaywallCustomerInfo(info, 'initial customer info');
-        setOffering(selectedOffering);
-        listener = (nextInfo: CustomerInfo) => {
-          logPaywallCustomerInfo(nextInfo, 'customer info listener update');
-          setCustomerInfo(nextInfo);
-        };
-        Purchases.addCustomerInfoUpdateListener(listener);
+        setProducts(nextProducts);
+        setEntitlementStatus(nextEntitlementStatus);
         setStatus('ready');
       } catch (nextError) {
         if (cancelled) return;
-        const message = nextError instanceof Error ? nextError.message : 'RevenueCat setup failed.';
-        setError(message);
+        setError(errorMessage(nextError, 'StoreKit setup failed.'));
         setStatus('error');
       }
     }
 
-    configureRevenueCat();
+    configureStoreKit();
 
     return () => {
       cancelled = true;
-      if (listener) Purchases.removeCustomerInfoUpdateListener(listener);
     };
   }, []);
 
+  useEffect(() => {
+    if (PAYWALL_MODE !== 'live' || !supportsStoreKitPurchases()) return undefined;
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        refreshEntitlementStatus().catch((nextError) => {
+          setError(errorMessage(nextError, 'Could not refresh StoreKit subscription status.'));
+        });
+      }
+    });
+
+    return () => subscription.remove();
+  }, [refreshEntitlementStatus]);
+
   const restorePurchases = useCallback(async () => {
     if (PAYWALL_MODE === 'off') return true;
-    if (!configuredRef.current) return false;
+    if (!supportsStoreKitPurchases()) return false;
 
     setIsBusy(true);
     try {
-      const info = await Purchases.restorePurchases();
-      logPaywallCustomerInfo(info, 'restored customer info');
-      setCustomerInfo(info);
-      return customerHasEntitlement(info);
+      const nextStatus = await GlassCardModule.restoreStoreKitPurchases(STOREKIT_PRODUCT_IDS);
+      setEntitlementStatus(nextStatus);
+      return isPremiumStatus(nextStatus);
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : 'Could not restore purchases.';
-      setError(message);
+      setError(errorMessage(nextError, 'Could not restore purchases.'));
       return false;
     } finally {
       setIsBusy(false);
     }
   }, []);
 
-  const purchasePackage = useCallback(async (packageID: string) => {
+  const purchaseProduct = useCallback(async (productID: string) => {
     if (PAYWALL_MODE === 'off') return true;
-    if (!configuredRef.current || !offering) return false;
-
-    const selectedPackage: PurchasesPackage | undefined = offering.availablePackages.find(
-      pkg => pkg.identifier === packageID || pkg.product.identifier === packageID,
-    );
-
-    if (!selectedPackage) {
-      setError('That subscription option is no longer available.');
-      return false;
-    }
+    if (!supportsStoreKitPurchases()) return false;
 
     setIsBusy(true);
     try {
-      const result = await Purchases.purchasePackage(selectedPackage);
-      logPaywallCustomerInfo(result.customerInfo, 'purchased customer info');
-      setCustomerInfo(result.customerInfo);
-      return customerHasEntitlement(result.customerInfo);
-    } catch (nextError) {
-      const maybePurchaseError = nextError as { userCancelled?: boolean; message?: string };
-      if (!maybePurchaseError.userCancelled) {
-        setError(maybePurchaseError.message || 'Could not complete purchase.');
+      const nextStatus = await GlassCardModule.purchaseStoreKitProduct(productID, STOREKIT_PRODUCT_IDS);
+      setEntitlementStatus(nextStatus);
+      if (nextStatus.pending) {
+        setError('The purchase is pending approval.');
       }
+      return isPremiumStatus(nextStatus);
+    } catch (nextError) {
+      setError(errorMessage(nextError, 'Could not complete purchase.'));
       return false;
     } finally {
       setIsBusy(false);
     }
-  }, [offering]);
+  }, []);
 
   const value = useMemo<PaywallContextValue>(() => ({
     mode: PAYWALL_MODE,
     status,
     error,
     isBusy,
-    customerInfo,
-    offering,
-    isPremium: PAYWALL_MODE === 'off' || customerHasEntitlement(customerInfo),
-    purchasePackage,
+    products,
+    entitlementStatus,
+    isPremium: PAYWALL_MODE === 'off' || isPremiumStatus(entitlementStatus),
+    purchaseProduct,
     restorePurchases,
-    refreshCustomerInfo,
+    refreshEntitlementStatus,
   }), [
-    customerInfo,
+    entitlementStatus,
     error,
     isBusy,
-    offering,
-    purchasePackage,
-    refreshCustomerInfo,
+    products,
+    purchaseProduct,
+    refreshEntitlementStatus,
     restorePurchases,
     status,
   ]);

@@ -10,6 +10,7 @@ import {
   Dimensions,
   Pressable,
   Easing,
+  PanResponder,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -91,9 +92,10 @@ type Screen = 'home' | 'insights' | 'insightDetail' | 'activity' | 'budget';
 patchTextWithInter();
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const DRAWER_WIDTH = Math.min(300, SCREEN_W * 0.82);
+const DRAWER_WIDTH = Math.min(280, SCREEN_W * 0.82);
 
 const ALL_SCREENS: Screen[] = ['home', 'insights', 'insightDetail', 'budget', 'activity'];
+const SIDEBAR_SWIPE_SCREENS: Screen[] = ['home', 'insights', 'budget', 'activity'];
 
 const FADE_DURATION = 180;
 
@@ -197,6 +199,7 @@ export function DashboardApp() {
   const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
   const [iosStyleOnboardingPreviewOpen, setIOSStyleOnboardingPreviewOpen] = useState(false);
   const [paywallPreviewOpen, setPaywallPreviewOpen] = useState(false);
+  const [paywallGateOpen, setPaywallGateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
   const [sharingSettingsOpen, setSharingSettingsOpen] = useState(false);
@@ -1061,27 +1064,110 @@ export function DashboardApp() {
   }).current;
 
   const drawerAnim = useRef(new Animated.Value(0)).current;
+  const drawerOpenRef = useRef(false);
+  const sideMenuPanStartsExpandedRef = useRef(false);
+  const sideMenuPanOffsetRef = useRef(0);
+  const paywallOpen = paywallPreviewOpen || paywallGateOpen;
+  const sidebarSwipeOpenEnabled = SIDEBAR_SWIPE_SCREENS.includes(screen)
+    && !goalsOpen
+    && !settingsOpen
+    && !profileOpen
+    && !notificationSettingsOpen
+    && !widgetsSetupOpen
+    && !sharingSettingsOpen
+    && !themeOpen
+    && !showOnboarding
+    && !paywallOpen
+    && !iosStyleOnboardingPreviewOpen
+    && !showIncomePrompt;
 
   // Start both drawer animations immediately on press — before setState.
   const openDrawer = useCallback(() => {
+    if (paywallOpen) return;
+    drawerOpenRef.current = true;
     setDrawerOpen(true);
     Animated.timing(drawerAnim, {
       toValue: 1,
-      duration: 220,
+      duration: 200,
       useNativeDriver: true,
       easing: Easing.out(Easing.exp),
-    }).start();
-  }, [drawerAnim]);
+    }).start(({ finished }) => {
+      if (finished) {
+        sideMenuPanStartsExpandedRef.current = true;
+        sideMenuPanOffsetRef.current = DRAWER_WIDTH;
+      }
+    });
+  }, [drawerAnim, paywallOpen]);
 
   const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
     Animated.timing(drawerAnim, {
       toValue: 0,
-      duration: 180,
+      duration: 200,
       useNativeDriver: true,
-      easing: Easing.in(Easing.cubic),
-    }).start();
+      easing: Easing.out(Easing.cubic),
+    }).start(({ finished }) => {
+      if (finished) {
+        drawerOpenRef.current = false;
+        sideMenuPanStartsExpandedRef.current = false;
+        sideMenuPanOffsetRef.current = 0;
+        setDrawerOpen(false);
+      }
+    });
   }, [drawerAnim]);
+
+  useEffect(() => {
+    if (paywallOpen && drawerOpenRef.current) {
+      closeDrawer();
+    }
+  }, [closeDrawer, paywallOpen]);
+
+  const sideMenuPanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => {
+      const isHorizontalSwipe = Math.abs(gesture.dx) > Math.abs(gesture.dy);
+      if (!isHorizontalSwipe || Math.abs(gesture.dx) < 6) {
+        return false;
+      }
+
+      if (gesture.dx < 0) return drawerOpenRef.current;
+      return sidebarSwipeOpenEnabled;
+    },
+    onPanResponderGrant: () => {
+      const startsExpanded = drawerOpenRef.current;
+      sideMenuPanStartsExpandedRef.current = startsExpanded;
+      sideMenuPanOffsetRef.current = startsExpanded ? DRAWER_WIDTH : 0;
+      drawerAnim.stopAnimation((value) => {
+        const clampedValue = Math.min(Math.max(value, 0), 1);
+        sideMenuPanStartsExpandedRef.current = drawerOpenRef.current || clampedValue > 0.5;
+        sideMenuPanOffsetRef.current = clampedValue * DRAWER_WIDTH;
+        drawerAnim.setValue(clampedValue);
+        if (!drawerOpenRef.current) {
+          drawerOpenRef.current = true;
+          setDrawerOpen(true);
+        }
+      });
+    },
+    onPanResponderMove: (_event, gesture) => {
+      const translation = gesture.dx + (sideMenuPanStartsExpandedRef.current ? DRAWER_WIDTH : 0);
+      const xOffset = Math.min(Math.max(translation, 0), DRAWER_WIDTH);
+      sideMenuPanOffsetRef.current = xOffset;
+      drawerAnim.setValue(xOffset / DRAWER_WIDTH);
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      const projectedOffset = sideMenuPanOffsetRef.current + (gesture.vx * 180);
+      if (projectedOffset > DRAWER_WIDTH / 2) {
+        openDrawer();
+      } else {
+        closeDrawer();
+      }
+    },
+    onPanResponderTerminate: () => {
+      if (sideMenuPanOffsetRef.current > DRAWER_WIDTH / 2) {
+        openDrawer();
+      } else {
+        closeDrawer();
+      }
+    },
+  }), [closeDrawer, drawerAnim, openDrawer, sidebarSwipeOpenEnabled]);
 
   // Cross-fade between screens. Starts before setState — zero perceived delay.
   const navigate = useCallback((s: Screen) => {
@@ -1415,8 +1501,9 @@ export function DashboardApp() {
       onOpenDrawer={openDrawer}
       onViewActivity={navigateToActivity}
       onOpenInsight={handleInsightTarget}
+      onRefreshSync={handleManualCloudRefresh}
     />
-  ), [handleInsightTarget, navigateToActivity, openDrawer, screen, theme]);
+  ), [handleInsightTarget, handleManualCloudRefresh, navigateToActivity, openDrawer, screen, theme]);
 
   const insightDetailScreen = useMemo(() => (
     <InsightDetailScreen
@@ -1446,15 +1533,20 @@ export function DashboardApp() {
       theme={theme}
       onOpenDrawer={openDrawer}
       onOpenIncome={openBudgetIncome}
+      onRefreshSync={handleManualCloudRefresh}
       onKeypadOpenChange={handleKeypadOpenChange}
       pendingEditCategoryId={pendingBudgetEditCategoryId}
       onPendingEditHandled={() => setPendingBudgetEditCategoryId(undefined)}
     />
-  ), [handleKeypadOpenChange, openBudgetIncome, openDrawer, pendingBudgetEditCategoryId, theme]);
+  ), [handleKeypadOpenChange, handleManualCloudRefresh, openBudgetIncome, openDrawer, pendingBudgetEditCategoryId, theme]);
 
-  const backdropOpacity = drawerAnim.interpolate({
-    inputRange:  [0, 1],
-    outputRange: [0, 0.5],
+  const sideMenuTranslateX = drawerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, DRAWER_WIDTH],
+  });
+  const sideMenuOverlayOpacity = drawerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
   });
 
   return (
@@ -1466,21 +1558,50 @@ export function DashboardApp() {
           behind a react-native-screens native view. */}
       <BottomSheetModalProvider>
       <View style={[styles.root, { backgroundColor: theme.bg }]}>
-        <ImageBackground
-          key={wallpaper.id}
-          source={wallpaper.source}
-          defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
-          fadeDuration={0}
-          onLoadEnd={() => setRootWallpaperReady(true)}
-          onError={() => setRootWallpaperReady(true)}
-          resizeMode="cover"
-          style={StyleSheet.absoluteFill}
-        />
-
         <View
-          pointerEvents={rootWallpaperReady ? 'auto' : 'none'}
-          style={[StyleSheet.absoluteFill, { opacity: rootWallpaperReady ? 1 : 0 }]}
+          style={[StyleSheet.absoluteFill, { zIndex: 0 }]}
+          pointerEvents={drawerOpen ? 'box-none' : 'none'}
         >
+          <Drawer
+            theme={theme}
+            width={DRAWER_WIDTH}
+            progress={drawerAnim}
+            activeId={goalsOpen ? 'goals' : screen}
+            onNavigate={handleDrawerNav}
+            onClose={closeDrawer}
+            currentUserId={session.currentUserId}
+            ledgerMembers={ledgerMembers}
+            onOpenProfile={openProfile}
+          />
+        </View>
+
+        <Animated.View
+          {...sideMenuPanResponder.panHandlers}
+          style={[
+            StyleSheet.absoluteFill,
+            styles.sideMenuContent,
+            drawerOpen ? styles.sideMenuContentOpen : null,
+            {
+              backgroundColor: theme.bg,
+              transform: [{ translateX: sideMenuTranslateX }],
+            },
+          ]}
+        >
+          <ImageBackground
+            key={wallpaper.id}
+            source={wallpaper.source}
+            defaultSource={typeof wallpaper.source === 'number' ? wallpaper.source : undefined}
+            fadeDuration={0}
+            onLoadEnd={() => setRootWallpaperReady(true)}
+            onError={() => setRootWallpaperReady(true)}
+            resizeMode="cover"
+            style={StyleSheet.absoluteFill}
+          />
+
+          <View
+            pointerEvents={rootWallpaperReady ? 'auto' : 'none'}
+            style={[StyleSheet.absoluteFill, { opacity: rootWallpaperReady ? 1 : 0 }]}
+          >
         <AnimatedScreen opacity={OP.home} active={screen === 'home'}>
           {homeScreen}
         </AnimatedScreen>
@@ -1519,34 +1640,22 @@ export function DashboardApp() {
           />
         </Animated.View>
 
-        {/* ─── Drawer backdrop ──────────────────────────────── */}
+        {/* Matches CustomSideMenu's tappable content overlay while expanded. */}
         <Animated.View
           pointerEvents={drawerOpen ? 'auto' : 'none'}
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: '#000', opacity: backdropOpacity, zIndex: 50 },
+            {
+              backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+              borderColor: dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)',
+              borderWidth: 1,
+              opacity: sideMenuOverlayOpacity,
+              zIndex: 50,
+            },
           ]}
         >
           <Pressable style={{ flex: 1 }} onPress={closeDrawer} />
         </Animated.View>
-
-        {/* ─── Drawer ───────────────────────────────────────── */}
-        <View
-          style={[StyleSheet.absoluteFill, { zIndex: 60 }]}
-          pointerEvents={drawerOpen ? 'box-none' : 'none'}
-        >
-          <Drawer
-            theme={theme}
-            width={DRAWER_WIDTH}
-            progress={drawerAnim}
-            activeId={goalsOpen ? 'goals' : screen}
-            onNavigate={handleDrawerNav}
-            onClose={closeDrawer}
-            currentUserId={session.currentUserId}
-            ledgerMembers={ledgerMembers}
-            onOpenProfile={openProfile}
-          />
-        </View>
 
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
         <BillSheetMount ref={billSheetRef} />
@@ -1570,6 +1679,7 @@ export function DashboardApp() {
           visible={goalsOpen}
           contributeRequestToken={goalContributeToken}
           onClose={closeGoals}
+          onRefreshSync={handleManualCloudRefresh}
           onEditGoalCategory={(catId) => {
             closeGoals();
             setPendingBudgetEditCategoryId(catId);
@@ -1674,9 +1784,12 @@ export function DashboardApp() {
           />
         ) : null}
 
-        {!showOnboarding && !paywallPreviewOpen && !iosStyleOnboardingPreviewOpen && <PaywallGate />}
+        {!showOnboarding && !paywallPreviewOpen && !iosStyleOnboardingPreviewOpen && (
+          <PaywallGate onOpenChange={setPaywallGateOpen} />
+        )}
         <AppLockGate />
         </View>
+        </Animated.View>
       </View>
       </BottomSheetModalProvider>
     </>
@@ -1805,4 +1918,14 @@ function shortDateTime(value?: string): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  sideMenuContent: {
+    overflow: 'hidden',
+  },
+  sideMenuContentOpen: {
+    borderRadius: 45,
+    shadowColor: '#000',
+    shadowOffset: { width: -10, height: 0 },
+    shadowOpacity: 0.06,
+    shadowRadius: 5,
+  },
 });

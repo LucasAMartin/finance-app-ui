@@ -10,22 +10,30 @@ function normalizeMode(value: string | undefined): PaywallMode {
 }
 
 export const PAYWALL_MODE = normalizeMode(rawMode);
-export const PAYWALL_ENTITLEMENT_ID =
-  process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID?.trim() || 'pro';
-export const REVENUECAT_OFFERING_ID =
-  process.env.EXPO_PUBLIC_REVENUECAT_OFFERING_ID?.trim() || 'default';
 
-export const REVENUECAT_IOS_API_KEY =
-  process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY?.trim() || '';
-export const REVENUECAT_ANDROID_API_KEY =
-  process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY?.trim() || '';
+const DEFAULT_STOREKIT_PRODUCT_IDS = ['pro_weekly', 'pro_monthly', 'pro_yearly'];
 
-export function revenueCatApiKeyForPlatform(): string {
-  if (Platform.OS === 'ios') return REVENUECAT_IOS_API_KEY;
-  if (Platform.OS === 'android') return REVENUECAT_ANDROID_API_KEY;
-  return '';
+function productIDsFromEnv(value: string | undefined): string[] {
+  const ids = value
+    ?.split(',')
+    .map(id => id.trim())
+    .filter(Boolean);
+
+  return ids?.length ? ids : DEFAULT_STOREKIT_PRODUCT_IDS;
 }
 
-export function supportsNativePurchases(): boolean {
-  return Platform.OS === 'ios' || Platform.OS === 'android';
+export const STOREKIT_PRODUCT_IDS = productIDsFromEnv(process.env.EXPO_PUBLIC_STOREKIT_PRODUCT_IDS);
+
+export const PAYWALL_APP_NAME =
+  process.env.EXPO_PUBLIC_PAYWALL_APP_NAME?.trim() || 'App Name';
+export const PAYWALL_TITLE =
+  process.env.EXPO_PUBLIC_PAYWALL_TITLE?.trim() || 'Membership';
+export const PAYWALL_SUBTITLE =
+  process.env.EXPO_PUBLIC_PAYWALL_SUBTITLE?.trim()
+  || 'Lorem Ipsum is simply dummy text\nof the printing and typesetting industry.';
+export const PAYWALL_CTA_LABEL =
+  process.env.EXPO_PUBLIC_PAYWALL_CTA_LABEL?.trim() || 'Start 30 Day Free Trial';
+
+export function supportsStoreKitPurchases(): boolean {
+  return Platform.OS === 'ios';
 }

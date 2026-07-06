@@ -16,6 +16,8 @@ import {
   Animated,
   Dimensions,
   Easing,
+  RefreshControl,
+  InteractionManager,
 } from 'react-native';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
@@ -37,6 +39,7 @@ import { SheetPrimaryButton } from '../components/shared';
 import { BillSheetMount, type BillSheetHandle } from '../components/sheetMounts';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
+import { Skeleton } from '../components/Skeleton';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
@@ -96,6 +99,7 @@ interface Props {
   theme: Theme;
   onOpenDrawer: () => void;
   onOpenIncome?: (ref: View) => void;
+  onRefreshSync?: () => Promise<void>;
   // Fired when the inline amount keypad opens/closes so the app can hide the tab bar.
   onKeypadOpenChange?: (open: boolean) => void;
   // When set, auto-opens the category editor for this category ID on mount/change.
@@ -1134,7 +1138,7 @@ function EditableBudgetAmount({ value, active, color, accentColor, underlineColo
   );
 }
 
-export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenChange, pendingEditCategoryId, onPendingEditHandled }: Props) {
+export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync, onKeypadOpenChange, pendingEditCategoryId, onPendingEditHandled }: Props) {
   const { transactionsRepo, incomeRepo, budgetsRepo, categoriesRepo, recurringRulesRepo, sessionRepo } = useRepositories();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [repoVersion, setRepoVersion] = useState(0);
@@ -1186,6 +1190,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
   const shadow = DARK_TEXT_SHADOW;
   const scrim = makeScrim(theme.dark);
   const floorColor = deriveFloor(wallpaperFloorBase, theme.dark);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // ── Scroll-driven sticky pin ──────────────────────────────────
   // The allocation card stays in the scroll layout, then translates by the
@@ -1222,6 +1228,45 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
     const y = e.nativeEvent.contentOffset.y;
     scrollOffsetRef.current = y;
   }, []);
+
+  useEffect(() => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setLoading(false);
+    };
+    const task = InteractionManager.runAfterInteractions(finish);
+    const fallback = setTimeout(finish, 450);
+    return () => {
+      settled = true;
+      task.cancel();
+      clearTimeout(fallback);
+    };
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setLoading(true);
+    void (async () => {
+      try {
+        await onRefreshSync?.();
+      } finally {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          setLoading(false);
+          setRefreshing(false);
+        };
+        const task = InteractionManager.runAfterInteractions(finish);
+        setTimeout(() => {
+          task.cancel();
+          finish();
+        }, 450);
+      }
+    })();
+  }, [onRefreshSync]);
 
   // ── Budget state ──────────────────────────────────────────────
   const [income, setIncome] = useState(initialIncome);
@@ -2109,6 +2154,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
               [{ nativeEvent: { contentOffset: { y: scrollY } } }],
               { useNativeDriver: true, listener: handleScroll },
             )}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                progressViewOffset={insets.top + 44}
+                tintColor={pWallpaper.textSec}
+                colors={[theme.accent.dot]}
+                progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
+              />
+            }
           >
 
             <View
@@ -2118,6 +2173,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                 updateAllocStickyY();
               }}
             >
+              {loading ? (
+                <BudgetSkeleton dark={theme.dark} />
+              ) : (
+              <>
               {/* Budget hero — open on the wallpaper, rhymes with Home */}
               <View
                 style={styles.hero}
@@ -2534,6 +2593,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
                   </SectionCard>
                 );
               })}
+              </>
+              )}
 
             </View>
           </AnimatedGHScrollView>
@@ -2612,6 +2673,66 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onKeypadOpenCh
 
     </View>
     </DraftContext.Provider>
+  );
+}
+
+function BudgetSkeleton({ dark }: { dark: boolean }) {
+  return (
+    <>
+      <View style={styles.hero}>
+        <View style={styles.heroTopRow}>
+          <Skeleton width={190} height={20} radius={5} onMedia={dark} />
+          <Skeleton width={108} height={18} radius={5} onMedia={dark} />
+        </View>
+      </View>
+
+      <SectionCard dark={dark}>
+        <Skeleton width="100%" height={7} radius={4} onMedia={dark} />
+        <View style={styles.compactLegend}>
+          {[0, 1, 2].map(index => (
+            <View key={index} style={styles.compactLegendItem}>
+              <Skeleton width={6} height={6} radius={3} onMedia={dark} />
+              <Skeleton width={index === 1 ? 42 : 52} height={10} radius={4} onMedia={dark} />
+              <Skeleton width={26} height={13} radius={4} onMedia={dark} />
+            </View>
+          ))}
+        </View>
+      </SectionCard>
+
+      {[0, 1, 2].map(groupIndex => (
+        <SectionCard key={groupIndex} dark={dark}>
+          <View style={styles.cardHead}>
+            <View style={{ flex: 1, gap: SPACE.sm }}>
+              <View style={styles.groupTitleRow}>
+                <Skeleton width={9} height={9} radius={5} onMedia={dark} />
+                <Skeleton width={groupIndex === 1 ? 72 : 64} height={20} radius={5} onMedia={dark} />
+              </View>
+              <Skeleton width={groupIndex === 2 ? 148 : 176} height={12} radius={4} onMedia={dark} />
+            </View>
+            <Skeleton width={74} height={18} radius={5} onMedia={dark} />
+          </View>
+
+          {[0, 1, 2].map(rowIndex => (
+            <View
+              key={rowIndex}
+              style={[
+                styles.editRow,
+                rowIndex < 2 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: dark ? MEDIA.hairline : ONMEDIA_BORDER_LIGHT },
+              ]}
+            >
+              <Skeleton width={32} height={32} radius={16} onMedia={dark} />
+              <View style={{ flex: 1, gap: SPACE.sm }}>
+                <Skeleton width={rowIndex === 1 ? '44%' : '58%'} height={14} radius={4} onMedia={dark} />
+                {groupIndex === 2 && rowIndex === 0 ? (
+                  <Skeleton width="100%" height={4} radius={2} onMedia={dark} />
+                ) : null}
+              </View>
+              <Skeleton width={58} height={16} radius={4} onMedia={dark} />
+            </View>
+          ))}
+        </SectionCard>
+      ))}
+    </>
   );
 }
 

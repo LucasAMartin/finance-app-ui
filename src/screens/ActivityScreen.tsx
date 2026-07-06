@@ -728,6 +728,33 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
   const latestActivityQueryKeyRef = useRef(activityQueryKey);
   latestActivityQueryKeyRef.current = activityQueryKey;
   const [settledActivityQueryKey, setSettledActivityQueryKey] = useState(activityQueryKey);
+  const loadingSettleRef = useRef<{
+    task?: { cancel: () => void };
+    fallback?: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  const clearLoadingSettle = useCallback(() => {
+    loadingSettleRef.current?.task?.cancel();
+    if (loadingSettleRef.current?.fallback) clearTimeout(loadingSettleRef.current.fallback);
+    loadingSettleRef.current = null;
+  }, []);
+
+  const finishLoadingAfterSettle = useCallback((loadKey: string, stopRefresh = false) => {
+    clearLoadingSettle();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (loadKey === latestActivityQueryKeyRef.current) setLoading(false);
+      if (stopRefresh) setRefreshing(false);
+    };
+    const task = InteractionManager.runAfterInteractions(finish);
+    const fallback = setTimeout(() => {
+      task.cancel();
+      finish();
+    }, 450);
+    loadingSettleRef.current = { task, fallback };
+  }, [clearLoadingSettle]);
 
   useLayoutEffect(() => {
     if (previousActivityQueryKeyRef.current === activityQueryKey) return;
@@ -757,9 +784,9 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
       setSettledActivityQueryKey(loadKey);
     } finally {
       const currentLoad = loadKey === latestActivityQueryKeyRef.current;
-      if (showSkeleton && currentLoad) setLoading(false);
+      if (showSkeleton && currentLoad) finishLoadingAfterSettle(loadKey);
     }
-  }, [activityQuery, activityQueryKey, transactionScope, transactionsRepo]);
+  }, [activityQuery, activityQueryKey, finishLoadingAfterSettle, transactionScope, transactionsRepo]);
 
   useEffect(() => {
     if (settledActivityQueryKey !== latestActivityQueryKeyRef.current) return;
@@ -777,6 +804,8 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
     loadFirstActivityPage(true);
   }, [loadFirstActivityPage, repoVersion]);
 
+  useEffect(() => clearLoadingSettle, [clearLoadingSettle]);
+
   const loadMoreActivity = useCallback(() => {
     if (loading || loadingMore || !nextCursor || selectedDay !== null) return;
     setLoadingMore(true);
@@ -791,15 +820,17 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    setLoading(true);
     void (async () => {
+      const loadKey = latestActivityQueryKeyRef.current;
       try {
         await onRefreshSync?.();
         loadFirstActivityPage(false);
       } finally {
-        setRefreshing(false);
+        finishLoadingAfterSettle(loadKey, true);
       }
     })();
-  }, [loadFirstActivityPage, onRefreshSync]);
+  }, [finishLoadingAfterSettle, loadFirstActivityPage, onRefreshSync]);
 
   const grouped = useMemo(() => {
     // Merge internal swipe-delete pending ID with the external App-level signal so
@@ -1106,6 +1137,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
+              progressViewOffset={insets.top + 44}
               tintColor={pWallpaper.textSec}
               colors={[theme.accent.dot]}
               progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
@@ -1214,7 +1246,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
 
             {loading ? (
               <SectionCard dark={theme.dark}>
-                <TxListSkeleton dark={theme.dark} />
+                <TxListSkeleton dark={theme.dark} rows={activityRows} />
               </SectionCard>
             ) : loadError ? (
               <SectionCard dark={theme.dark}>
@@ -3054,16 +3086,23 @@ function SwipeHint({ p }: { p: WallpaperP }) {
 // the real list will fill. Swap the simulated `loading` timer for the async
 // data source when the backend lands.
 
-function TxListSkeleton({ dark }: { dark: boolean }) {
+function TxListSkeleton({ dark, rows }: { dark: boolean; rows: Transaction[] }) {
+  const groupCounts = rows.length > 0
+    ? Object.values(rows.reduce<Record<string, number>>((acc, tx) => {
+        acc[tx.fullDate] = (acc[tx.fullDate] ?? 0) + 1;
+        return acc;
+      }, {})).slice(0, 4)
+    : [3, 3];
+
   return (
     <View>
-      {[0, 1].map(g => (
+      {groupCounts.map((count, g) => (
         <View key={g} style={{ marginBottom: 16 }}>
           <View style={[S.dayHeader, { marginBottom: 12 }]}>
             <Skeleton width={64} height={11} radius={4} onMedia={dark} />
             <Skeleton width={52} height={11} radius={4} onMedia={dark} />
           </View>
-          {[0, 1, 2].map(r => (
+          {Array.from({ length: Math.max(1, Math.min(count, 5)) }).map((_, r) => (
             <View key={r} style={S.txRow}>
               <Skeleton width={36} height={36} radius={18} onMedia={dark} />
               <View style={{ flex: 1, gap: 8 }}>

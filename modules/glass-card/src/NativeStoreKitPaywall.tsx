@@ -3,7 +3,7 @@ import { Platform, StyleProp, StyleSheet, View, ViewProps, ViewStyle } from 'rea
 import { requireNativeView } from 'expo';
 import { Host } from '@expo/ui';
 
-export type RevenueCatPaywallPlan = {
+export type StoreKitPaywallPlan = {
   id: string;
   title: string;
   price: string;
@@ -12,10 +12,11 @@ export type RevenueCatPaywallPlan = {
   detail: string;
 };
 
-type NativeRevenueCatPaywallNativeProps = ViewProps & {
+type NativeStoreKitPaywallNativeProps = ViewProps & {
   appName?: string;
   title?: string;
   subtitle?: string;
+  ctaLabel?: string;
   plansJSON?: string;
   isBusy?: boolean;
   onClose?: () => void;
@@ -23,17 +24,16 @@ type NativeRevenueCatPaywallNativeProps = ViewProps & {
   onRestore?: () => void;
 };
 
-const NativeRevenueCatPaywallView = Platform.OS === 'ios'
-  ? requireNativeView<NativeRevenueCatPaywallNativeProps>('GlassCard', 'NativeRevenueCatPaywallView')
+const NativeStoreKitPaywallView = Platform.OS === 'ios'
+  ? requireNativeView<NativeStoreKitPaywallNativeProps>('GlassCard', 'NativeStoreKitPaywallView')
   : null;
 
-const FALLBACK_PLANS: RevenueCatPaywallPlan[] = [
+const FALLBACK_PLANS: StoreKitPaywallPlan[] = [
   {
     id: 'pro_weekly',
     title: 'Weekly',
     price: '$0.99',
     cadence: '/week',
-    badge: 'YOUR PLAN',
     detail: 'Subscribe for a Week',
   },
   {
@@ -52,11 +52,12 @@ const FALLBACK_PLANS: RevenueCatPaywallPlan[] = [
   },
 ];
 
-export function NativeRevenueCatPaywall({
+export function NativeStoreKitPaywall({
   style,
   appName = 'App Name',
   title = 'Membership',
   subtitle = 'Lorem Ipsum is simply dummy text\nof the printing and typesetting industry.',
+  ctaLabel = 'Start 30 Day Free Trial',
   plans = FALLBACK_PLANS,
   isBusy = false,
   onClose,
@@ -67,26 +68,28 @@ export function NativeRevenueCatPaywall({
   appName?: string;
   title?: string;
   subtitle?: string;
-  plans?: RevenueCatPaywallPlan[];
+  ctaLabel?: string;
+  plans?: StoreKitPaywallPlan[];
   isBusy?: boolean;
   onClose?: () => void;
-  onSubscribe?: (packageID: string) => void;
+  onSubscribe?: (productID: string) => void;
   onRestore?: () => void;
 }) {
   const plansJSON = useMemo(() => JSON.stringify(plans), [plans]);
 
-  if (!NativeRevenueCatPaywallView) {
+  if (!NativeStoreKitPaywallView) {
     return <View style={[style, styles.fallback]} />;
   }
 
   return (
     <View collapsable={false} style={[style, styles.root]}>
       <Host colorScheme="dark" ignoreSafeArea="all" style={styles.host}>
-        <NativeRevenueCatPaywallView
+        <NativeStoreKitPaywallView
           style={styles.nativeFill}
           appName={appName}
           title={title}
           subtitle={subtitle}
+          ctaLabel={ctaLabel}
           plansJSON={plansJSON}
           isBusy={isBusy}
           onClose={onClose}

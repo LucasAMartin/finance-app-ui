@@ -910,6 +910,7 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           scrollEventThrottle={16}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
+              progressViewOffset={insets.top + 44}
               tintColor={pWallpaper.textSec} colors={[theme.accent.dot]}
               progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'} />
           }
@@ -1009,11 +1010,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
           <View style={styles.sectionStack}>
 
             {/* Spending */}
-            {SUPPORTS_GLASS && !loading ? (
+            {SUPPORTS_GLASS ? (
               <NativeSpendingSection
                 theme={theme}
                 p={p}
-                loading={false}
+                loading={loading}
                 groups={visibleSpendGroups}
                 income={income}
               />
@@ -1031,11 +1032,11 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             )}
 
             {/* Upcoming */}
-            {SUPPORTS_GLASS && !loading ? (
+            {SUPPORTS_GLASS ? (
               <NativeUpcomingSection
                 dark={theme.dark}
                 p={p}
-                loading={false}
+                loading={loading}
                 bills={nativeUpcomingBills}
               />
             ) : (
@@ -1107,12 +1108,12 @@ export function HomeScreen({ theme, onViewActivity, onOpenDrawer, onAddVoice, on
             )}
 
             {/* Activity */}
-            {SUPPORTS_GLASS && !loading ? (
+            {SUPPORTS_GLASS ? (
               <NativeHomeActivitySection
                 dark={theme.dark}
                 p={p}
                 accent={theme.accent.dot}
-                loading={false}
+                loading={loading}
                 groups={nativeHomeActivityGroups}
                 onSeeAll={openSelectedMonthActivity}
               />
@@ -1191,7 +1192,7 @@ function NativeSpendingSection({
           : NATIVE_SPEND_GROUP_CLOSED_HEIGHT),
       0,
     );
-  const sectionHeight = loading ? 430 : sectionChromeHeight + groupsHeight(openKeys);
+  const sectionHeight = sectionChromeHeight + groupsHeight(loading ? {} : openKeys);
 
   const toggleGroup = (key: string) => {
     LayoutAnimation.configureNext({
@@ -1608,8 +1609,9 @@ function NativeUpcomingSection({
   const glassTint = dark ? 'rgba(18,20,22,0.46)' : 'rgba(255,255,255,0.72)';
   const rowHeight = 64;
   const sectionChromeHeight = LAYOUT.cardPadTop + 17 + SPACE.xs + LAYOUT.cardPadBottom;
+  const rowCount = bills.length > 0 ? bills.length : 1;
   const sectionHeight = loading
-    ? sectionChromeHeight + rowHeight * 3 + 2
+    ? sectionChromeHeight + rowHeight * rowCount + Math.max(0, rowCount - 1)
     : bills.length === 0
       ? 116
       : sectionChromeHeight + rowHeight * bills.length + Math.max(0, bills.length - 1);
@@ -1655,7 +1657,7 @@ function NativeUpcomingSection({
           </HStack>
 
           {loading ? (
-            <NativeUpcomingSkeleton p={p} />
+            <NativeUpcomingSkeleton p={p} count={rowCount} />
           ) : bills.length === 0 ? (
             <SwiftText
               modifiers={[
@@ -1806,7 +1808,7 @@ function NativeUpcomingRow({
   );
 }
 
-function NativeUpcomingSkeleton({ p }: { p: P }) {
+function NativeUpcomingSkeleton({ p, count }: { p: P; count: number }) {
   const block = (width: number, height: number, radius: number) => (
     <RoundedRectangle
       cornerRadius={radius}
@@ -1823,7 +1825,7 @@ function NativeUpcomingSkeleton({ p }: { p: P }) {
       spacing={0}
       modifiers={[padding({ top: SPACE.xs }), frame({ maxWidth: 10000, alignment: 'leading' })]}
     >
-      {[0, 1, 2].map(index => (
+      {Array.from({ length: count }).map((_, index) => (
         <VStack key={index} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
           <HStack
             alignment="center"
@@ -1838,7 +1840,7 @@ function NativeUpcomingSkeleton({ p }: { p: P }) {
             <Spacer />
             {block(62, 14, 4)}
           </HStack>
-          {index < 2 && (
+          {index < count - 1 && (
             <Rectangle
               modifiers={[
                 frame({ height: 1, maxWidth: 10000 }),
@@ -1872,8 +1874,15 @@ function NativeHomeActivitySection({
   const sectionChromeHeight = LAYOUT.cardPadTop + 18 + SPACE.md + LAYOUT.cardPadBottom;
   const groupLabelHeight = 27;
   const rowHeight = 64;
+  const skeletonGroups = groups.length > 0
+    ? groups.map(group => Math.max(group.items.length, 1))
+    : [1];
+  const skeletonItemCount = skeletonGroups.reduce((sum, count) => sum + count, 0);
   const sectionHeight = loading
-    ? 332
+    ? sectionChromeHeight
+      + skeletonGroups.length * groupLabelHeight
+      + skeletonItemCount * rowHeight
+      + Math.max(0, skeletonGroups.length - 1) * SPACE.md
     : itemCount === 0
       ? 116
       : sectionChromeHeight
@@ -1924,7 +1933,7 @@ function NativeHomeActivitySection({
           </HStack>
 
           {loading ? (
-            <NativeHomeActivitySkeleton p={p} />
+            <NativeHomeActivitySkeleton p={p} groups={skeletonGroups} />
           ) : itemCount === 0 ? (
             <SwiftText
               modifiers={[
@@ -2073,7 +2082,7 @@ function NativeHomeActivityRow({
   );
 }
 
-function NativeHomeActivitySkeleton({ p }: { p: P }) {
+function NativeHomeActivitySkeleton({ p, groups }: { p: P; groups: number[] }) {
   const block = (width: number, height: number, radius: number) => (
     <RoundedRectangle
       cornerRadius={radius}
@@ -2086,7 +2095,7 @@ function NativeHomeActivitySkeleton({ p }: { p: P }) {
 
   return (
     <VStack alignment="leading" spacing={SPACE.md} modifiers={[padding({ top: SPACE.md }), frame({ maxWidth: 10000, alignment: 'leading' })]}>
-      {[2, 3].map((count, groupIndex) => (
+      {groups.map((count, groupIndex) => (
         <VStack key={groupIndex} alignment="leading" spacing={0} modifiers={[frame({ maxWidth: 10000, alignment: 'leading' })]}>
           {block(70, 11, 4)}
           {Array.from({ length: count }).map((_, index) => (

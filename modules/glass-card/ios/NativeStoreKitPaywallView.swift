@@ -3,10 +3,11 @@ import ExpoUI
 import SwiftUI
 import UIKit
 
-public final class NativeRevenueCatPaywallViewProps: UIBaseViewProps {
+public final class NativeStoreKitPaywallViewProps: UIBaseViewProps {
   @Field var appName: String = "App Name"
   @Field var title: String = "Membership"
   @Field var subtitle: String = "Lorem Ipsum is simply dummy text\nof the printing and typesetting industry."
+  @Field var ctaLabel: String = "Start 30 Day Free Trial"
   @Field var plansJSON: String = "[]"
   @Field var isBusy: Bool = false
   var onClose = EventDispatcher()
@@ -14,18 +15,19 @@ public final class NativeRevenueCatPaywallViewProps: UIBaseViewProps {
   var onRestore = EventDispatcher()
 }
 
-public struct NativeRevenueCatPaywallView: ExpoSwiftUI.View {
-  @ObservedObject public var props: NativeRevenueCatPaywallViewProps
+public struct NativeStoreKitPaywallView: ExpoSwiftUI.View {
+  @ObservedObject public var props: NativeStoreKitPaywallViewProps
 
-  public init(props: NativeRevenueCatPaywallViewProps) {
+  public init(props: NativeStoreKitPaywallViewProps) {
     self.props = props
   }
 
   public var body: some View {
-    RevenueCatPaywallContentView(
+    StoreKitPaywallContentView(
       appName: props.appName,
       title: props.title,
       subtitle: props.subtitle,
+      ctaLabel: props.ctaLabel,
       plans: decodePlans(props.plansJSON),
       isBusy: props.isBusy,
       onClose: { props.onClose([:]) },
@@ -34,19 +36,19 @@ public struct NativeRevenueCatPaywallView: ExpoSwiftUI.View {
     )
   }
 
-  private func decodePlans(_ json: String) -> [RevenueCatPaywallPlan] {
+  private func decodePlans(_ json: String) -> [StoreKitPaywallPlan] {
     guard let data = json.data(using: .utf8),
-          let plans = try? JSONDecoder().decode([RevenueCatPaywallPlan].self, from: data),
+          let plans = try? JSONDecoder().decode([StoreKitPaywallPlan].self, from: data),
           !plans.isEmpty
     else {
-      return RevenueCatPaywallPlan.defaults
+      return StoreKitPaywallPlan.defaults
     }
 
     return plans
   }
 }
 
-private struct RevenueCatPaywallPlan: Codable, Identifiable, Equatable {
+private struct StoreKitPaywallPlan: Codable, Identifiable, Equatable {
   let id: String
   let title: String
   let price: String
@@ -55,15 +57,15 @@ private struct RevenueCatPaywallPlan: Codable, Identifiable, Equatable {
   let detail: String
 
   static let defaults = [
-    RevenueCatPaywallPlan(
+    StoreKitPaywallPlan(
       id: "pro_weekly",
       title: "Weekly",
       price: "$0.99",
       cadence: "/week",
-      badge: "YOUR PLAN",
+      badge: nil,
       detail: "Subscribe for a Week"
     ),
-    RevenueCatPaywallPlan(
+    StoreKitPaywallPlan(
       id: "pro_monthly",
       title: "Change Plan to Monthly",
       price: "$2.99",
@@ -71,7 +73,7 @@ private struct RevenueCatPaywallPlan: Codable, Identifiable, Equatable {
       badge: nil,
       detail: "Subscribe for a Month"
     ),
-    RevenueCatPaywallPlan(
+    StoreKitPaywallPlan(
       id: "pro_yearly",
       title: "Yearly",
       price: "$12.99",
@@ -89,24 +91,25 @@ private enum IAPImage: String, CaseIterable {
   case four = "IAP4"
 }
 
-private struct RevenueCatPaywallContentView: View {
+private struct StoreKitPaywallContentView: View {
   let appName: String
   let title: String
   let subtitle: String
-  let plans: [RevenueCatPaywallPlan]
+  let ctaLabel: String
+  let plans: [StoreKitPaywallPlan]
   let isBusy: Bool
   let onClose: () -> Void
   let onSubscribe: (String) -> Void
   let onRestore: () -> Void
 
-  @State private var selectedPlanID: String = RevenueCatPaywallPlan.defaults[0].id
-  @State private var scrollPlanID: String? = RevenueCatPaywallPlan.defaults[0].id
+  @State private var selectedPlanID: String = StoreKitPaywallPlan.defaults[0].id
+  @State private var scrollPlanID: String? = StoreKitPaywallPlan.defaults[0].id
 
   var selectedIndex: Int {
     plans.firstIndex(where: { $0.id == selectedPlanID }) ?? 0
   }
 
-  var selectedPlan: RevenueCatPaywallPlan {
+  var selectedPlan: StoreKitPaywallPlan {
     plans.first(where: { $0.id == selectedPlanID }) ?? plans[0]
   }
 
@@ -114,74 +117,28 @@ private struct RevenueCatPaywallContentView: View {
     GeometryReader { proxy in
       let size = proxy.size
       let isSmalleriPhone = size.height < 700
-      let marketingHeight = size.height * (isSmalleriPhone ? 0.49 : 0.54)
+      let safeBottom = proxy.safeAreaInsets.bottom
       let cardWidth = min(size.width * 0.66, 270)
+      let cardHeight: CGFloat = isSmalleriPhone ? 116 : 136
+      let legalBottom = safeBottom + 10
 
       VStack(spacing: 0) {
         CustomMarketingView()
-          .frame(height: marketingHeight)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        PlanPicker(cardWidth: cardWidth)
-          .frame(height: isSmalleriPhone ? 128 : 142)
-
-        HStack(spacing: 10) {
-          ForEach(plans.indices, id: \.self) { index in
-            Circle()
-              .fill(index == selectedIndex ? .white : .white.opacity(0.34))
-              .frame(width: index == selectedIndex ? 8 : 7, height: index == selectedIndex ? 8 : 7)
-          }
-        }
-        .padding(.top, isSmalleriPhone ? 10 : 18)
-
-        Text("Plan auto-renews until canceled.")
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.48))
-          .padding(.top, isSmalleriPhone ? 12 : 18)
-
-        Button {
-          onSubscribe(selectedPlan.id)
-        } label: {
-          ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-              .fill(Color.white.opacity(isBusy ? 0.72 : 0.84))
-
-            if isBusy {
-              ProgressView()
-                .tint(Color(red: 0.06, green: 0.07, blue: 0.10))
-            } else {
-              Text("Subscribe")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(Color(red: 0.06, green: 0.07, blue: 0.10))
-            }
-          }
-          .frame(height: 56)
-        }
-        .buttonStyle(.plain)
-        .disabled(isBusy)
-        .padding(.horizontal, 33)
-        .padding(.top, isSmalleriPhone ? 12 : 16)
-
-        Button(action: onRestore) {
-          Text("Restore Subscription")
-            .font(.headline.weight(.bold))
-            .foregroundStyle(.white)
-            .opacity(isBusy ? 0.55 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(isBusy)
-        .padding(.top, isSmalleriPhone ? 18 : 26)
-
-        Spacer(minLength: 8)
+        CustomSubscriptionStyle(cardWidth: cardWidth, cardHeight: cardHeight, isSmalleriPhone: isSmalleriPhone)
+          .offset(y: 12)
+          .padding(.bottom, 12)
 
         HStack(spacing: 3) {
           Button("Terms of Service", action: onClose)
           Text("And")
           Button("Privacy Policy", action: onClose)
         }
-        .font(.caption.weight(.semibold))
+        .font(.caption)
         .foregroundStyle(.white.opacity(0.56))
         .buttonStyle(.plain)
-        .padding(.bottom, 10)
+        .padding(.bottom, legalBottom)
       }
       .frame(width: size.width, height: size.height)
       .background(BackdropView())
@@ -203,7 +160,7 @@ private struct RevenueCatPaywallContentView: View {
     GeometryReader {
       let size = $0.size
 
-      if let image = RevenueCatPaywallAssets.image(named: "IAP4") {
+      if let image = StoreKitPaywallAssets.image(named: "IAP4") {
         Image(uiImage: image)
           .resizable()
           .aspectRatio(contentMode: .fill)
@@ -268,7 +225,62 @@ private struct RevenueCatPaywallContentView: View {
   }
 
   @ViewBuilder
-  func PlanPicker(cardWidth: CGFloat) -> some View {
+  func CustomSubscriptionStyle(cardWidth: CGFloat, cardHeight: CGFloat, isSmalleriPhone: Bool) -> some View {
+    VStack(spacing: 25) {
+      PlanPicker(cardWidth: cardWidth, cardHeight: cardHeight)
+        .frame(height: cardHeight)
+
+      VStack(spacing: isSmalleriPhone ? 8 : 10) {
+        HStack(spacing: 10) {
+          ForEach(plans.indices, id: \.self) { index in
+            Circle()
+              .fill(index == selectedIndex ? .white : .white.opacity(0.34))
+              .frame(width: index == selectedIndex ? 8 : 7, height: index == selectedIndex ? 8 : 7)
+          }
+        }
+
+        Text("Plan auto-renews until canceled.")
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.48))
+      }
+
+      Button {
+        onSubscribe(selectedPlan.id)
+      } label: {
+        ZStack {
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(isBusy ? 0.72 : 0.84))
+
+          if isBusy {
+            ProgressView()
+              .tint(Color(red: 0.06, green: 0.07, blue: 0.10))
+          } else {
+            Text(ctaLabel)
+              .font(.title3.weight(.medium))
+              .foregroundStyle(Color(red: 0.06, green: 0.07, blue: 0.10))
+              .lineLimit(1)
+              .minimumScaleFactor(0.78)
+          }
+        }
+        .frame(height: 56)
+      }
+      .buttonStyle(.plain)
+      .disabled(isBusy)
+      .padding(.horizontal, 33)
+
+      Button(action: onRestore) {
+        Text("Restore Subscription")
+          .font(.headline.weight(.bold))
+          .foregroundStyle(.white)
+          .opacity(isBusy ? 0.55 : 1)
+      }
+      .buttonStyle(.plain)
+      .disabled(isBusy)
+    }
+  }
+
+  @ViewBuilder
+  func PlanPicker(cardWidth: CGFloat, cardHeight: CGFloat) -> some View {
     if #available(iOS 17.0, *) {
       ScrollView(.horizontal) {
         HStack(spacing: 25) {
@@ -277,6 +289,7 @@ private struct RevenueCatPaywallContentView: View {
               plan: plan,
               selected: selectedPlanID == plan.id,
               width: cardWidth,
+              height: cardHeight,
               onSelect: {
                 selectedPlanID = plan.id
                 scrollPlanID = plan.id
@@ -304,6 +317,7 @@ private struct RevenueCatPaywallContentView: View {
               plan: plan,
               selected: selectedPlanID == plan.id,
               width: cardWidth,
+              height: cardHeight,
               onSelect: { selectedPlanID = plan.id }
             )
           }
@@ -319,7 +333,7 @@ private struct RevenueCatPaywallContentView: View {
     ScrollView(.vertical) {
       VStack(spacing: 10) {
         ForEach(content.indices, id: \.self) { index in
-          if let image = RevenueCatPaywallAssets.image(named: content[index].rawValue) {
+          if let image = StoreKitPaywallAssets.image(named: content[index].rawValue) {
             Image(uiImage: image)
               .resizable()
               .aspectRatio(contentMode: .fit)
@@ -347,9 +361,10 @@ private extension View {
 }
 
 private struct PlanCard: View {
-  let plan: RevenueCatPaywallPlan
+  let plan: StoreKitPaywallPlan
   let selected: Bool
   let width: CGFloat
+  let height: CGFloat
   let onSelect: () -> Void
 
   var body: some View {
@@ -378,20 +393,7 @@ private struct PlanCard: View {
           }
         }
 
-        if let badge = plan.badge {
-          HStack(spacing: 5) {
-            Image(systemName: "star.fill")
-              .font(.system(size: 12, weight: .bold))
-            Text(badge)
-              .font(.caption2.weight(.black))
-          }
-          .foregroundStyle(.white)
-          .padding(.top, 14)
-        } else {
-          Spacer(minLength: 22)
-        }
-
-        Spacer(minLength: 10)
+        Spacer(minLength: 12)
 
         Divider()
           .background(.white.opacity(0.10))
@@ -406,7 +408,7 @@ private struct PlanCard: View {
       }
       .padding(.horizontal, 18)
       .padding(.vertical, 14)
-      .frame(width: width, height: 136)
+      .frame(width: width, height: height)
       .background {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
           .fill(.ultraThinMaterial)
@@ -428,7 +430,7 @@ private struct PlanCard: View {
   }
 }
 
-private enum RevenueCatPaywallAssets {
+private enum StoreKitPaywallAssets {
   static func image(named name: String) -> UIImage? {
     if let bundle = resourceBundle,
        let image = UIImage(named: name, in: bundle, compatibleWith: nil) {

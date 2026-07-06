@@ -1,6 +1,7 @@
 import React from 'react';
-import { Animated, StyleProp, ViewStyle, DimensionValue } from 'react-native';
+import { Animated, Platform, StyleProp, ViewStyle, DimensionValue } from 'react-native';
 import { useTheme } from '../ThemeProvider';
+import { NativeSkeleton } from '../../modules/glass-card/src/NativeSkeleton';
 
 interface Props {
   width?: DimensionValue;
@@ -29,10 +30,22 @@ export function Skeleton({ width = '100%', height = 14, radius = 8, style, onMed
   const opacity = sharedPulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.9] });
 
   const bg = onMedia
-    ? 'rgba(245,238,255,0.16)'
+    ? theme.dark ? '#34333d' : '#d8d7de'
     : theme.dark
-    ? 'rgba(173,189,222,0.14)'
-    : 'rgba(14,14,16,0.07)';
+      ? '#2f3540'
+      : '#e8e9ec';
+
+  if (Platform.OS === 'ios') {
+    return (
+      <NativeSkeleton
+        width={width}
+        height={height}
+        radius={radius}
+        color={bg}
+        style={style}
+      />
+    );
+  }
 
   return (
     <Animated.View

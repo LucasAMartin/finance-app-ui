@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   View,
@@ -11,6 +11,8 @@ import {
   TextInput,
   Keyboard,
   ImageBackground,
+  RefreshControl,
+  InteractionManager,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -63,6 +65,7 @@ import { MEDIA, MEDIA_INK, makeP, makeScrim, deriveFloor } from '../wallpaperPal
 import { SheetPrimaryButton, ProgressBar, Money, FIELD_CARD, FIELD_ROW } from '../components/shared';
 import { GlassCard } from '../components/GlassCard';
 import { MerchantMark } from '../components/MerchantMark';
+import { Skeleton } from '../components/Skeleton';
 import { PopupNumericKeypad } from '../components/PopupNumericKeypad';
 import { applyKeypadKey } from '../components/NumericKeypad';
 import { Icon } from '../components/Icon';
@@ -139,6 +142,7 @@ interface Props {
   contributeRequestToken?: number;
   onClose: () => void;
   onEditGoalCategory?: (catId: string) => void;
+  onRefreshSync?: () => Promise<void>;
 }
 
 interface GoalDraft {
@@ -158,7 +162,7 @@ interface ContributionTarget {
   goalId: string;
 }
 
-export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClose, onEditGoalCategory }: Props) {
+export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClose, onEditGoalCategory, onRefreshSync }: Props) {
   const insets = useSafeAreaInsets();
   const { wallpaper, wallpaperFloorBase } = useTheme();
   const { categoriesRepo, transactionsRepo } = useRepositories();
@@ -207,6 +211,8 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
   const goalsBehind = goals.filter(goal => statusFor(goal).tone === 'caution').length;
   const goalSavedTotal = goals.reduce((sum, goal) => sum + goal.saved, 0);
   const monthlyPlanTotal = goals.reduce((sum, goal) => sum + (goal.monthlyContribution ?? 0), 0);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const beginContribution = (goal: Goal) => {
     setContributionPickerOpen(false);
@@ -232,6 +238,47 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
       setContributionPickerOpen(true);
     }
   }, [contributeRequestToken, goals, visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setLoading(true);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setLoading(false);
+    };
+    const task = InteractionManager.runAfterInteractions(finish);
+    const fallback = setTimeout(finish, 450);
+    return () => {
+      settled = true;
+      task.cancel();
+      clearTimeout(fallback);
+    };
+  }, [visible]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setLoading(true);
+    void (async () => {
+      try {
+        await onRefreshSync?.();
+      } finally {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          setLoading(false);
+          setRefreshing(false);
+        };
+        const task = InteractionManager.runAfterInteractions(finish);
+        setTimeout(() => {
+          task.cancel();
+          finish();
+        }, 450);
+      }
+    })();
+  }, [onRefreshSync]);
 
   const saveGoal = (draft: GoalDraft, _goal: 'new') => {
     const target = parseAmount(draft.target);
@@ -454,11 +501,37 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
                 paddingBottom: insets.bottom + SPACE.xxxl,
               }}
               showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  progressViewOffset={insets.top + 44}
+                  tintColor={pWallpaper.textSec}
+                  colors={[theme.accent.dot]}
+                  progressBackgroundColor={theme.dark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
+                />
+              }
             >
-              {goals.length === 0 && archivedGoals.length === 0 ? (
+              {loading ? (
+                <GoalsSkeleton
+                  dark={theme.dark}
+                  activeCount={goals.length}
+                  archivedCount={archivedGoals.length}
+                />
+              ) : goals.length === 0 && archivedGoals.length === 0 ? (
                 <EmptyGoals theme={theme} tint={teal} p={p} onAdd={() => setFormGoalOpen(true)} />
               ) : (
                 <>
+                  <GoalSummary
+                    theme={theme}
+                    p={p}
+                    activeCount={goals.length}
+                    savedTotal={goalSavedTotal}
+                    monthlyPlan={monthlyPlanTotal}
+                    behindCount={goalsBehind}
+                    tint={teal}
+                    caution={caution}
+                  />
                   {goals.length === 0 && (
                     <EmptyActiveGoals theme={theme} p={p} onAdd={() => setFormGoalOpen(true)} />
                   )}
@@ -556,6 +629,87 @@ export function GoalsScreen({ theme, visible, contributeRequestToken = 0, onClos
         </BottomSheetModalProvider>
       </View>
     </Animated.View>
+  );
+}
+
+function GoalsSkeleton({
+  dark,
+  activeCount,
+  archivedCount,
+}: {
+  dark: boolean;
+  activeCount: number;
+  archivedCount: number;
+}) {
+  const activeSkeletonCount = Math.max(activeCount, 1);
+  const archivedSkeletonCount = archivedCount > 0 ? Math.min(archivedCount, 2) : 0;
+
+  return (
+    <>
+      <GlassCard dark={dark} style={{ marginBottom: SPACE.md }}>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryTopRow}>
+            <View style={{ gap: SPACE.sm }}>
+              <Skeleton width={76} height={11} radius={4} onMedia={dark} />
+              <Skeleton width={148} height={20} radius={5} onMedia={dark} />
+            </View>
+            <Skeleton width={82} height={26} radius={RADIUS.full} onMedia={dark} />
+          </View>
+          <View style={styles.summaryStatRow}>
+            {[0, 1, 2].map(index => (
+              <View key={index} style={styles.summaryStat}>
+                <Skeleton width={index === 1 ? 76 : 58} height={11} radius={4} onMedia={dark} />
+                <Skeleton width={index === 2 ? 32 : 72} height={20} radius={5} onMedia={dark} />
+              </View>
+            ))}
+          </View>
+        </View>
+      </GlassCard>
+
+      {Array.from({ length: activeSkeletonCount }).map((_, index) => (
+        <GlassCard key={index} dark={dark} style={{ marginBottom: SPACE.md }}>
+          <View style={styles.goalSkeletonCard}>
+            <View style={styles.cardTopRow}>
+              <Skeleton width={36} height={36} radius={18} onMedia={dark} />
+              <Skeleton width={index === 1 ? 104 : 132} height={16} radius={5} onMedia={dark} style={{ flex: 1 }} />
+              <Skeleton width={index === 2 ? 76 : 82} height={26} radius={RADIUS.full} onMedia={dark} />
+            </View>
+            <View style={styles.goalSkeletonProgressRow}>
+              <Skeleton width="100%" height={7} radius={4} onMedia={dark} />
+              <Skeleton width={48} height={14} radius={4} onMedia={dark} />
+            </View>
+            <View style={styles.goalSkeletonFooter}>
+              <Skeleton width={86} height={14} radius={4} onMedia={dark} />
+              <Skeleton width={128} height={12} radius={4} onMedia={dark} />
+            </View>
+          </View>
+        </GlassCard>
+      ))}
+
+      {archivedSkeletonCount > 0 ? (
+        <>
+          <View style={styles.archivedHeader}>
+            <Skeleton width={72} height={11} radius={4} onMedia={dark} />
+            <Skeleton width={16} height={11} radius={4} onMedia={dark} />
+          </View>
+          {Array.from({ length: archivedSkeletonCount }).map((_, index) => (
+            <GlassCard key={`archived-${index}`} dark={dark} style={{ marginBottom: SPACE.md, opacity: 0.78 }}>
+              <View style={styles.goalSkeletonCard}>
+                <View style={styles.cardTopRow}>
+                  <Skeleton width={36} height={36} radius={18} onMedia={dark} />
+                  <Skeleton width={index === 0 ? 112 : 92} height={16} radius={5} onMedia={dark} style={{ flex: 1 }} />
+                  <Skeleton width={68} height={26} radius={RADIUS.full} onMedia={dark} />
+                </View>
+                <View style={styles.goalSkeletonProgressRow}>
+                  <Skeleton width="100%" height={7} radius={4} onMedia={dark} />
+                  <Skeleton width={48} height={14} radius={4} onMedia={dark} />
+                </View>
+              </View>
+            </GlassCard>
+          ))}
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -2322,6 +2476,21 @@ const styles = StyleSheet.create({
   summaryStat: {
     flex: 1,
     gap: SPACE.xs,
+  },
+  goalSkeletonCard: {
+    minHeight: 118,
+  },
+  goalSkeletonProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.md,
+    marginTop: SPACE.md,
+  },
+  goalSkeletonFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: SPACE.md,
+    marginTop: SPACE.md,
   },
   archivedHeader: {
     marginTop: SPACE.lg,
