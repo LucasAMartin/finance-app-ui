@@ -30,7 +30,7 @@ export function NativeIOSStyleOnboarding({
 
   return (
     <View style={[style, styles.transparentLayer]}>
-      <Host colorScheme="dark" style={styles.host}>
+      <Host colorScheme="light" style={styles.host}>
         <NativeIOSStyleOnboardingView
           style={styles.nativeFill}
           tint={tint}
@@ -44,17 +44,17 @@ export function NativeIOSStyleOnboarding({
 
 const styles = StyleSheet.create({
   host: {
-    backgroundColor: 'transparent',
+    backgroundColor: '#fff',
     flex: 1,
   },
   nativeFill: {
-    backgroundColor: 'transparent',
+    backgroundColor: '#fff',
     flex: 1,
   },
   transparentLayer: {
-    backgroundColor: 'transparent',
+    backgroundColor: '#fff',
   },
   fallback: {
-    backgroundColor: '#000',
+    backgroundColor: '#fff',
   },
 });

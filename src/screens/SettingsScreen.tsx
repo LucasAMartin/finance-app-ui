@@ -91,7 +91,10 @@ interface Props {
   onOpenSharing: (intent?: 'overview' | 'members' | 'invite') => void;
   onOpenOnboarding?: () => void;
   onOpenIOSStyleOnboarding?: () => void;
-  onOpenPaywallPreview?: () => void;
+  userTutorialDemoEnabled?: boolean;
+  onUserTutorialDemoEnabledChange?: (enabled: boolean) => void;
+  animatedKeyPadDemoEnabled?: boolean;
+  onAnimatedKeyPadDemoEnabledChange?: (enabled: boolean) => void;
   onOpenPayWallStoreKitDemo?: () => void;
   cloudSyncState: CloudSyncUiState;
 }
@@ -107,7 +110,10 @@ export function SettingsScreen({
   onOpenSharing,
   onOpenOnboarding,
   onOpenIOSStyleOnboarding,
-  onOpenPaywallPreview,
+  userTutorialDemoEnabled = false,
+  onUserTutorialDemoEnabledChange,
+  animatedKeyPadDemoEnabled = false,
+  onAnimatedKeyPadDemoEnabledChange,
   onOpenPayWallStoreKitDemo,
   cloudSyncState,
 }: Props) {
@@ -364,12 +370,20 @@ export function SettingsScreen({
                     onPress={onOpenIOSStyleOnboarding}
                   />
                 ) : null}
-                {__DEV__ && onOpenPaywallPreview ? (
-                  <SettingsActionRow
-                    label="Preview Paywall"
-                    systemImage="crown"
-                    value="Open"
-                    onPress={onOpenPaywallPreview}
+                {__DEV__ && onUserTutorialDemoEnabledChange ? (
+                  <SwiftToggle
+                    label="Tutorial Demo"
+                    systemImage="questionmark.circle"
+                    isOn={userTutorialDemoEnabled}
+                    onIsOnChange={onUserTutorialDemoEnabledChange}
+                  />
+                ) : null}
+                {__DEV__ && onAnimatedKeyPadDemoEnabledChange ? (
+                  <SwiftToggle
+                    label="Animated Keypad Demo"
+                    systemImage="keyboard"
+                    isOn={animatedKeyPadDemoEnabled}
+                    onIsOnChange={onAnimatedKeyPadDemoEnabledChange}
                   />
                 ) : null}
                 {__DEV__ && onOpenPayWallStoreKitDemo ? (

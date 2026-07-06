@@ -263,6 +263,7 @@ function compareTx(a: Transaction, b: Transaction, sort: TransactionSortOrder): 
 
 function matchesTxQuery(tx: Transaction, query: TransactionSummaryQuery): boolean {
   if (query.categoryIds && query.categoryIds.length > 0 && !query.categoryIds.includes(tx.cat)) return false;
+  if (query.createdByUserIds && query.createdByUserIds.length > 0 && !query.createdByUserIds.includes(tx.createdByUserId ?? '')) return false;
   if (query.from && (tx.occurredAt ?? '') < query.from) return false;
   if (query.to && (tx.occurredAt ?? '') > query.to) return false;
   if (query.minAmount !== undefined && tx.amount < query.minAmount) return false;
@@ -369,6 +370,7 @@ class InMemoryTransactionsRepo
     year: number;
     month: number;
     categoryIds?: string[];
+    createdByUserIds?: string[];
     merchantQuery?: string;
     searchCategoryIds?: string[];
     minAmount?: number;

@@ -88,12 +88,13 @@
         }
       ],
       [
-        "expo-build-properties",
-        {
-          "ios": {
-            "buildReactNativeFromSource": true
-          }
+      "expo-build-properties",
+      {
+        "ios": {
+          "deploymentTarget": "17.0",
+          "buildReactNativeFromSource": true
         }
+      }
       ]
     ],
     "extra": {

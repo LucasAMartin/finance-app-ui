@@ -88,17 +88,17 @@ export function PaywallProvider({ children }: { children: React.ReactNode }) {
         setStatus('configuring');
         setError(null);
 
-        const [nextProducts, nextEntitlementStatus] = await Promise.all([
-          GlassCardModule.getStoreKitProducts(STOREKIT_PRODUCT_IDS),
-          GlassCardModule.getStoreKitEntitlementStatus(STOREKIT_PRODUCT_IDS),
-        ]);
-        if (cancelled) return;
+        const nextEntitlementStatus = await GlassCardModule.getStoreKitEntitlementStatus(STOREKIT_PRODUCT_IDS);
+        let nextProducts: StoreKitProduct[] = [];
 
-        if (nextProducts.length === 0) {
-          setStatus('error');
-          setError(`StoreKit returned no products for: ${STOREKIT_PRODUCT_IDS.join(', ')}`);
-          return;
+        try {
+          nextProducts = await GlassCardModule.getStoreKitProducts(STOREKIT_PRODUCT_IDS);
+        } catch (productError) {
+          if (__DEV__) {
+            console.warn('[Paywall] StoreKit product prefetch failed. Native paywall will load products directly.', productError);
+          }
         }
+        if (cancelled) return;
 
         setProducts(nextProducts);
         setEntitlementStatus(nextEntitlementStatus);

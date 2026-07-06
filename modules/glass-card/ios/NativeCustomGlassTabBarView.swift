@@ -6,6 +6,7 @@ import UIKit
 public final class NativeCustomGlassTabBarViewProps: UIBaseViewProps {
   @Field var activeTab: String = "home"
   @Field var isDark: Bool = false
+  @Field var usesExternalVoiceTrigger: Bool = false
   var onTabSelect = EventDispatcher()
   var onVoiceAction = EventDispatcher()
 }
@@ -22,6 +23,7 @@ public struct NativeCustomGlassTabBarView: ExpoSwiftUI.View {
       NativeCustomGlassTabBarContent(
         activeTabID: props.activeTab,
         isDark: props.isDark,
+        usesExternalVoiceTrigger: props.usesExternalVoiceTrigger,
         onTabSelect: { tab in props.onTabSelect(["tabId": tab.id]) },
         onVoiceAction: { props.onVoiceAction([:]) }
       )
@@ -29,6 +31,7 @@ public struct NativeCustomGlassTabBarView: ExpoSwiftUI.View {
       NativeCustomGlassTabBarFallback(
         activeTabID: props.activeTab,
         isDark: props.isDark,
+        usesExternalVoiceTrigger: props.usesExternalVoiceTrigger,
         onTabSelect: { tab in props.onTabSelect(["tabId": tab.id]) },
         onVoiceAction: { props.onVoiceAction([:]) }
       )
@@ -73,6 +76,7 @@ private enum FinanceGlassTab: String, CaseIterable {
 private struct NativeCustomGlassTabBarContent: View {
   let activeTabID: String
   let isDark: Bool
+  let usesExternalVoiceTrigger: Bool
   let onTabSelect: (FinanceGlassTab) -> Void
   let onVoiceAction: () -> Void
 
@@ -81,11 +85,13 @@ private struct NativeCustomGlassTabBarContent: View {
   init(
     activeTabID: String,
     isDark: Bool,
+    usesExternalVoiceTrigger: Bool,
     onTabSelect: @escaping (FinanceGlassTab) -> Void,
     onVoiceAction: @escaping () -> Void
   ) {
     self.activeTabID = activeTabID
     self.isDark = isDark
+    self.usesExternalVoiceTrigger = usesExternalVoiceTrigger
     self.onTabSelect = onTabSelect
     self.onVoiceAction = onVoiceAction
     _activeTab = State(initialValue: FinanceGlassTab.from(id: activeTabID))
@@ -117,13 +123,19 @@ private struct NativeCustomGlassTabBarContent: View {
           .glassEffect(.regular.interactive(), in: .capsule)
         }
 
-        Button(action: onVoiceAction) {
+        Button(action: {
+          guard !usesExternalVoiceTrigger else { return }
+          onVoiceAction()
+        }) {
           Image(systemName: "mic.fill")
             .font(.system(size: 22, weight: .medium))
+            .foregroundStyle(Color.primary)
             .frame(width: 55, height: 55)
             .contentShape(.capsule)
         }
         .glassEffect(.regular.interactive(), in: .capsule)
+        .allowsHitTesting(!usesExternalVoiceTrigger)
+        .accessibilityHidden(usesExternalVoiceTrigger)
         .animation(.smooth(duration: 0.55, extraBounce: 0), value: activeTab)
         .accessibilityLabel(Text("Add expense"))
       }
@@ -142,6 +154,7 @@ private struct NativeCustomGlassTabBarContent: View {
 private struct NativeCustomGlassTabBarFallback: View {
   let activeTabID: String
   let isDark: Bool
+  let usesExternalVoiceTrigger: Bool
   let onTabSelect: (FinanceGlassTab) -> Void
   let onVoiceAction: () -> Void
 
@@ -158,10 +171,16 @@ private struct NativeCustomGlassTabBarFallback: View {
         }
       }
 
-      Button(action: onVoiceAction) {
+      Button(action: {
+        guard !usesExternalVoiceTrigger else { return }
+        onVoiceAction()
+      }) {
         Image(systemName: "mic.fill")
+          .foregroundStyle(Color.primary)
           .frame(width: 55, height: 55)
       }
+      .allowsHitTesting(!usesExternalVoiceTrigger)
+      .accessibilityHidden(usesExternalVoiceTrigger)
     }
     .frame(height: 55)
     .preferredColorScheme(isDark ? .dark : .light)

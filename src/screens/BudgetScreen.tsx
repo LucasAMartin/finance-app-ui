@@ -24,7 +24,6 @@ const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 import { Swipeable, ScrollView as GHScrollView, TapGestureHandler, State } from 'react-native-gesture-handler';
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Theme, GROUP_COLORS, OVER_DOT, ON_GROUP_ICON } from '../theme';
@@ -40,6 +39,7 @@ import { BillSheetMount, type BillSheetHandle } from '../components/sheetMounts'
 import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { Skeleton } from '../components/Skeleton';
+import { Toast } from '../components/Toast';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
@@ -1365,8 +1365,6 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
     customSubs: Record<string, { label: string }[]>;
     deletedIncome?: Income;
   } | null>(null);
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const billsByGroup = useMemo(() => {
     const map: Record<string, Bill[]> = {};
     upcomingBills.forEach(bill => {
@@ -1411,13 +1409,9 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
       pendingDeleteRef.current();
       pendingDeleteRef.current = null;
     }
-    if (undoTimer.current) clearTimeout(undoTimer.current);
     setUndoLabel(label);
     setUndoHasAction(false);
     setUndoVisible(true);
-    undoTimer.current = setTimeout(() => {
-      setUndoVisible(false);
-    }, 4000);
   }, []);
   const lockedOwnerName = useCallback((createdByUserId?: string) => (
     memberDisplayName(ledgerMembers, createdByUserId) ?? 'This member'
@@ -1951,17 +1945,10 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
       pendingDeleteRef.current();
       pendingDeleteRef.current = null;
     }
-    if (undoTimer.current) clearTimeout(undoTimer.current);
     setUndoLabel(label);
+    setUndoHasAction(true);
     setUndoVisible(true);
     pendingDeleteRef.current = onCommit ?? null;
-    undoTimer.current = setTimeout(() => {
-      setUndoVisible(false);
-      if (pendingDeleteRef.current) {
-        pendingDeleteRef.current();
-        pendingDeleteRef.current = null;
-      }
-    }, 7000);
   }, []);
 
   const handleUndo = useCallback(() => {
@@ -1988,9 +1975,16 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
       }
       prevActionSnapshot.current = null;
     }
-    if (undoTimer.current) clearTimeout(undoTimer.current);
     setUndoVisible(false);
   }, []);
+
+  const handleUndoDismiss = useCallback(() => {
+    setUndoVisible(false);
+    if (undoHasAction && pendingDeleteRef.current) {
+      pendingDeleteRef.current();
+      pendingDeleteRef.current = null;
+    }
+  }, [undoHasAction]);
 
 
   const _base = Math.max(income, totalBudgeted, 1);
@@ -2599,29 +2593,14 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
             </View>
           </AnimatedGHScrollView>
 
-          {/* Floating undo toast */}
-          {undoVisible && (
-            <View style={{
-              position: 'absolute',
-              bottom: insets.bottom + 90,
-              left: 16,
-              right: 16,
-              zIndex: 10,
-            }}>
-              <BlurView
-                intensity={theme.dark ? 70 : 100}
-                tint={theme.dark ? 'systemMaterialDark' : 'systemMaterialLight'}
-                style={{ borderRadius: RADIUS.field, overflow: 'hidden' }}
-              >
-                <View style={[styles.undoToast, { borderColor: stickyBorderColor }]}>
-                  <Text style={[TYPE.bodySm, { flex: 1, color: p.text }]}>{undoLabel}</Text>
-                  <TouchableOpacity onPress={handleUndo} hitSlop={{ top: 8, bottom: 8, left: 16, right: 8 }}>
-                    <Text style={[TYPE.bodySmEm, { color: theme.accent.dot }]}>Undo</Text>
-                  </TouchableOpacity>
-                </View>
-              </BlurView>
-            </View>
-          )}
+          <Toast
+            theme={theme}
+            message={undoVisible ? undoLabel : null}
+            actionLabel={undoHasAction ? 'Undo' : undefined}
+            onAction={undoHasAction ? handleUndo : undefined}
+            onDismiss={handleUndoDismiss}
+            duration={undoHasAction ? 7000 : 4000}
+          />
 
 
         </View>
@@ -3474,14 +3453,6 @@ const styles = StyleSheet.create({
   incomeAmountInput: {
     minWidth: 60,
     textAlign: 'right',
-  },
-  undoToast: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: LAYOUT.screenGutter,
-    paddingVertical: LAYOUT.rowPadY,
-    borderWidth: 1,
-    borderRadius: RADIUS.field,
   },
   editRow: {
     flexDirection: 'row',

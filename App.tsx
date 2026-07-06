@@ -11,9 +11,11 @@ import {
   Pressable,
   Easing,
   PanResponder,
+  useWindowDimensions,
+  type PanResponderGestureState,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { router, useFocusEffect } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -25,9 +27,8 @@ import { AppFeedbackProvider, useAppFeedback } from './src/AppFeedbackProvider';
 import { FirstRunPrompt } from './src/components/FirstRunPrompt';
 import { OnboardingFlow, type OnboardingDraft } from './src/components/OnboardingFlow';
 import { AppLockGate } from './src/components/AppLockGate';
-import { PaywallProvider } from './src/paywall/PaywallProvider';
+import { PaywallProvider, usePaywall } from './src/paywall/PaywallProvider';
 import { PaywallGate } from './src/paywall/PaywallGate';
-import { MembershipPaywallPreview } from './src/paywall/MembershipPaywallPreview';
 import { NativePayWallStoreKitDemo } from './modules/glass-card/src/NativePayWallStoreKitDemo';
 import { EMPTY_STATE_PREVIEW_META_KEY } from './src/emptyStatePreview';
 import {
@@ -57,6 +58,8 @@ import { NotificationSettingsScreen } from './src/screens/NotificationSettingsSc
 import { SharingSettingsScreen } from './src/screens/SharingSettingsScreen';
 import { WidgetsSetupScreen } from './src/screens/WidgetsSetupScreen';
 import { IOSStyleOnboardingPreview } from './src/screens/IOSStyleOnboardingPreview';
+import { UserTutorialDemoScreen } from './src/screens/UserTutorialDemoScreen';
+import { AnimatedKeyPadDemoScreen } from './src/screens/AnimatedKeyPadDemoScreen';
 import { GoalsScreen } from './src/screens/GoalsScreen';
 import { TabBar } from './src/components/TabBar';
 import { Drawer } from './src/components/Drawer';
@@ -99,6 +102,10 @@ const ALL_SCREENS: Screen[] = ['home', 'insights', 'insightDetail', 'budget', 'a
 const SIDEBAR_SWIPE_SCREENS: Screen[] = ['home', 'insights', 'budget', 'activity'];
 
 const FADE_DURATION = 180;
+const TAB_BAR_GESTURE_EXCLUSION_HEIGHT = 88;
+const DRAWER_GESTURE_PRESS_SUPPRESSION_MS = 350;
+// TEMP: startup paywall disabled while testing. Set to false to restore PaywallGate on app launch.
+const PAYWALL_STARTUP_DISABLED = true;
 
 // Purely presentational — opacity is owned by the parent, no internal effects.
 const MemoHomeScreen = React.memo(HomeScreen);
@@ -161,6 +168,8 @@ function cloneActivityFilter(filter: ActivityInitialFilter): ActivityInitialFilt
 
 export function DashboardApp() {
   const { theme, dark, wallpaper, metaFlag, setMetaFlag, currencyCode } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const {
     transactionsRepo,
     devDataRepo,
@@ -180,6 +189,7 @@ export function DashboardApp() {
   const recurringRules = useRepositoryList(recurringRulesRepo);
   const settings = useRepositoryList(settingsRepo)[0];
   const { showToast } = useAppFeedback();
+  const { refreshEntitlementStatus } = usePaywall();
   const iCloudSyncEnabled = metaFlag('icloudSync');
   const emptyStatePreview = metaFlag(EMPTY_STATE_PREVIEW_META_KEY);
 
@@ -199,7 +209,8 @@ export function DashboardApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
   const [iosStyleOnboardingPreviewOpen, setIOSStyleOnboardingPreviewOpen] = useState(false);
-  const [paywallPreviewOpen, setPaywallPreviewOpen] = useState(false);
+  const [userTutorialDemoOpen, setUserTutorialDemoOpen] = useState(false);
+  const [animatedKeyPadDemoOpen, setAnimatedKeyPadDemoOpen] = useState(false);
   const [payWallStoreKitDemoOpen, setPayWallStoreKitDemoOpen] = useState(false);
   const [paywallGateOpen, setPaywallGateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -223,6 +234,12 @@ export function DashboardApp() {
   const [ledgers, setLedgers] = useState<Ledger[]>(() => sessionRepo.listLedgers());
   const cloudSyncInFlightRef = useRef<ReturnType<typeof syncActiveLedger> | null>(null);
   const cloudSyncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const drawerOpenRef = useRef(false);
+  const sideMenuPanStartsExpandedRef = useRef(false);
+  const sideMenuPanOffsetRef = useRef(0);
+  const tabBarTouchActiveRef = useRef(false);
+  const drawerGesturePressSuppressionRef = useRef(false);
+  const drawerGesturePressSuppressionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insightOpenTokenRef = useRef(0);
   const insightClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insightOpenFrameRef = useRef<number | null>(null);
@@ -230,6 +247,10 @@ export function DashboardApp() {
   const activeLedger = ledgers.find(ledger => ledger.id === session.activeLedgerId);
   const activeLedgerMeta = activeLedger?.meta ?? {};
   const currentMember = ledgerMembers.find(member => member.userId === session.currentUserId);
+  const currentMemberProfileImageDataUri = typeof currentMember?.meta?.profileImageDataUri === 'string'
+    && currentMember.meta.profileImageDataUri.startsWith('data:image/')
+    ? currentMember.meta.profileImageDataUri
+    : undefined;
   const activeLedgerIsSharedParticipant = activeLedgerMeta.cloudDatabaseScope === 'shared';
   const canInviteToActiveLedger = !activeLedgerIsSharedParticipant && currentMember?.role === 'owner';
   const shouldAutoShowOnboarding = !emptyStatePreview && !onboardingCompleted;
@@ -543,19 +564,65 @@ export function DashboardApp() {
     }).start();
   }, [tabBarAnim]);
 
+  const tabBarGestureExclusionTop = windowHeight - (
+    Math.max(insets.bottom, 16) +
+    8 +
+    TAB_BAR_GESTURE_EXCLUSION_HEIGHT
+  );
+  const drawerGestureStartedInTabBar = useCallback((gesture: PanResponderGestureState) => (
+    !drawerOpenRef.current && (tabBarTouchActiveRef.current || gesture.y0 >= tabBarGestureExclusionTop)
+  ), [tabBarGestureExclusionTop]);
+  const handleTabBarTouchActivityChange = useCallback((active: boolean) => {
+    tabBarTouchActiveRef.current = active;
+  }, []);
+  const beginDrawerGesturePressSuppression = useCallback(() => {
+    if (drawerGesturePressSuppressionTimerRef.current) {
+      clearTimeout(drawerGesturePressSuppressionTimerRef.current);
+      drawerGesturePressSuppressionTimerRef.current = null;
+    }
+    drawerGesturePressSuppressionRef.current = true;
+  }, []);
+  const endDrawerGesturePressSuppressionSoon = useCallback(() => {
+    if (drawerGesturePressSuppressionTimerRef.current) {
+      clearTimeout(drawerGesturePressSuppressionTimerRef.current);
+    }
+    drawerGesturePressSuppressionTimerRef.current = setTimeout(() => {
+      drawerGesturePressSuppressionRef.current = false;
+      drawerGesturePressSuppressionTimerRef.current = null;
+    }, DRAWER_GESTURE_PRESS_SUPPRESSION_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (drawerGesturePressSuppressionTimerRef.current) {
+      clearTimeout(drawerGesturePressSuppressionTimerRef.current);
+    }
+  }, []);
+
   const txSheetRef   = useRef<TxSheetHandle>(null);
   const billSheetRef = useRef<BillSheetHandle>(null);
-  const prepareTx = useCallback((tx: Transaction) => txSheetRef.current?.prepare(tx), []);
-  const openTx = useCallback((tx: Transaction) => txSheetRef.current?.open(tx), []);
+  const prepareTx = useCallback((tx: Transaction) => {
+    if (drawerGesturePressSuppressionRef.current) return;
+    txSheetRef.current?.prepare(tx);
+  }, []);
+  const openTx = useCallback((tx: Transaction) => {
+    if (drawerGesturePressSuppressionRef.current) return;
+    txSheetRef.current?.open(tx);
+  }, []);
   useAutomationImportProcessor({ onOpenTransaction: openTx });
-  const openBill = useCallback((bill: Bill) => billSheetRef.current?.open(bill), []);
+  const openBill = useCallback((bill: Bill) => {
+    if (drawerGesturePressSuppressionRef.current) return;
+    billSheetRef.current?.open(bill);
+  }, []);
   const openIncomeRoute = useCallback((_source?: SourceRect) => {
+    if (drawerGesturePressSuppressionRef.current) return;
     router.push('/income');
   }, []);
   const openVoiceExpense = useCallback((_source?: SourceRect) => {
+    if (drawerGesturePressSuppressionRef.current) return;
     router.push('/expense?mode=voice');
   }, []);
   const openManualExpense = useCallback((_source?: SourceRect) => {
+    if (drawerGesturePressSuppressionRef.current) return;
     router.push('/expense?mode=manual');
   }, []);
   const resetHomeMorphReaction = useCallback(() => {
@@ -668,6 +735,12 @@ export function DashboardApp() {
     });
     showToast(patch.displayName ? 'Profile name updated' : patch.profileImageDataUri === null ? 'Profile photo removed' : 'Profile photo updated');
   }, [ledgerMembers, session.currentUserId, sessionRepo, showToast]);
+
+  const handleIOSStyleOnboardingNameChange = useCallback((name: string) => {
+    const member = ledgerMembers.find(item => item.userId === session.currentUserId);
+    if (!member || name === member.displayName) return;
+    sessionRepo.updateMember(member.id, { displayName: name });
+  }, [ledgerMembers, session.currentUserId, sessionRepo]);
 
   const bindActiveLedgerToICloudUser = useCallback(async (claimAsOwner: boolean) => {
     const currentCloudUser = await CloudKitSyncModule.getCurrentUser();
@@ -1066,10 +1139,7 @@ export function DashboardApp() {
   }).current;
 
   const drawerAnim = useRef(new Animated.Value(0)).current;
-  const drawerOpenRef = useRef(false);
-  const sideMenuPanStartsExpandedRef = useRef(false);
-  const sideMenuPanOffsetRef = useRef(0);
-  const paywallOpen = paywallPreviewOpen || paywallGateOpen || payWallStoreKitDemoOpen;
+  const paywallOpen = paywallGateOpen || payWallStoreKitDemoOpen || animatedKeyPadDemoOpen;
   const sidebarSwipeOpenEnabled = SIDEBAR_SWIPE_SCREENS.includes(screen)
     && !goalsOpen
     && !settingsOpen
@@ -1130,10 +1200,15 @@ export function DashboardApp() {
         return false;
       }
 
+      if (drawerGestureStartedInTabBar(gesture)) {
+        return false;
+      }
+
       if (gesture.dx < 0) return drawerOpenRef.current;
       return sidebarSwipeOpenEnabled;
     },
     onPanResponderGrant: () => {
+      beginDrawerGesturePressSuppression();
       const startsExpanded = drawerOpenRef.current;
       sideMenuPanStartsExpandedRef.current = startsExpanded;
       sideMenuPanOffsetRef.current = startsExpanded ? DRAWER_WIDTH : 0;
@@ -1161,6 +1236,7 @@ export function DashboardApp() {
       } else {
         closeDrawer();
       }
+      endDrawerGesturePressSuppressionSoon();
     },
     onPanResponderTerminate: () => {
       if (sideMenuPanOffsetRef.current > DRAWER_WIDTH / 2) {
@@ -1168,8 +1244,17 @@ export function DashboardApp() {
       } else {
         closeDrawer();
       }
+      endDrawerGesturePressSuppressionSoon();
     },
-  }), [closeDrawer, drawerAnim, openDrawer, sidebarSwipeOpenEnabled]);
+  }), [
+    beginDrawerGesturePressSuppression,
+    closeDrawer,
+    drawerAnim,
+    drawerGestureStartedInTabBar,
+    endDrawerGesturePressSuppressionSoon,
+    openDrawer,
+    sidebarSwipeOpenEnabled,
+  ]);
 
   // Cross-fade between screens. Starts before setState — zero perceived delay.
   const navigate = useCallback((s: Screen) => {
@@ -1200,6 +1285,7 @@ export function DashboardApp() {
   }, [OP]);
 
   const navigateToActivity = useCallback((filter?: ActivityInitialFilter) => {
+    if (drawerGesturePressSuppressionRef.current) return;
     if (filter) {
       setActivityFilter(cloneActivityFilter(filter));
     }
@@ -1270,14 +1356,22 @@ export function DashboardApp() {
     setSettingsOpen(false);
     setIOSStyleOnboardingPreviewOpen(true);
   }, []);
-  const openPaywallPreview = useCallback(() => {
+  const handleUserTutorialDemoChange = useCallback((enabled: boolean) => {
     setSettingsOpen(false);
-    setPaywallPreviewOpen(true);
+    setUserTutorialDemoOpen(enabled);
+  }, []);
+  const handleAnimatedKeyPadDemoChange = useCallback((enabled: boolean) => {
+    setSettingsOpen(false);
+    setAnimatedKeyPadDemoOpen(enabled);
   }, []);
   const openPayWallStoreKitDemo = useCallback(() => {
     setSettingsOpen(false);
     setPayWallStoreKitDemoOpen(true);
   }, []);
+  const handlePayWallStoreKitDemoPurchaseComplete = useCallback(() => {
+    setPayWallStoreKitDemoOpen(false);
+    void refreshEntitlementStatus();
+  }, [refreshEntitlementStatus]);
   const updateSettingsMeta = useCallback((patch: Record<string, unknown>) => {
     const fallbackSettings = {
       id: 'settings' as const,
@@ -1460,6 +1554,7 @@ export function DashboardApp() {
     setInsightTarget(null);
   }, [handleOverlayOpenChange, navigateToActivity]);
   const handleTabPress = useCallback((id: string) => {
+    if (drawerGesturePressSuppressionRef.current) return;
     if      (id === 'home')     navigate('home');
     else if (id === 'spending') navigate('insights');
     else if (id === 'budget')   navigate('budget');
@@ -1643,6 +1738,7 @@ export function DashboardApp() {
             active={screen === 'insights' || screen === 'insightDetail' ? 'spending' : screen}
             onAdd={openVoiceExpense}
             onTabPress={handleTabPress}
+            onTouchActivityChange={handleTabBarTouchActivityChange}
           />
         </Animated.View>
 
@@ -1704,7 +1800,10 @@ export function DashboardApp() {
           onOpenSharing={openSharingSettings}
           onOpenOnboarding={openOnboardingPreview}
           onOpenIOSStyleOnboarding={openIOSStyleOnboardingPreview}
-          onOpenPaywallPreview={openPaywallPreview}
+          userTutorialDemoEnabled={userTutorialDemoOpen}
+          onUserTutorialDemoEnabledChange={handleUserTutorialDemoChange}
+          animatedKeyPadDemoEnabled={animatedKeyPadDemoOpen}
+          onAnimatedKeyPadDemoEnabledChange={handleAnimatedKeyPadDemoChange}
           onOpenPayWallStoreKitDemo={openPayWallStoreKitDemo}
           cloudSyncState={cloudSyncState}
         />
@@ -1777,16 +1876,12 @@ export function DashboardApp() {
           </View>
         ) : null}
 
-        {paywallPreviewOpen ? (
-          <MembershipPaywallPreview
-            visible={paywallPreviewOpen}
-            onClose={() => setPaywallPreviewOpen(false)}
-          />
-        ) : null}
-
         {payWallStoreKitDemoOpen ? (
           <View style={[StyleSheet.absoluteFill, { zIndex: 130, backgroundColor: '#000' }]}>
-            <NativePayWallStoreKitDemo style={StyleSheet.absoluteFill} />
+            <NativePayWallStoreKitDemo
+              style={StyleSheet.absoluteFill}
+              onPurchaseComplete={handlePayWallStoreKitDemoPurchaseComplete}
+            />
           </View>
         ) : null}
 
@@ -1794,10 +1889,27 @@ export function DashboardApp() {
           <IOSStyleOnboardingPreview
             visible={iosStyleOnboardingPreviewOpen}
             onClose={() => setIOSStyleOnboardingPreviewOpen(false)}
+            initialName={currentMemberProfileImageDataUri ? currentMember?.displayName : ''}
+            profileImageDataUri={currentMemberProfileImageDataUri}
+            onNameChange={handleIOSStyleOnboardingNameChange}
           />
         ) : null}
 
-        {!showOnboarding && !paywallPreviewOpen && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && (
+        {userTutorialDemoOpen ? (
+          <UserTutorialDemoScreen
+            visible={userTutorialDemoOpen}
+            onClose={() => setUserTutorialDemoOpen(false)}
+          />
+        ) : null}
+
+        {animatedKeyPadDemoOpen ? (
+          <AnimatedKeyPadDemoScreen
+            visible={animatedKeyPadDemoOpen}
+            onClose={() => setAnimatedKeyPadDemoOpen(false)}
+          />
+        ) : null}
+
+        {!PAYWALL_STARTUP_DISABLED && !showOnboarding && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && !userTutorialDemoOpen && !animatedKeyPadDemoOpen && (
           <PaywallGate onOpenChange={setPaywallGateOpen} />
         )}
         <AppLockGate />

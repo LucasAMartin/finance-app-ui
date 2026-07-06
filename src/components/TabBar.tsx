@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { Link } from 'expo-router';
@@ -15,6 +15,7 @@ export interface TabBarProps {
   active: string;
   onAdd: (source?: SourceRect) => void;
   onTabPress?: (id: string) => void;
+  onTouchActivityChange?: (active: boolean) => void;
 }
 
 // Each tab carries both a legacy RN icon name (fallback path) and the SF Symbol
@@ -32,8 +33,10 @@ const TAB_GAP  = 4;   // spacing between buttons in the pill
 
 // ─── Liquid Glass tab bar (iOS 26+) ──────────────────────────────────────────
 
-function GlassTabBar({ theme, active, onTabPress, onAdd }: TabBarProps) {
+function GlassTabBar({ theme, active, onTabPress, onAdd, onTouchActivityChange }: TabBarProps) {
   const insets  = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const barWidth = Math.max(280, Math.min(width - 40, 430));
 
   const handleTabPress = (id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -48,14 +51,34 @@ function GlassTabBar({ theme, active, onTabPress, onAdd }: TabBarProps) {
   return (
     <View
       style={[glassStyles.container, { bottom: Math.max(insets.bottom, 16) + 8 }]}
+      onStartShouldSetResponderCapture={() => {
+        onTouchActivityChange?.(true);
+        return false;
+      }}
+      onTouchStart={() => onTouchActivityChange?.(true)}
+      onTouchEnd={() => onTouchActivityChange?.(false)}
+      onTouchCancel={() => onTouchActivityChange?.(false)}
       accessibilityRole="tablist"
     >
-      <NativeCustomGlassTabBar
-        activeTab={active}
-        isDark={theme.dark}
-        onTabSelect={handleTabPress}
-        onVoiceAction={handleAdd}
-      />
+      <View style={[glassStyles.nativeBarFrame, { width: barWidth }]}>
+        <NativeCustomGlassTabBar
+          activeTab={active}
+          isDark={theme.dark}
+          onTabSelect={handleTabPress}
+          onVoiceAction={handleAdd}
+          usesExternalVoiceTrigger
+        />
+        <Link href="/expense?mode=voice" asChild>
+          <Link.Trigger withAppleZoom>
+            <Pressable
+              onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+              accessibilityRole="button"
+              accessibilityLabel="Add expense"
+              style={glassStyles.voiceZoomTrigger}
+            />
+          </Link.Trigger>
+        </Link>
+      </View>
     </View>
   );
 }
@@ -68,16 +91,28 @@ const glassStyles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 30,
   },
+  nativeBarFrame: {
+    height: 55,
+  },
+  voiceZoomTrigger: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 55,
+    height: 55,
+    borderRadius: 27.5,
+  },
 });
 
 // ─── Fallback tab bar (iOS < 26, Android) ────────────────────────────────────
 
 const EASE_OUT_EXPO = Easing.bezier(0.16, 1, 0.3, 1);
 
-function FallbackTabBar({ theme, active, onTabPress }: TabBarProps) {
+function FallbackTabBar({ theme, active, onTabPress, onTouchActivityChange }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const scales = useRef(TABS.map(() => new Animated.Value(1))).current;
   const [localActive, setLocalActive] = useState(active);
+  const selectedIconColor = theme.text;
 
   useEffect(() => { setLocalActive(active); }, [active]);
 
@@ -114,7 +149,7 @@ function FallbackTabBar({ theme, active, onTabPress }: TabBarProps) {
             style={fallbackStyles.tabBtn}
           >
             <Animated.View style={{ transform: [{ scale: scales[i] }] }}>
-              <Icon name={t.icon} size={22} color={isActive ? theme.text : theme.textSec} solid={isActive} />
+              <Icon name={t.icon} size={22} color={isActive ? selectedIconColor : theme.textSec} solid={isActive} />
             </Animated.View>
           </Pressable>
         );
@@ -135,7 +170,7 @@ function FallbackTabBar({ theme, active, onTabPress }: TabBarProps) {
               { backgroundColor: theme.dark ? 'rgba(235,239,242,0.14)' : 'rgba(14,12,24,0.07)' },
             ]}
           >
-            <Icon name="mic" size={24} color={theme.text} stroke={1.8} />
+            <Icon name="mic" size={24} color={selectedIconColor} stroke={1.8} />
           </Pressable>
         </Link.Trigger>
       </Link>
@@ -143,7 +178,16 @@ function FallbackTabBar({ theme, active, onTabPress }: TabBarProps) {
   );
 
   return (
-    <View style={[fallbackStyles.container, { bottom: Math.max(insets.bottom, 16) + 8 }]}>
+    <View
+      style={[fallbackStyles.container, { bottom: Math.max(insets.bottom, 16) + 8 }]}
+      onStartShouldSetResponderCapture={() => {
+        onTouchActivityChange?.(true);
+        return false;
+      }}
+      onTouchStart={() => onTouchActivityChange?.(true)}
+      onTouchEnd={() => onTouchActivityChange?.(false)}
+      onTouchCancel={() => onTouchActivityChange?.(false)}
+    >
       {Platform.OS === 'ios' ? (
         <BlurView
           intensity={80}

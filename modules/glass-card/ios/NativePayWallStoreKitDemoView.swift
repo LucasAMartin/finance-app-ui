@@ -4,7 +4,9 @@ import StoreKit
 import SwiftUI
 import UIKit
 
-public final class NativePayWallStoreKitDemoViewProps: UIBaseViewProps {}
+public final class NativePayWallStoreKitDemoViewProps: UIBaseViewProps {
+  var onPurchaseComplete = EventDispatcher()
+}
 
 public struct NativePayWallStoreKitDemoView: ExpoSwiftUI.View {
   @ObservedObject public var props: NativePayWallStoreKitDemoViewProps
@@ -15,7 +17,9 @@ public struct NativePayWallStoreKitDemoView: ExpoSwiftUI.View {
 
   public var body: some View {
     if #available(iOS 18.0, *) {
-      PayWallStoreKitDemoContentView()
+      PayWallStoreKitDemoContentView(onPurchaseComplete: {
+        props.onPurchaseComplete([:])
+      })
     } else {
       ZStack {
         Color.black.ignoresSafeArea()
@@ -60,6 +64,7 @@ private enum PayWallStoreKitDemoIAPImage: String, CaseIterable {
 
 @available(iOS 18.0, *)
 private struct PayWallStoreKitDemoContentView: View {
+    let onPurchaseComplete: () -> Void
     @State private var loadingStatus: (Bool, Bool) = (false, false)
     var body: some View {
         GeometryReader {
@@ -92,8 +97,12 @@ private struct PayWallStoreKitDemoContentView: View {
                     switch result {
                     case .success(let result):
                         switch result {
-                        case .success(_): print("Success and verify purchase using verification result")
-                        case .pending: print("Pending Action")
+                        case .success(_):
+                            print("Success and verify purchase using verification result")
+                            onPurchaseComplete()
+                        case .pending:
+                            print("Pending Action")
+                            onPurchaseComplete()
                         case .userCancelled: print("User Cancelled")
                         @unknown default:
                             fatalError()

@@ -132,6 +132,7 @@ function appendSearchClause(
 
 function appendBaseWhere(parts: string[], params: any[], query: TransactionSummaryQuery) {
   appendInClause(parts, params, 'category', query.categoryIds);
+  appendInClause(parts, params, 'created_by_user_id', query.createdByUserIds);
   appendSearchClause(parts, params, query.merchantQuery, query.searchCategoryIds);
   if (query.from) {
     parts.push('occurred_at >= ?');
@@ -344,6 +345,7 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     params.push(ledgerParam());
     appendBaseWhere(parts, params, {
       categoryIds: query.categoryIds,
+      createdByUserIds: query.createdByUserIds,
       merchantQuery: query.merchantQuery,
       searchCategoryIds: query.searchCategoryIds,
       from: query.from,
@@ -373,6 +375,7 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     year: number;
     month: number;
     categoryIds?: string[];
+    createdByUserIds?: string[];
     merchantQuery?: string;
     searchCategoryIds?: string[];
     minAmount?: number;
@@ -386,6 +389,7 @@ export class SQLiteTransactionsRepo extends SQLiteRepository<Transaction, Create
     params.push(ledgerParam());
     appendBaseWhere(parts, params, {
       categoryIds: query.categoryIds,
+      createdByUserIds: query.createdByUserIds,
       merchantQuery: query.merchantQuery,
       searchCategoryIds: query.searchCategoryIds,
       from,

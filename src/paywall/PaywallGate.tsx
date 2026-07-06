@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { usePaywall } from './PaywallProvider';
-import { MembershipPaywallPreview } from './MembershipPaywallPreview';
+import { NativePayWallStoreKitDemo } from '../../modules/glass-card/src/NativePayWallStoreKitDemo';
 
 interface PaywallGateProps {
   onOpenChange?: (open: boolean) => void;
@@ -12,10 +13,7 @@ export function PaywallGate({ onOpenChange }: PaywallGateProps = {}) {
     mode,
     status,
     isPremium,
-    isBusy,
-    products,
-    purchaseProduct,
-    restorePurchases,
+    refreshEntitlementStatus,
   } = usePaywall();
   const [paywallAttempted, setPaywallAttempted] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
@@ -39,20 +37,29 @@ export function PaywallGate({ onOpenChange }: PaywallGateProps = {}) {
     onOpenChange?.(false);
   }, [onOpenChange]);
 
+  const handlePurchaseComplete = useCallback(() => {
+    setPaywallOpen(false);
+    void refreshEntitlementStatus();
+  }, [refreshEntitlementStatus]);
+
   return paywallOpen ? (
-    <MembershipPaywallPreview
-      visible={paywallOpen}
-      onClose={() => setPaywallOpen(false)}
-      products={products}
-      isBusy={isBusy}
-      onPurchase={async (productID) => {
-        const didPurchase = await purchaseProduct(productID);
-        if (didPurchase) setPaywallOpen(false);
-      }}
-      onRestore={async () => {
-        const didRestore = await restorePurchases();
-        if (didRestore) setPaywallOpen(false);
-      }}
-    />
+    <View style={styles.root}>
+      <NativePayWallStoreKitDemo
+        style={StyleSheet.absoluteFill}
+        onPurchaseComplete={handlePurchaseComplete}
+      />
+    </View>
   ) : null;
 }
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: '#000',
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 130,
+  },
+});

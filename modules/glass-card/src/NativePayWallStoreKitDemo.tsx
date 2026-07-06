@@ -3,13 +3,21 @@ import { Platform, StyleProp, StyleSheet, View, ViewProps, ViewStyle } from 'rea
 import { requireNativeView } from 'expo';
 import { Host } from '@expo/ui';
 
-type NativePayWallStoreKitDemoNativeProps = ViewProps;
+type NativePayWallStoreKitDemoNativeProps = ViewProps & {
+  onPurchaseComplete?: () => void;
+};
 
 const NativePayWallStoreKitDemoView = Platform.OS === 'ios'
   ? requireNativeView<NativePayWallStoreKitDemoNativeProps>('GlassCard', 'NativePayWallStoreKitDemoView')
   : null;
 
-export function NativePayWallStoreKitDemo({ style }: { style?: StyleProp<ViewStyle> }) {
+export function NativePayWallStoreKitDemo({
+  style,
+  onPurchaseComplete,
+}: {
+  style?: StyleProp<ViewStyle>;
+  onPurchaseComplete?: () => void;
+}) {
   if (!NativePayWallStoreKitDemoView) {
     return <View style={[style, styles.fallback]} />;
   }
@@ -17,7 +25,10 @@ export function NativePayWallStoreKitDemo({ style }: { style?: StyleProp<ViewSty
   return (
     <View collapsable={false} style={[style, styles.root]}>
       <Host colorScheme="dark" ignoreSafeArea="all" style={styles.host}>
-        <NativePayWallStoreKitDemoView style={styles.nativeFill} />
+        <NativePayWallStoreKitDemoView
+          style={styles.nativeFill}
+          onPurchaseComplete={onPurchaseComplete}
+        />
       </Host>
     </View>
   );

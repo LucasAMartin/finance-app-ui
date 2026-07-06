@@ -379,9 +379,10 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
   // a JS Pressable renders the material but stays inert. The RN label (custom SVG
   // icons + Inter text) is embedded via `RNHostView`, and `matchContents` sizes
   // the capsule to hug it. The active-filter tint maps to the glass's native tint.
+  const hostKey = `${dark ? 'dark' : 'light'}:${overlay ?? 'default'}`;
   if (SUPPORTS_GLASS) {
     return (
-      <Host matchContents ignoreSafeArea="all" colorScheme={dark ? 'dark' : 'light'}>
+      <Host key={hostKey} matchContents ignoreSafeArea="all" colorScheme={dark ? 'dark' : 'light'}>
         <GlassEffectContainer>
           <SwiftButton
             onPress={onPress}
@@ -395,7 +396,7 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
               }),
             ]}
           >
-            <RNHostView matchContents>
+            <RNHostView key={hostKey} matchContents>
               <View style={S.filterPill}>{children}</View>
             </RNHostView>
           </SwiftButton>
@@ -407,6 +408,7 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
   // Pre-iOS-26 fallback: the prior BlurView capsule with a tint overlay.
   return (
     <TouchableOpacity
+      key={hostKey}
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole="button"
@@ -417,6 +419,7 @@ function FilterPill({ dark, overlay, onPress, accessibilityLabel, children }: {
         tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
         style={[S.filterPill, S.filterPillBlur, {
           borderColor: dark ? GLASS_TINT_ACTIVE : 'rgba(0,0,0,0.10)',
+          backgroundColor: overlay ?? (dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)'),
         }]}
       >
         {overlay ? (
@@ -458,6 +461,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
   const [catFilter, setCatFilter]           = useState<string[]>([]);
   const [dateFilter, setDateFilter]         = useState<DateFilter>(null);
   const [amountFilter, setAmountFilter]     = useState<AmountFilter>(null);
+  const [userFilter, setUserFilter]         = useState<string | null>(null);
   const [sortBy, setSortBy]                 = useState<SortOrder>('date-desc');
   const [pendingUndo, setPendingUndo]       = useState<{ tx: Transaction } | null>(null);
   const [deniedMessage, setDeniedMessage]   = useState<string | null>(null);
@@ -599,6 +603,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
     setCatFilter([]);
     setDateFilter(null);
     setAmountFilter(null);
+    setUserFilter(null);
     setSelectedDay(null);
     calendarSheetRef.current?.resetSelection?.();
   }, []);
@@ -653,7 +658,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
 
   // Sort is a presentation preference, not a scope filter — excluded from the badge count
   // so the filter button doesn't fill just because the user changed sort order.
-  const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0);
+  const activeCount = catFilter.length + (dateFilter ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0) + (userFilter ? 1 : 0);
 
   const appliedInitialFilterRef = useRef<ActivityInitialFilter | null>(null);
 
@@ -673,6 +678,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
       setDateFilter(null);
     }
     setAmountFilter(null);
+    setUserFilter(null);
     setSelectedDay(null);
   }, []);
 
@@ -712,11 +718,12 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
 
   const transactionScope = useMemo<TransactionSummaryQuery>(() => ({
     categoryIds: catFilter.length > 0 ? catFilter : undefined,
+    createdByUserIds: userFilter ? [userFilter] : undefined,
     merchantQuery,
     searchCategoryIds,
     ...amountBounds(amountFilter),
     ...dateRangeForFilter(dateFilter, false, CALENDAR_YEAR, CALENDAR_MONTH),
-  }), [catFilter, merchantQuery, searchCategoryIds, amountFilter, dateFilter]);
+  }), [catFilter, userFilter, merchantQuery, searchCategoryIds, amountFilter, dateFilter]);
 
   const activityQuery = useMemo<TransactionQuery>(() => ({
     ...transactionScope,
@@ -848,7 +855,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
   const merchantLogos = useMerchantLogoMap(activityRows, SUPPORTS_GLASS && active);
 
   const dayKeys = useMemo(() => Object.keys(grouped), [grouped]);
-  const isFiltered = catFilter.length > 0 || dateFilter !== null || query.length > 0 || selectedDay !== null;
+  const isFiltered = catFilter.length > 0 || dateFilter !== null || userFilter !== null || query.length > 0 || selectedDay !== null;
 
   // Expense-only count and sum for the filtered result set. Both exclude income
   // so count and total are consistent — no silent discrepancy between them.
@@ -869,6 +876,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
     const selectedDate = new Date(calViewYear, calViewMonth, selectedDay);
     const txs = transactionsRepo.listPage({
       categoryIds: catFilter.length > 0 ? catFilter : undefined,
+      createdByUserIds: userFilter ? [userFilter] : undefined,
       merchantQuery,
       searchCategoryIds,
       from: startOfDay(selectedDate).toISOString(),
@@ -881,7 +889,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
       return pd?.month === calViewMonth && pd.day === selectedDay;
     });
     return { txs, bills, total: txs.reduce((s, t) => s + t.amount, 0) };
-  }, [selectedDay, calViewMonth, calViewYear, catFilter, merchantQuery, searchCategoryIds, calBills, transactionsRepo, repoVersion]);
+  }, [selectedDay, calViewMonth, calViewYear, catFilter, userFilter, merchantQuery, searchCategoryIds, calBills, transactionsRepo, repoVersion]);
 
   const dayDetailSpend = dayDetail.txs
     .filter(t => t.type !== 'income')
@@ -889,6 +897,10 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
 
   const pWallpaper = makeP(true);
   const p          = makeP(theme.dark);
+  const filterPillBaseTint = glassTintForTheme(theme.dark);
+  const filterPillInk = theme.dark ? pWallpaper.text : '#0E0C18';
+  const filterPillSemanticAlpha = theme.dark ? '36' : '24';
+  const filterPillNeutralTint = theme.dark ? 'rgba(20,20,24,0.55)' : 'rgba(255,255,255,0.92)';
   const scrim      = makeScrim(theme.dark);
 
   const scrimTop    = scrim.top;
@@ -903,8 +915,22 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
     extrapolate: 'clamp',
   });
 
-  const filterPillCount = (selectedDay !== null ? 1 : 0) + (dateFilter !== null ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0) + catFilter.length;
+  const filterPillCount = (selectedDay !== null ? 1 : 0) + (dateFilter !== null ? 1 : 0) + (amountFilterActive(amountFilter) ? 1 : 0) + (userFilter ? 1 : 0) + catFilter.length;
   const hasFilterPills = filterPillCount > 0;
+  const activityListExtraData = useMemo(() => ({
+    activeCount,
+    amountKey: amountFilterLabel(amountFilter),
+    catKey: catFilter.join('|'),
+    dateKey: dateFilter
+      ? (typeof dateFilter === 'string' ? dateFilter : `${dateFilter.from.toISOString()}-${dateFilter.to.toISOString()}`)
+      : '',
+    dayKey: selectedDay ?? '',
+    dark: theme.dark,
+    filterPillCount,
+    hasFilterPills,
+    query,
+    userKey: userFilter ?? '',
+  }), [activeCount, amountFilter, catFilter, dateFilter, filterPillCount, hasFilterPills, query, selectedDay, theme.dark, userFilter]);
 
   // Safety net: selected-day changes are local to the calendar detail and do not
   // always rebuild the paged activity query, so restore once that local filter
@@ -1114,6 +1140,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
         <AnimatedGHFlatList
           ref={scrollViewRef}
           data={activityDayKeys}
+          extraData={activityListExtraData}
           keyExtractor={(day) => String(day)}
           renderItem={renderActivityItem}
           accessibilityRole="list"
@@ -1181,50 +1208,61 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
                   {filterPillCount >= 2 && (
                     <Reanimated.View key="pill-clear-all" entering={FadeIn.duration(160)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
                       <FilterPill dark={theme.dark} overlay={glassTintForTheme(theme.dark)} onPress={() => removeFilter(clearAllFilters)} accessibilityLabel="Clear all filters">
-                        <Text numberOfLines={1} style={[S.filterPillText, S.filterPillClearAll, { color: p.text }]}>Clear all</Text>
+                        <Text numberOfLines={1} style={[S.filterPillText, S.filterPillClearAll, { color: filterPillInk }]}>Clear all</Text>
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {selectedDay !== null && (
                     <Reanimated.View key="pill-day" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                      <FilterPill dark={theme.dark} onPress={() => removeFilter(() => setSelectedDay(null))} accessibilityLabel="Clear day selection">
-                        <Icon name="cal" size={10} color={p.text} stroke={1.7} />
-                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
+                      <FilterPill dark={theme.dark} overlay={filterPillBaseTint} onPress={() => removeFilter(() => setSelectedDay(null))} accessibilityLabel="Clear day selection">
+                        <Icon name="cal" size={10} color={filterPillInk} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: filterPillInk }]}>
                           {MONTHS[calViewMonth]} {selectedDay}
                         </Text>
-                        <Icon name="close" size={10} color={p.text} stroke={2} />
+                        <Icon name="close" size={10} color={filterPillInk} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {dateFilter && typeof dateFilter === 'string' && (
                     <Reanimated.View key="pill-date" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                      <FilterPill dark={theme.dark} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
-                        <Icon name="cal" size={10} color={p.text} stroke={1.7} />
-                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
+                      <FilterPill dark={theme.dark} overlay={filterPillBaseTint} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
+                        <Icon name="cal" size={10} color={filterPillInk} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: filterPillInk }]}>
                           {DATE_PRESETS.find(dp => dp.id === dateFilter)?.label}
                         </Text>
-                        <Icon name="close" size={10} color={p.text} stroke={2} />
+                        <Icon name="close" size={10} color={filterPillInk} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {dateFilter && typeof dateFilter !== 'string' && (
                     <Reanimated.View key="pill-date-range" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                      <FilterPill dark={theme.dark} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
-                        <Icon name="cal" size={10} color={p.text} stroke={1.7} />
-                        <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>
+                      <FilterPill dark={theme.dark} overlay={filterPillBaseTint} onPress={() => removeFilter(clearDateRange)} accessibilityLabel="Remove date filter">
+                        <Icon name="cal" size={10} color={filterPillInk} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: filterPillInk }]}>
                           {fmtDate(dateFilter.from)} – {fmtDate(dateFilter.to)}
                         </Text>
-                        <Icon name="close" size={10} color={p.text} stroke={2} />
+                        <Icon name="close" size={10} color={filterPillInk} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
                   {amountFilterActive(amountFilter) && (
                     <Reanimated.View key="pill-amount" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                      <FilterPill dark={theme.dark} overlay={theme.dark ? 'rgba(231,234,237,0.38)' : 'rgba(14,17,22,0.38)'} onPress={() => removeFilter(() => setAmountFilter(null))} accessibilityLabel="Remove amount filter">
-                        <Text numberOfLines={1} style={[S.filterPillText, S.filterPillAmountText, { color: p.text }]}>
+                      <FilterPill dark={theme.dark} overlay={filterPillNeutralTint} onPress={() => removeFilter(() => setAmountFilter(null))} accessibilityLabel="Remove amount filter">
+                        <Text numberOfLines={1} style={[S.filterPillText, S.filterPillAmountText, { color: filterPillInk }]}>
                           {amountFilterLabel(amountFilter)}
                         </Text>
-                        <Icon name="close" size={10} color={p.text} stroke={2} />
+                        <Icon name="close" size={10} color={filterPillInk} stroke={2} />
+                      </FilterPill>
+                    </Reanimated.View>
+                  )}
+                  {userFilter && (
+                    <Reanimated.View key="pill-user" exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
+                      <FilterPill dark={theme.dark} overlay={filterPillNeutralTint} onPress={() => removeFilter(() => setUserFilter(null))} accessibilityLabel="Remove user filter">
+                        <Icon name="profile" size={10} color={filterPillInk} stroke={1.7} />
+                        <Text numberOfLines={1} style={[S.filterPillText, { color: filterPillInk }]}>
+                          {memberDisplayName(ledgerMembers, userFilter) ?? 'Unknown user'}
+                        </Text>
+                        <Icon name="close" size={10} color={filterPillInk} stroke={2} />
                       </FilterPill>
                     </Reanimated.View>
                   )}
@@ -1232,10 +1270,10 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
                     const cat = cats[catId];
                     return (
                       <Reanimated.View key={catId} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(200)}>
-                        <FilterPill dark={theme.dark} overlay={categoryGroupColor(catId, categories, theme.dark) + '26'} onPress={() => removeFilter(() => setCatFilter(catFilter.filter(c => c !== catId)))} accessibilityLabel={`Remove ${cat?.label} filter`}>
-                          <Icon name={cat?.icon} size={11} color={p.text} stroke={1.6} />
-                          <Text numberOfLines={1} style={[S.filterPillText, { color: p.text }]}>{cat?.label}</Text>
-                          <Icon name="close" size={10} color={p.text} stroke={2} />
+                        <FilterPill dark={theme.dark} overlay={categoryGroupColor(catId, categories, theme.dark) + filterPillSemanticAlpha} onPress={() => removeFilter(() => setCatFilter(catFilter.filter(c => c !== catId)))} accessibilityLabel={`Remove ${cat?.label} filter`}>
+                          <Icon name={cat?.icon} size={11} color={filterPillInk} stroke={1.6} />
+                          <Text numberOfLines={1} style={[S.filterPillText, { color: filterPillInk }]}>{cat?.label}</Text>
+                          <Icon name="close" size={10} color={filterPillInk} stroke={2} />
                         </FilterPill>
                       </Reanimated.View>
                     );
@@ -1380,6 +1418,7 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
           repoVersion={repoVersion}
           categories={categories}
           catFilter={catFilter}
+          userFilter={userFilter}
           merchantQuery={merchantQuery}
           searchCategoryIds={searchCategoryIds}
           amountFilter={amountFilter}
@@ -1396,10 +1435,13 @@ export function ActivityScreen({ theme, active = true, onOpenDrawer, onOpenTx, o
           catFilter={catFilter}
           dateFilter={dateFilter}
           amountFilter={amountFilter}
+          userFilter={userFilter}
           sortBy={sortBy}
           categories={categories}
+          ledgerMembers={ledgerMembers}
           cats={cats}
           setCatFilter={setCatFilter}
+          setUserFilter={setUserFilter}
           setDateFilter={handleSetDateFilter}
           setAmountFilter={setAmountFilter}
           setSortBy={setSortBy}
@@ -1448,6 +1490,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   repoVersion: number;
   categories: Category[];
   catFilter: string[];
+  userFilter: string | null;
   merchantQuery?: string;
   searchCategoryIds: string[];
   amountFilter: AmountFilter;
@@ -1465,6 +1508,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   repoVersion,
   categories,
   catFilter,
+  userFilter,
   merchantQuery,
   searchCategoryIds,
   amountFilter,
@@ -1717,10 +1761,11 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
   const marksQueryKey = useMemo(() => [
     repoVersion,
     catFilter.join('|'),
+    userFilter ?? '',
     merchantQuery ?? '',
     searchCategoryIds.join('|'),
     amountFilterLabel(amountFilter),
-  ].join('::'), [amountFilter, catFilter, merchantQuery, repoVersion, searchCategoryIds]);
+  ].join('::'), [amountFilter, catFilter, userFilter, merchantQuery, repoVersion, searchCategoryIds]);
   const marksCacheRef = useRef(new Map<string, Record<number, string[]>>());
 
   useEffect(() => {
@@ -1736,6 +1781,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       year,
       month,
       categoryIds: catFilter.length > 0 ? catFilter : undefined,
+      createdByUserIds: userFilter ? [userFilter] : undefined,
       merchantQuery,
       searchCategoryIds,
       ...amountBounds(amountFilter),
@@ -1747,7 +1793,7 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
     });
     marksCacheRef.current.set(cacheKey, groupedRows);
     return groupedRows;
-  }, [amountFilter, catFilter, marksQueryKey, merchantQuery, searchCategoryIds, transactionsRepo]);
+  }, [amountFilter, catFilter, userFilter, marksQueryKey, merchantQuery, searchCategoryIds, transactionsRepo]);
   const colorForCat = useMemo(() => {
     const cache: Record<string, string> = {};
     return (catId: string) => (
@@ -1763,11 +1809,12 @@ const CalendarSheet = React.memo(React.forwardRef<SheetHandle, {
       repoVersion,
       dark: theme.dark,
       catKey: catFilter.join('|'),
+      userKey: userFilter ?? '',
       merchantQuery,
       searchKey: searchCategoryIds.join('|'),
       amountKey: amountFilterLabel(amountFilter),
     }),
-    [amountFilter, catFilter, merchantQuery, mode, rangeEndId, rangeStartId, repoVersion, searchCategoryIds, selectedDateId, theme.dark],
+    [amountFilter, catFilter, userFilter, merchantQuery, mode, rangeEndId, rangeStartId, repoVersion, searchCategoryIds, selectedDateId, theme.dark],
   );
   const renderMonth = useCallback(({ item }: { item: CalendarMonthEnhanced }) => (
     <HistoryCalendarMonth
@@ -2038,10 +2085,13 @@ const FilterSheet = React.memo(React.forwardRef<SheetHandle, {
   catFilter: string[];
   dateFilter: DateFilter;
   amountFilter: AmountFilter;
+  userFilter: string | null;
   sortBy: SortOrder;
   categories: Category[];
+  ledgerMembers: LedgerMember[];
   cats: Record<string, { label: string; icon: string; budget: number }>;
   setCatFilter: (c: string[]) => void;
+  setUserFilter: (userId: string | null) => void;
   setDateFilter: (d: DateFilter) => void;
   setAmountFilter: (a: AmountFilter) => void;
   setSortBy: (s: SortOrder) => void;
@@ -2049,8 +2099,8 @@ const FilterSheet = React.memo(React.forwardRef<SheetHandle, {
   onOpenChange?: (open: boolean) => void;
 }>(
 function FilterSheet({
-  theme, catFilter, dateFilter, amountFilter, sortBy,
-  categories, cats, setCatFilter, setDateFilter, setAmountFilter, setSortBy, clearDay, onOpenChange,
+  theme, catFilter, dateFilter, amountFilter, userFilter, sortBy,
+  categories, ledgerMembers, cats, setCatFilter, setUserFilter, setDateFilter, setAmountFilter, setSortBy, clearDay, onOpenChange,
 }, ref) {
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<BottomSheet>(null);
@@ -2264,13 +2314,14 @@ function FilterSheet({
     commitCatFilter([]);
     setDateFilter(null);
     clearAmountFilter();
+    setUserFilter(null);
     setSortBy('date-desc');
     clearDay();
   };
 
   const hasAmountFilter = amountFilterActive(amountFilterFromDrafts(localMinDraft, localMaxDraft));
   const amountInvalid = amountRangeInvalid(localMinDraft, localMaxDraft);
-  const activeCount = localCatFilter.length + (dateFilter ? 1 : 0) + (hasAmountFilter ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
+  const activeCount = localCatFilter.length + (dateFilter ? 1 : 0) + (hasAmountFilter ? 1 : 0) + (userFilter ? 1 : 0) + (sortBy !== 'date-desc' ? 1 : 0);
 
   const customLabel = dateFilter && typeof dateFilter !== 'string'
     ? `${fmtDate(dateFilter.from)} – ${fmtDate(dateFilter.to)}`
@@ -2362,6 +2413,44 @@ function FilterSheet({
     );
   }, [customLabel, dateFilter, theme.text, theme.accent.dot, handleDatePickerChange, setDateFilter]);
 
+  const userMenu = useMemo(() => {
+    const activeMembers = ledgerMembers.filter(member => member.status !== 'removed');
+    const activeLabel = userFilter
+      ? memberDisplayName(ledgerMembers, userFilter) ?? 'Unknown user'
+      : 'All users';
+    return (
+      <View style={FS.sortRow}>
+        <Text style={[FS.sortRowLabel, { color: theme.text }]}>Added by</Text>
+        <Host ignoreSafeArea="all" style={{ width: 160, height: 28 }}>
+          <Menu
+            label={
+              <View style={[FS.menuTrigger, { width: 160, height: 28, justifyContent: 'flex-end' }]}>
+                <Text style={[FS.menuTriggerText, { color: theme.accent.dot }]} numberOfLines={1}>
+                  {activeLabel}
+                </Text>
+                <Icon name="chevDown" size={11} color={theme.accent.dot} stroke={2} />
+              </View>
+            }
+          >
+            <SwiftButton
+              systemImage={userFilter === null ? 'checkmark' : undefined}
+              onPress={() => setUserFilter(null)}
+              label="All users"
+            />
+            {activeMembers.map(member => (
+              <SwiftButton
+                key={member.userId}
+                systemImage={userFilter === member.userId ? 'checkmark' : undefined}
+                onPress={() => setUserFilter(member.userId)}
+                label={member.displayName}
+              />
+            ))}
+          </Menu>
+        </Host>
+      </View>
+    );
+  }, [ledgerMembers, userFilter, theme.text, theme.accent.dot, setUserFilter]);
+
   return (
     <BottomSheet
       ref={sheetRef}
@@ -2383,41 +2472,42 @@ function FilterSheet({
       {!everVisible ? (
         <View style={{ flex: 1, backgroundColor: theme.surface }} />
       ) : (
-        <View style={[FS.content, { backgroundColor: theme.surface }]}>
-
-          {/* ── Header ──────────────────────────────────────── */}
-          <View style={[FS.header, { borderBottomColor: theme.sep }]}>
-            <ScreenExitButton
-              variant="close"
-              onPress={close}
-              tint={theme.textSec}
-              fallbackBg={theme.chipBg}
-              accessibilityLabel="Done"
-            />
-            <Text style={[FS.title, { color: theme.text }]} pointerEvents="none">Filters</Text>
-            <TouchableOpacity
-              onPress={clearAll}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityRole="button"
-              accessibilityLabel="Clear all filters"
-              disabled={activeCount === 0}
-              style={{ opacity: activeCount > 0 ? 1 : 0 }}
-            >
-              <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
-            </TouchableOpacity>
-          </View>
-
+        <>
           <BottomSheetScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, SPACE.lg) + SPACE.lg }}
+            style={[FS.scroll, { backgroundColor: theme.surface }]}
+            contentContainerStyle={[FS.scrollContent, { paddingBottom: Math.max(insets.bottom, SPACE.lg) + SPACE.lg }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
+            {/* ── Header ──────────────────────────────────────── */}
+            <View style={[FS.header, { borderBottomColor: theme.sep }]}>
+              <ScreenExitButton
+                variant="close"
+                onPress={close}
+                tint={theme.textSec}
+                fallbackBg={theme.chipBg}
+                accessibilityLabel="Done"
+              />
+              <Text style={[FS.title, { color: theme.text }]} pointerEvents="none">Filters</Text>
+              <TouchableOpacity
+                onPress={clearAll}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                disabled={activeCount === 0}
+                style={{ opacity: activeCount > 0 ? 1 : 0 }}
+              >
+                <Text style={[FS.clearLink, { color: theme.accent.dot }]}>Clear all</Text>
+              </TouchableOpacity>
+            </View>
+
             {/* ── Sort + Date — control card ──────────────────── */}
             <View style={[FS.controlsCard, { backgroundColor: theme.chipBg }]}>
               {sortMenu}
               <View style={[FS.cardRowDivider, { backgroundColor: theme.sep }]} />
               {dateMenu}
+              <View style={[FS.cardRowDivider, { backgroundColor: theme.sep }]} />
+              {userMenu}
             </View>
 
             {/* ── Amount range ────────────────────────────────── */}
@@ -2499,7 +2589,7 @@ function FilterSheet({
             zIndex={80}
             passthrough
           />
-        </View>
+        </>
       )}
     </BottomSheet>
   );
@@ -3520,8 +3610,10 @@ const CS = StyleSheet.create({
 // ─── FilterSheet styles ───────────────────────────────────────────────────────
 
 const FS = StyleSheet.create({
-  content: {
+  scroll: {
     flex: 1,
+  },
+  scrollContent: {
     paddingTop: 8,
   },
   header: {

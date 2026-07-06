@@ -92,6 +92,9 @@ private struct IOS26StyleOnBoarding: View {
 
   var body: some View {
     ZStack(alignment: .bottom) {
+      Color(uiColor: .systemBackground)
+        .ignoresSafeArea()
+
       ScreenshotView()
         .compositingGroup()
         .scaleEffect(
@@ -116,7 +119,7 @@ private struct IOS26StyleOnBoarding: View {
 
       BackButton()
     }
-    .preferredColorScheme(.dark)
+    .preferredColorScheme(.light)
   }
 
   @ViewBuilder
@@ -132,7 +135,7 @@ private struct IOS26StyleOnBoarding: View {
       let size = $0.size
 
       Rectangle()
-        .fill(.black)
+        .fill(Color(uiColor: .systemBackground))
 
       ScrollView(.horizontal) {
         HStack(spacing: 12) {
@@ -210,13 +213,13 @@ private struct IOS26StyleOnBoarding: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .lineLimit(1)
-                .foregroundStyle(.white)
+                .foregroundStyle(.black)
 
               Text(item.subtitle)
                 .font(.callout)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(.black.opacity(0.65))
             }
             .frame(width: size.width)
             .compositingGroup()
@@ -244,7 +247,7 @@ private struct IOS26StyleOnBoarding: View {
         let isActive = currentIndex == index
 
         Capsule()
-          .fill(.white.opacity(isActive ? 1 : 0.4))
+          .fill(.black.opacity(isActive ? 1 : 0.25))
           .frame(width: isActive ? 25 : 6, height: 6)
       }
     }
@@ -293,7 +296,7 @@ private struct IOS26StyleOnBoarding: View {
 
   @ViewBuilder
   func VariableGlassBlur(_ radius: CGFloat) -> some View {
-    let tint: Color = .black.opacity(0.5)
+    let tint: Color = Color(uiColor: .systemBackground).opacity(0.82)
     Rectangle()
       .fill(tint)
       .glassEffect(.clear, in: .rect)
@@ -334,20 +337,20 @@ private struct IOSStyleOnboardingFallback: View {
 
   var body: some View {
     ZStack {
-      Color.black
+      Color(uiColor: .systemBackground)
       VStack(spacing: 16) {
         Text("iOS 26 Onboarding")
           .font(.title2)
           .fontWeight(.semibold)
-          .foregroundStyle(.white)
+          .foregroundStyle(.black)
         Text("This preview requires iOS 26.")
           .font(.callout)
-          .foregroundStyle(.white.opacity(0.75))
+          .foregroundStyle(.black.opacity(0.65))
         Button("Done", action: onComplete)
           .buttonStyle(.borderedProminent)
       }
       .padding(24)
     }
-    .preferredColorScheme(.dark)
+    .preferredColorScheme(.light)
   }
 }

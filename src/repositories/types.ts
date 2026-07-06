@@ -271,6 +271,7 @@ export interface TransactionQuery {
   limit: number;
   cursor?: TransactionCursor;
   categoryIds?: string[];
+  createdByUserIds?: string[];
   merchantQuery?: string;
   searchCategoryIds?: string[];
   from?: string;
@@ -291,6 +292,7 @@ export interface TransactionPageWithSummary extends TransactionPage {
 
 export interface TransactionSummaryQuery {
   categoryIds?: string[];
+  createdByUserIds?: string[];
   merchantQuery?: string;
   searchCategoryIds?: string[];
   from?: string;
@@ -319,6 +321,7 @@ export interface SpendSeriesQuery {
   /** 'day' → one point per calendar day; 'month' → one point per calendar month. */
   bucket: SpendBucket;
   categoryIds?: string[];
+  createdByUserIds?: string[];
   merchantQuery?: string;
   searchCategoryIds?: string[];
   minAmount?: number;
@@ -353,6 +356,7 @@ export type TransactionsRepo = Repository<Transaction, CreateTransactionInput, U
     year: number;
     month: number;
     categoryIds?: string[];
+    createdByUserIds?: string[];
     merchantQuery?: string;
     searchCategoryIds?: string[];
     minAmount?: number;

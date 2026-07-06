@@ -6,13 +6,14 @@ Pod::Spec.new do |s|
   s.author         = ''
   s.homepage       = 'https://docs.expo.dev/modules/'
   s.platforms      = {
-    :ios => '16.4',
-    :tvos => '16.4'
+    :ios => '17.0',
+    :tvos => '17.0'
   }
   s.source         = { git: '' }
   s.static_framework = true
   s.resource_bundles = {
     'GlassCardPaywall' => ['Resources/Paywall/*'],
+    'GlassCardUserTutorial' => ['Resources/UserTutorialAssets.xcassets'],
     'GlassCardShaders' => ['LiquidLens.metal']
   }
 
