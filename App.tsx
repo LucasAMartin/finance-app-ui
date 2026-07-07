@@ -60,6 +60,7 @@ import { WidgetsSetupScreen } from './src/screens/WidgetsSetupScreen';
 import { IOSStyleOnboardingPreview } from './src/screens/IOSStyleOnboardingPreview';
 import { UserTutorialDemoScreen } from './src/screens/UserTutorialDemoScreen';
 import { AnimatedKeyPadDemoScreen } from './src/screens/AnimatedKeyPadDemoScreen';
+import { NotificationPermissionDemoScreen } from './src/screens/NotificationPermissionDemoScreen';
 import { GoalsScreen } from './src/screens/GoalsScreen';
 import { TabBar } from './src/components/TabBar';
 import { Drawer } from './src/components/Drawer';
@@ -211,6 +212,7 @@ export function DashboardApp() {
   const [iosStyleOnboardingPreviewOpen, setIOSStyleOnboardingPreviewOpen] = useState(false);
   const [userTutorialDemoOpen, setUserTutorialDemoOpen] = useState(false);
   const [animatedKeyPadDemoOpen, setAnimatedKeyPadDemoOpen] = useState(false);
+  const [notificationPermissionDemoOpen, setNotificationPermissionDemoOpen] = useState(false);
   const [payWallStoreKitDemoOpen, setPayWallStoreKitDemoOpen] = useState(false);
   const [paywallGateOpen, setPaywallGateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -742,6 +744,17 @@ export function DashboardApp() {
     sessionRepo.updateMember(member.id, { displayName: name });
   }, [ledgerMembers, session.currentUserId, sessionRepo]);
 
+  const handleIOSStyleOnboardingProfileImageChange = useCallback((profileImageDataUri: string) => {
+    const member = ledgerMembers.find(item => item.userId === session.currentUserId);
+    if (!member) return;
+    sessionRepo.updateMember(member.id, {
+      meta: {
+        ...(member.meta ?? {}),
+        profileImageDataUri,
+      },
+    });
+  }, [ledgerMembers, session.currentUserId, sessionRepo]);
+
   const bindActiveLedgerToICloudUser = useCallback(async (claimAsOwner: boolean) => {
     const currentCloudUser = await CloudKitSyncModule.getCurrentUser();
     if (!currentCloudUser.available) return currentCloudUser;
@@ -1139,7 +1152,7 @@ export function DashboardApp() {
   }).current;
 
   const drawerAnim = useRef(new Animated.Value(0)).current;
-  const paywallOpen = paywallGateOpen || payWallStoreKitDemoOpen || animatedKeyPadDemoOpen;
+  const paywallOpen = paywallGateOpen || payWallStoreKitDemoOpen || animatedKeyPadDemoOpen || notificationPermissionDemoOpen;
   const sidebarSwipeOpenEnabled = SIDEBAR_SWIPE_SCREENS.includes(screen)
     && !goalsOpen
     && !settingsOpen
@@ -1367,6 +1380,10 @@ export function DashboardApp() {
   const openPayWallStoreKitDemo = useCallback(() => {
     setSettingsOpen(false);
     setPayWallStoreKitDemoOpen(true);
+  }, []);
+  const openNotificationPermissionDemo = useCallback(() => {
+    setSettingsOpen(false);
+    setNotificationPermissionDemoOpen(true);
   }, []);
   const handlePayWallStoreKitDemoPurchaseComplete = useCallback(() => {
     setPayWallStoreKitDemoOpen(false);
@@ -1805,6 +1822,7 @@ export function DashboardApp() {
           animatedKeyPadDemoEnabled={animatedKeyPadDemoOpen}
           onAnimatedKeyPadDemoEnabledChange={handleAnimatedKeyPadDemoChange}
           onOpenPayWallStoreKitDemo={openPayWallStoreKitDemo}
+          onOpenNotificationPermissionDemo={openNotificationPermissionDemo}
           cloudSyncState={cloudSyncState}
         />
 
@@ -1892,6 +1910,7 @@ export function DashboardApp() {
             initialName={currentMemberProfileImageDataUri ? currentMember?.displayName : ''}
             profileImageDataUri={currentMemberProfileImageDataUri}
             onNameChange={handleIOSStyleOnboardingNameChange}
+            onProfileImageChange={handleIOSStyleOnboardingProfileImageChange}
           />
         ) : null}
 
@@ -1909,7 +1928,14 @@ export function DashboardApp() {
           />
         ) : null}
 
-        {!PAYWALL_STARTUP_DISABLED && !showOnboarding && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && !userTutorialDemoOpen && !animatedKeyPadDemoOpen && (
+        {notificationPermissionDemoOpen ? (
+          <NotificationPermissionDemoScreen
+            visible={notificationPermissionDemoOpen}
+            onClose={() => setNotificationPermissionDemoOpen(false)}
+          />
+        ) : null}
+
+        {!PAYWALL_STARTUP_DISABLED && !showOnboarding && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && !userTutorialDemoOpen && !animatedKeyPadDemoOpen && !notificationPermissionDemoOpen && (
           <PaywallGate onOpenChange={setPaywallGateOpen} />
         )}
         <AppLockGate />

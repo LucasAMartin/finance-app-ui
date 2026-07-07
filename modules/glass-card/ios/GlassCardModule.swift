@@ -35,6 +35,7 @@ public class GlassCardModule: Module {
     ExpoUIView(NativeWallpaperCarouselView.self)
     ExpoUIView(NativeGlassSegmentedControlView.self)
     ExpoUIView(NativeLGToastView.self)
+    ExpoUIView(NativeNotificationPermissionView.self)
 
     AsyncFunction("writeFinanceWidgetSnapshot") { (json: String) in
       guard let defaults = UserDefaults(suiteName: "group.com.lucasmartin.financeapp.widgets") else {

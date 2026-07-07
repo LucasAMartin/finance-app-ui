@@ -1,7 +1,7 @@
 import React from 'react';
-import { Modal, StyleSheet, View } from 'react-native';
+import { Alert, Modal, StyleSheet, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { NativeIOSStyleOnboarding } from '../../modules/glass-card/src/NativeIOSStyleOnboarding';
-import { NativeIntroLoginNamePage } from '../../modules/intro-login/src/NativeIntroLoginNamePage';
 
 interface Props {
   visible: boolean;
@@ -9,6 +9,7 @@ interface Props {
   initialName?: string;
   profileImageDataUri?: string;
   onNameChange?: (name: string) => void;
+  onProfileImageChange?: (profileImageDataUri: string) => void;
 }
 
 export function IOSStyleOnboardingPreview({
@@ -17,12 +18,30 @@ export function IOSStyleOnboardingPreview({
   initialName,
   profileImageDataUri,
   onNameChange,
+  onProfileImageChange,
 }: Props) {
-  const [step, setStep] = React.useState<'ios' | 'introLogin'>('ios');
-
-  React.useEffect(() => {
-    if (visible) setStep('ios');
-  }, [visible]);
+  const choosePhoto = React.useCallback(async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Photo access needed', 'Allow photo access to choose a profile picture.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.35,
+      base64: true,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset?.base64) {
+      Alert.alert('Photo unavailable', 'This photo could not be saved as a synced avatar.');
+      return;
+    }
+    const mimeType = asset.mimeType ?? 'image/jpeg';
+    onProfileImageChange?.(`data:${mimeType};base64,${asset.base64}`);
+  }, [onProfileImageChange]);
 
   return (
     <Modal
@@ -31,35 +50,24 @@ export function IOSStyleOnboardingPreview({
       presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
-      {step === 'ios' ? (
-        <View style={styles.root}>
-          <NativeIOSStyleOnboarding
-            style={StyleSheet.absoluteFill}
-            tint="#007AFF"
-            hideBezels={false}
-            onComplete={() => setStep('introLogin')}
-          />
-        </View>
-      ) : (
-        <View style={styles.introLoginRoot}>
-          <NativeIntroLoginNamePage
-            style={StyleSheet.absoluteFill}
-            initialName={initialName}
-            profileImageDataUri={profileImageDataUri}
-            onNameChange={onNameChange}
-          />
-        </View>
-      )}
+      <View style={styles.root}>
+        <NativeIOSStyleOnboarding
+          style={StyleSheet.absoluteFill}
+          tint="#007AFF"
+          hideBezels={false}
+          initialName={initialName}
+          profileImageDataUri={profileImageDataUri}
+          onNameChange={onNameChange}
+          onProfileImagePress={choosePhoto}
+          onComplete={onClose}
+        />
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  introLoginRoot: {
     flex: 1,
     backgroundColor: '#fff',
   },

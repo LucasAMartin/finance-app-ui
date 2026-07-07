@@ -96,6 +96,7 @@ interface Props {
   animatedKeyPadDemoEnabled?: boolean;
   onAnimatedKeyPadDemoEnabledChange?: (enabled: boolean) => void;
   onOpenPayWallStoreKitDemo?: () => void;
+  onOpenNotificationPermissionDemo?: () => void;
   cloudSyncState: CloudSyncUiState;
 }
 
@@ -115,6 +116,7 @@ export function SettingsScreen({
   animatedKeyPadDemoEnabled = false,
   onAnimatedKeyPadDemoEnabledChange,
   onOpenPayWallStoreKitDemo,
+  onOpenNotificationPermissionDemo,
   cloudSyncState,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -392,6 +394,14 @@ export function SettingsScreen({
                     systemImage="storefront"
                     value="Open"
                     onPress={onOpenPayWallStoreKitDemo}
+                  />
+                ) : null}
+                {__DEV__ && onOpenNotificationPermissionDemo ? (
+                  <SettingsActionRow
+                    label="Demo Notification Permission"
+                    systemImage="bell.badge"
+                    value="Open"
+                    onPress={onOpenNotificationPermissionDemo}
                   />
                 ) : null}
               </SwiftSection>
