@@ -37,8 +37,12 @@ function GlassTabBar({ theme, active, onTabPress, onAdd, onTouchActivityChange }
   const insets  = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const barWidth = Math.max(280, Math.min(width - 40, 430));
+  const [localActive, setLocalActive] = useState(active);
+
+  useEffect(() => { setLocalActive(active); }, [active]);
 
   const handleTabPress = (id: string) => {
+    setLocalActive(id);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onTabPress?.(id);
   };
@@ -62,7 +66,7 @@ function GlassTabBar({ theme, active, onTabPress, onAdd, onTouchActivityChange }
     >
       <View style={[glassStyles.nativeBarFrame, { width: barWidth }]}>
         <NativeCustomGlassTabBar
-          activeTab={active}
+          activeTab={localActive}
           isDark={theme.dark}
           onTabSelect={handleTabPress}
           onVoiceAction={handleAdd}

@@ -1,55 +1,59 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Concise guidance for agents working in this repo.
 
 ## Commands
 
 ```bash
-npm start          # Start Expo dev server (Metro bundler + QR code)
-npm run ios        # Build and run on iOS simulator (requires macOS + Xcode)
-npm run android    # Build and run on Android emulator
-npm run web        # Run in browser
+npm start          # Expo dev server
+npm run ios        # Build/run iOS app
+npm run android    # Build/run Android app
+npm run web        # Expo web
+npm run typecheck  # TypeScript correctness gate
+npm test           # Node test runner for src/**/*.test.ts
+npm run test:repo  # Repository-focused tests
 ```
 
-No linter or test runner is configured. TypeScript type-checking is the main correctness gate — run it via your editor or `npx tsc --noEmit`.
+For Swift/native module changes, also build the touched module, usually:
 
-## Architecture
+```bash
+xcodebuild -workspace ios/financeapp.xcworkspace -scheme GlassCard -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build
+```
 
-This is an Expo React Native app (TypeScript, React 19, Expo SDK 54). Navigation is implemented manually — there is no React Navigation or Expo Router.
+## App Shape
 
-**Navigation model (`App.tsx`):** All screens render simultaneously as `Animated.View` layers stacked with `absoluteFillObject`. The active screen sits at `translateX: 0`; inactive screens sit off-screen left or right based on a fixed `SCREEN_ORDER` map. On transition, only the two involved screens animate; the rest snap silently. `prevScreen` state tracks which screen was just left so `AnimatedScreen` knows which pair to animate.
+- Expo React Native app, TypeScript, React 19, Expo SDK 56. `package.json` uses `expo-router/entry`.
+- Main dashboard navigation still lives in `App.tsx`, not React Navigation. The primary screens are stacked as absolute `Animated.View` layers and fade via per-screen opacity values. `navigate()` owns transition cancellation so rapid tab taps do not leave stale animations behind.
+- Expo Router is used for routed flows such as `/income` and `/expense`; do not assume the app is router-free.
+- The bottom tab bar is `src/components/TabBar.tsx`; on supported iOS it uses the native glass tab bar from `modules/glass-card`.
 
-**Theme system (`src/theme.ts` + `src/ThemeProvider.tsx`):** `makeTheme(dark, accentKey, cardStyle)` produces a `Theme` object with semantic color tokens (`bg`, `surface`, `text`, `textSec`, `textTer`, `sep`, `hairline`, `chipBg`). Every screen and component receives `theme` as a prop — there is no stylesheet. `getCardStyle(theme)` returns the appropriate shadow/border style for the active card variant (`flat | shadow | glass`). The `ThemeProvider` context exposes `setDark`, `setAccentKey`, and `setCardStyle` for runtime switching.
+## Data & Sync
 
-**Data layer (`src/data.ts`):** All data is static mock data — no network calls, no persistence. `TRANSACTIONS`, `PERIOD_DATA`, `TREND`, `SPEND_GROUPS`, `MONTH_BUDGETS`, and `UPCOMING_BILLS` are the main data structures. The 50/30/20 budget framework is the organizing principle: categories map to `needs | wants | savings` groups via `CAT_TO_GROUP` in `src/theme.ts`.
+- Runtime data goes through repositories in `src/repositories`. Production uses SQLite repositories; tests use in-memory repositories.
+- CloudKit sync lives in `src/sync` plus the native module in `modules/cloudkit-sync`.
+- Sharing, conflicts, session metadata, notification prefs, automation imports, and widgets are real app surfaces. Do not treat `src/data.ts` as the app's source of truth.
 
-**Screens (`src/screens/`):**
-- `HomeScreen` — primary dashboard with period toggle (Week/Month/Year), donut chart, sparkline, and transaction list
-- `SpendingScreen` — category breakdown with trend chart
-- `BudgetScreen` — 50/30/20 group view with monthly history switcher
-- `ActivityScreen` — full transaction list with date grouping
-- `DetailScreen` — single transaction detail; receives the `Transaction` object as a prop from App
+## Native Modules
 
-**Components (`src/components/`):**
-- `Icon` — inline SVG icon set (react-native-svg), `name` prop maps to a fixed set of path definitions. Add new icons directly in this file.
-- `shared.tsx` — reusable primitives: `Money` (formatted currency display), `Segmented` (animated pill control), `CircleBtn`, `BackBtn`, `CatBadge`, `SectionHeader`
-- `Donut` — SVG donut chart for category spending
-- `TrendChart` — SVG bar chart with budget line
-- `Sparkline` — 7-day mini sparkline
-- `TabBar` — bottom tab bar (Home / Spending / Budget + Add button)
-- `Drawer` — left slide-in navigation drawer
-- `VoiceSheet` — bottom sheet for adding expenses by voice or manual keypad entry
+- Native SwiftUI/Expo modules live under `modules/`, especially:
+  - `modules/glass-card` for Liquid Glass UI, onboarding, LG toasts, native sheets, tab bar, notification demo.
+  - `modules/animated-key-pad` for the animated keypad demo/income flow pieces.
+  - `modules/intro-login` for imported onboarding/name-page code.
+  - `modules/cloudkit-sync` for CloudKit bridge code.
+- SwiftUI views are exported through Expo Modules and consumed by small TS wrappers in each module's `src/` directory.
+- When integrating code supplied from Downloads, preserve the provided implementation unless the user explicitly asks for design/code changes. Prefer minimal adapters over rewriting native screens in React Native.
 
-**Voice input (`src/voice/`):**
-- `useVoiceRecognition.ts` — wraps `expo-speech-recognition` with start/stop/abort/reset interface
-- `parseVoiceExpense.ts` — pure function that parses free-form speech transcripts into `{ amount, cat, merchant }`. Handles both digit forms ("$6.50") and spoken numbers ("six fifty"). Add new category keywords to `CAT_KEYWORDS`.
+## Design & UI Rules
 
-**Fonts (`src/fonts.ts`):** Inter (via `@expo-google-fonts/inter`) is patched as the default Text font using `patchTextWithInter()`, called once at module load in `App.tsx`.
+- `DESIGN.md` documents the current visual intent; leave larger design-system rewrites for the SwiftUI migration unless the user asks.
+- The app targets iOS first. Prefer native iOS/SwiftUI components for imported native demos and iOS-specific polish.
+- The theme object from `src/theme.ts` is the normal color source for React Native screens. Typography, spacing, and radius tokens live in `src/typography.ts`, `src/spacing.ts`, and `src/radius.ts`.
+- App toasts use `src/components/Toast.tsx`, backed by `NativeLGToast` on iOS.
 
-## Key conventions
+## Editing Conventions
 
-- Every component that needs colors receives a `theme: Theme` prop — do not use hardcoded hex values.
-- Category colors come from `catPastel(cat, dark)` for chart segments or `catGroupColor(cat, dark)` for group-level coloring. Both live in `src/theme.ts`.
-- The app targets iOS first (voice recognition uses Apple's Speech framework). Android and web are secondary.
-- There is no state management library. Local `useState` and props threading are used throughout.
-- For iOS 26+ native Liquid Glass work, read `docs/native-glass-playbook.md` before changing `GlassCard`, Expo UI SwiftUI hosts, Home/Activity native containers, or native merchant marks.
+- Keep changes scoped. There are often unrelated dirty files.
+- Use `rg` for search.
+- Run `npm run typecheck` after TypeScript changes.
+- Run the relevant `xcodebuild` target after Swift/native module changes.
+- Do not rewrite native imported views from scratch when a small edit or wrapper change will solve the request.

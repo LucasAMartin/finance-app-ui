@@ -2,6 +2,8 @@ import ExpoModulesCore
 import ExpoUI
 import Foundation
 import StoreKit
+import SwiftUI
+import UIKit
 import WidgetKit
 
 public class GlassCardModule: Module {
@@ -32,6 +34,8 @@ public class GlassCardModule: Module {
     ExpoUIView(NativeSkeletonView.self)
     ExpoUIView(NativeXStyleSideBarView.self)
     ExpoUIView(NativeDynamicHeightSheetView.self)
+    ExpoUIView(NativeUpcomingPaymentSheetView.self)
+    ExpoUIView(NativeTransactionSheetView.self)
     ExpoUIView(NativeWallpaperCarouselView.self)
     ExpoUIView(NativeGlassSegmentedControlView.self)
     ExpoUIView(NativeLGToastView.self)
@@ -82,6 +86,69 @@ public class GlassCardModule: Module {
       try await AppStore.sync()
       return await self.storeKitEntitlementStatus(productIDs: productIDs)
     }
+
+    AsyncFunction("presentDirectDynamicHeightSheet") { (isDark: Bool) async throws in
+      try await MainActor.run {
+        try self.presentDirectDynamicHeightSheet(isDark: isDark)
+      }
+    }
+  }
+
+  @MainActor
+  private func presentDirectDynamicHeightSheet(isDark: Bool) throws {
+    guard let presenter = Self.topViewController() else {
+      throw storeKitError("No active view controller is available to present the sheet.")
+    }
+
+    let rootView: AnyView
+    if #available(iOS 26.0, *) {
+      let animation: Animation = .snappy(duration: 0.3, extraBounce: 0)
+      rootView = AnyView(
+        DynamicSheet(animation: animation) {
+          TrayView(animation: animation)
+        }
+        .preferredColorScheme(isDark ? .dark : .light)
+      )
+    } else {
+      rootView = AnyView(
+        VStack(spacing: 12) {
+          Text("Direct Native Sheet")
+            .font(.headline)
+          Text("The dynamic tray requires iOS 26.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .presentationDetents([.medium])
+        .preferredColorScheme(isDark ? .dark : .light)
+      )
+    }
+
+    let controller = UIHostingController(rootView: rootView)
+    controller.view.backgroundColor = .clear
+    controller.modalPresentationStyle = .pageSheet
+    presenter.present(controller, animated: true)
+  }
+
+  @MainActor
+  private static func topViewController(from controller: UIViewController? = nil) -> UIViewController? {
+    let root = controller ?? UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .first { $0.activationState == .foregroundActive }?
+      .windows
+      .first { $0.isKeyWindow }?
+      .rootViewController
+
+    if let navigation = root as? UINavigationController {
+      return topViewController(from: navigation.visibleViewController)
+    }
+    if let tab = root as? UITabBarController {
+      return topViewController(from: tab.selectedViewController)
+    }
+    if let presented = root?.presentedViewController {
+      return topViewController(from: presented)
+    }
+    return root
   }
 
   @available(iOS 15.0, *)
@@ -154,7 +221,7 @@ public class GlassCardModule: Module {
     let ids = Set(normalizedProductIDs(productIDs))
     let now = Date()
 
-    for await result in Transaction.currentEntitlements {
+    for await result in StoreKit.Transaction.currentEntitlements {
       guard case .verified(let transaction) = result else { continue }
       guard ids.isEmpty || ids.contains(transaction.productID) else { continue }
       guard transaction.revocationDate == nil else { continue }
@@ -214,7 +281,7 @@ public class GlassCardModule: Module {
   }
 
   @available(iOS 15.0, *)
-  private func verifiedTransaction(_ result: VerificationResult<Transaction>) throws -> Transaction {
+  private func verifiedTransaction(_ result: VerificationResult<StoreKit.Transaction>) throws -> StoreKit.Transaction {
     switch result {
     case .verified(let transaction):
       return transaction

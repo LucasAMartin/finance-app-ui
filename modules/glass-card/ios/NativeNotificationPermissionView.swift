@@ -134,7 +134,8 @@ struct NotificationOnBoarding<NotificationLogo: View>: View {
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                     
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 8)
+                        .frame(maxHeight: 16)
                     
                     /// Primary & Secondary Button's
                     Button {
@@ -197,7 +198,7 @@ struct NotificationOnBoarding<NotificationLogo: View>: View {
             let size = $0.size
             /// Scaling to fit the Preview for smaller devices
             /// You can increase the value 340 to more to have more scaling!
-            let scale = min(size.height / 380, size.width / 340, 0.88)
+            let scale = min(size.height / 380, size.width / 340, 1)
             let width: CGFloat = 320
             let cornerRadius: CGFloat = 30
             
@@ -245,8 +246,8 @@ struct NotificationOnBoarding<NotificationLogo: View>: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 15)
                 
-                /// Notification View
-                NotificationView()
+                /// iCloud Sync Toast View
+                ICloudSyncToastView()
             }
             .frame(width: width)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -264,40 +265,28 @@ struct NotificationOnBoarding<NotificationLogo: View>: View {
     }
     
     @ViewBuilder
-    private func NotificationView() -> some View {
+    private func ICloudSyncToastView() -> some View {
         HStack(alignment: .center, spacing: 8) {
-            notificationLogo
+            Image(systemName: "icloud")
+                .font(.title3)
+                .foregroundStyle(Color.primary)
             
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(config.notificationTitle)
-                        .font(.callout)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    
-                    Spacer(minLength: 0)
-                    
-                    Text("Now")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.gray)
-                }
-                
-                Text(config.notificationContent)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.gray)
-                    .lineLimit(2)
-            }
+            Text("iCloud is up to date")
+                .font(.body)
+                .lineLimit(1)
+            
+            Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(.background)
-        .clipShape(.rect(cornerRadius: 20))
-        .shadow(color: .gray.opacity(0.5), radius: 1.5)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 18)
+        .frame(height: 50)
+        .clipShape(.capsule)
+        .contentShape(.capsule)
+        .lgNotificationDemoToastGlassEffect()
+        .padding(.horizontal, 15)
         .padding(.top, 40)
         .offset(y: animateNotification ? 0 : -200)
         .clipped()
+        .transition(.offset(y: 100))
         .task {
             await loopAnimation()
         }
@@ -371,5 +360,16 @@ fileprivate extension View {
         }
         
         return false
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func lgNotificationDemoToastGlassEffect() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: .capsule)
+        } else {
+            self.background(.regularMaterial, in: .capsule)
+        }
     }
 }

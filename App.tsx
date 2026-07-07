@@ -30,6 +30,8 @@ import { AppLockGate } from './src/components/AppLockGate';
 import { PaywallProvider, usePaywall } from './src/paywall/PaywallProvider';
 import { PaywallGate } from './src/paywall/PaywallGate';
 import { NativePayWallStoreKitDemo } from './modules/glass-card/src/NativePayWallStoreKitDemo';
+import { NativeDynamicHeightSheetDemo } from './modules/glass-card/src/NativeDynamicHeightSheetDemo';
+import GlassCardModule from './modules/glass-card/src/GlassCardModule';
 import { EMPTY_STATE_PREVIEW_META_KEY } from './src/emptyStatePreview';
 import {
   ONBOARDING_V1_COMPLETED_AT_META_KEY,
@@ -67,8 +69,11 @@ import { Drawer } from './src/components/Drawer';
 import type { SourceRect } from './src/components/ContainerTransform';
 import {
   TxSheetMount, type TxSheetHandle,
-  BillSheetMount, type BillSheetHandle,
 } from './src/components/sheetMounts';
+import {
+  NativeUpcomingPaymentSheetMount,
+  type NativeUpcomingPaymentSheetHandle,
+} from './src/components/NativeUpcomingPaymentSheetMount';
 import { useLocalNotificationScheduler } from './src/notifications/scheduler';
 import { useAutomationImportProcessor } from './src/automation/useAutomationImportProcessor';
 import {
@@ -93,6 +98,9 @@ import type { StoredSyncConflict } from './src/sync/sqliteSyncStore';
 import type { AppSession, Bill, Ledger, LedgerMember, Transaction } from './src/repositories/types';
 
 type Screen = 'home' | 'insights' | 'insightDetail' | 'activity' | 'budget';
+type NavigateOptions = {
+  immediate?: boolean;
+};
 
 patchTextWithInter();
 
@@ -214,6 +222,8 @@ export function DashboardApp() {
   const [animatedKeyPadDemoOpen, setAnimatedKeyPadDemoOpen] = useState(false);
   const [notificationPermissionDemoOpen, setNotificationPermissionDemoOpen] = useState(false);
   const [payWallStoreKitDemoOpen, setPayWallStoreKitDemoOpen] = useState(false);
+  const [dynamicHeightSheetDemoOpen, setDynamicHeightSheetDemoOpen] = useState(false);
+  const [dynamicHeightSheetDemoToken, setDynamicHeightSheetDemoToken] = useState(0);
   const [paywallGateOpen, setPaywallGateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
@@ -601,7 +611,7 @@ export function DashboardApp() {
   }, []);
 
   const txSheetRef   = useRef<TxSheetHandle>(null);
-  const billSheetRef = useRef<BillSheetHandle>(null);
+  const upcomingPaymentSheetRef = useRef<NativeUpcomingPaymentSheetHandle>(null);
   const prepareTx = useCallback((tx: Transaction) => {
     if (drawerGesturePressSuppressionRef.current) return;
     txSheetRef.current?.prepare(tx);
@@ -613,7 +623,7 @@ export function DashboardApp() {
   useAutomationImportProcessor({ onOpenTransaction: openTx });
   const openBill = useCallback((bill: Bill) => {
     if (drawerGesturePressSuppressionRef.current) return;
-    billSheetRef.current?.open(bill);
+    upcomingPaymentSheetRef.current?.open(bill);
   }, []);
   const openIncomeRoute = useCallback((_source?: SourceRect) => {
     if (drawerGesturePressSuppressionRef.current) return;
@@ -1140,6 +1150,7 @@ export function DashboardApp() {
 
   // Synchronous read of current screen so navigate() never reads stale state.
   const activeRef = useRef<Screen>('home');
+  const navigationRunRef = useRef(0);
 
   // Each screen's opacity. Home starts visible, rest start hidden.
   // Driven imperatively — no useEffect cycle.
@@ -1152,7 +1163,7 @@ export function DashboardApp() {
   }).current;
 
   const drawerAnim = useRef(new Animated.Value(0)).current;
-  const paywallOpen = paywallGateOpen || payWallStoreKitDemoOpen || animatedKeyPadDemoOpen || notificationPermissionDemoOpen;
+  const paywallOpen = paywallGateOpen || payWallStoreKitDemoOpen || animatedKeyPadDemoOpen || notificationPermissionDemoOpen || dynamicHeightSheetDemoOpen;
   const sidebarSwipeOpenEnabled = SIDEBAR_SWIPE_SCREENS.includes(screen)
     && !goalsOpen
     && !settingsOpen
@@ -1269,32 +1280,50 @@ export function DashboardApp() {
     sidebarSwipeOpenEnabled,
   ]);
 
-  // Cross-fade between screens. Starts before setState — zero perceived delay.
-  const navigate = useCallback((s: Screen) => {
+  // Cross-fade between screens. Tab taps can opt into an immediate native-style swap.
+  const navigate = useCallback((s: Screen, options?: NavigateOptions) => {
     const from = activeRef.current;
     if (s === from) return;
+    const run = navigationRunRef.current + 1;
+    navigationRunRef.current = run;
+
+    ALL_SCREENS.forEach(k => {
+      OP[k].stopAnimation();
+    });
 
     // Snap all uninvolved screens to fully transparent.
     ALL_SCREENS.forEach(k => {
       if (k !== from && k !== s) OP[k].setValue(0);
     });
 
-    Animated.timing(OP[from], {
-      toValue: 0,
-      duration: FADE_DURATION,
-      useNativeDriver: true,
-      easing: Easing.in(Easing.quad),
-    }).start();
-
-    Animated.timing(OP[s], {
-      toValue: 1,
-      duration: FADE_DURATION,
-      useNativeDriver: true,
-      easing: Easing.out(Easing.quad),
-    }).start();
-
     activeRef.current = s;
     setScreen(s);
+
+    if (options?.immediate) {
+      OP[from].setValue(0);
+      OP[s].setValue(1);
+      return;
+    }
+
+    Animated.parallel([
+      Animated.timing(OP[from], {
+        toValue: 0,
+        duration: FADE_DURATION,
+        useNativeDriver: true,
+        easing: Easing.in(Easing.quad),
+      }),
+      Animated.timing(OP[s], {
+        toValue: 1,
+        duration: FADE_DURATION,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.quad),
+      }),
+    ], { stopTogether: false }).start(({ finished }) => {
+      if (!finished || navigationRunRef.current !== run) return;
+      ALL_SCREENS.forEach(k => {
+        OP[k].setValue(k === s ? 1 : 0);
+      });
+    });
   }, [OP]);
 
   const navigateToActivity = useCallback((filter?: ActivityInitialFilter) => {
@@ -1377,6 +1406,27 @@ export function DashboardApp() {
     setSettingsOpen(false);
     setAnimatedKeyPadDemoOpen(enabled);
   }, []);
+  const handleDynamicHeightSheetDemoChange = useCallback((enabled: boolean) => {
+    if (!enabled) {
+      setDynamicHeightSheetDemoOpen(false);
+      return;
+    }
+
+    setSettingsOpen(false);
+    setDynamicHeightSheetDemoOpen(true);
+    setDynamicHeightSheetDemoToken(token => token + 1);
+  }, []);
+  const handleDynamicHeightSheetDemoDismiss = useCallback(() => {
+    setDynamicHeightSheetDemoOpen(false);
+  }, []);
+  const openDirectDynamicHeightSheetDemo = useCallback(() => {
+    setSettingsOpen(false);
+    setTimeout(() => {
+      GlassCardModule.presentDirectDynamicHeightSheet(dark).catch(() => {
+        Alert.alert('Sheet unavailable', 'The direct native sheet could not be opened in this build.');
+      });
+    }, 120);
+  }, [dark]);
   const openPayWallStoreKitDemo = useCallback(() => {
     setSettingsOpen(false);
     setPayWallStoreKitDemoOpen(true);
@@ -1777,7 +1827,7 @@ export function DashboardApp() {
         </Animated.View>
 
         <TxSheetMount ref={txSheetRef} onDeleted={handleDeleteTx} />
-        <BillSheetMount ref={billSheetRef} />
+        <NativeUpcomingPaymentSheetMount ref={upcomingPaymentSheetRef} />
 
         {/* First-run income prompt — rendered once when no income is set */}
         {showIncomePrompt && (
@@ -1821,6 +1871,9 @@ export function DashboardApp() {
           onUserTutorialDemoEnabledChange={handleUserTutorialDemoChange}
           animatedKeyPadDemoEnabled={animatedKeyPadDemoOpen}
           onAnimatedKeyPadDemoEnabledChange={handleAnimatedKeyPadDemoChange}
+          dynamicHeightSheetDemoEnabled={dynamicHeightSheetDemoOpen}
+          onDynamicHeightSheetDemoEnabledChange={handleDynamicHeightSheetDemoChange}
+          onOpenDirectDynamicHeightSheetDemo={openDirectDynamicHeightSheetDemo}
           onOpenPayWallStoreKitDemo={openPayWallStoreKitDemo}
           onOpenNotificationPermissionDemo={openNotificationPermissionDemo}
           cloudSyncState={cloudSyncState}
@@ -1935,7 +1988,13 @@ export function DashboardApp() {
           />
         ) : null}
 
-        {!PAYWALL_STARTUP_DISABLED && !showOnboarding && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && !userTutorialDemoOpen && !animatedKeyPadDemoOpen && !notificationPermissionDemoOpen && (
+        <NativeDynamicHeightSheetDemo
+          presentationToken={dynamicHeightSheetDemoToken}
+          isDark={dark}
+          onDismiss={handleDynamicHeightSheetDemoDismiss}
+        />
+
+        {!PAYWALL_STARTUP_DISABLED && !showOnboarding && !payWallStoreKitDemoOpen && !iosStyleOnboardingPreviewOpen && !userTutorialDemoOpen && !animatedKeyPadDemoOpen && !notificationPermissionDemoOpen && !dynamicHeightSheetDemoOpen && (
           <PaywallGate onOpenChange={setPaywallGateOpen} />
         )}
         <AppLockGate />

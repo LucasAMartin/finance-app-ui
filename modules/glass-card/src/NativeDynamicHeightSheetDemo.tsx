@@ -6,6 +6,7 @@ import { Host } from '@expo/ui';
 type NativeDynamicHeightSheetViewProps = ViewProps & {
   presentationToken?: number;
   isDark?: boolean;
+  onDismiss?: () => void;
 };
 
 const NativeDynamicHeightSheetView = Platform.OS === 'ios'
@@ -15,9 +16,11 @@ const NativeDynamicHeightSheetView = Platform.OS === 'ios'
 export function NativeDynamicHeightSheetDemo({
   presentationToken,
   isDark,
+  onDismiss,
 }: {
   presentationToken: number;
   isDark: boolean;
+  onDismiss?: () => void;
 }) {
   if (!NativeDynamicHeightSheetView) {
     return <View pointerEvents="none" style={styles.host} />;
@@ -33,6 +36,7 @@ export function NativeDynamicHeightSheetDemo({
       <NativeDynamicHeightSheetView
         presentationToken={presentationToken}
         isDark={isDark}
+        onDismiss={onDismiss}
         pointerEvents="none"
         style={StyleSheet.absoluteFill}
       />

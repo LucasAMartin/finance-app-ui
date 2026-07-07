@@ -1,9 +1,11 @@
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
+import { Platform } from 'react-native';
 import { useTheme } from '../ThemeProvider';
 import { VoiceSheet, type SavedExpenseInfo } from './VoiceSheet';
 import { TxSheet } from './TxSheet';
 import { BillSheet } from './BillSheet';
 import { NativeDynamicHeightSheetDemo } from '../../modules/glass-card/src/NativeDynamicHeightSheetDemo';
+import { NativeTransactionSheetMount } from './NativeTransactionSheetMount';
 import type { Bill, Transaction } from '../repositories/types';
 
 // Each sheet owns its own visibility/data state inside a leaf mount, exposed via
@@ -45,6 +47,10 @@ export interface TxSheetHandle {
 export const TxSheetMount = forwardRef<TxSheetHandle, {
   onDeleted?: (tx: Transaction) => void;
 }>(function TxSheetMount({ onDeleted }, ref) {
+  if (Platform.OS === 'ios') {
+    return <NativeTransactionSheetMount ref={ref} onDeleted={onDeleted} />;
+  }
+
   const { theme } = useTheme();
   const [tx, setTx] = useState<Transaction | null>(null);
   const [visible, setVisible] = useState(false);

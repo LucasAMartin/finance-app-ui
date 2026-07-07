@@ -29,6 +29,7 @@ declare class GlassCardModule extends NativeModule<{}> {
   getStoreKitEntitlementStatus(productIDs: string[]): Promise<StoreKitEntitlementStatus>;
   purchaseStoreKitProduct(productID: string, productIDs: string[]): Promise<StoreKitEntitlementStatus>;
   restoreStoreKitPurchases(productIDs: string[]): Promise<StoreKitEntitlementStatus>;
+  presentDirectDynamicHeightSheet(isDark: boolean): Promise<void>;
 }
 
 export default requireNativeModule<GlassCardModule>('GlassCard');

@@ -5,6 +5,7 @@ import SwiftUI
 public final class NativeDynamicHeightSheetViewProps: UIBaseViewProps {
   @Field var presentationToken: Int = 0
   @Field var isDark: Bool = false
+  var onDismiss = EventDispatcher()
 }
 
 public struct NativeDynamicHeightSheetView: ExpoSwiftUI.View {
@@ -17,7 +18,10 @@ public struct NativeDynamicHeightSheetView: ExpoSwiftUI.View {
   public var body: some View {
     NativeDynamicHeightSheetPresenter(
       presentationToken: props.presentationToken,
-      isDark: props.isDark
+      isDark: props.isDark,
+      onDismiss: {
+        props.onDismiss([:])
+      }
     )
   }
 }
@@ -25,6 +29,7 @@ public struct NativeDynamicHeightSheetView: ExpoSwiftUI.View {
 private struct NativeDynamicHeightSheetPresenter: View {
   let presentationToken: Int
   let isDark: Bool
+  let onDismiss: () -> Void
 
   @State private var lastPresentationToken: Int = 0
   @State private var showTrayView: Bool = false
@@ -55,6 +60,11 @@ private struct NativeDynamicHeightSheetPresenter: View {
           }
           .padding(24)
           .presentationDetents([.medium])
+        }
+      }
+      .onChange(of: showTrayView) { isPresented in
+        if !isPresented {
+          onDismiss()
         }
       }
   }

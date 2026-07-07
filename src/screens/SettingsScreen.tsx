@@ -95,6 +95,9 @@ interface Props {
   onUserTutorialDemoEnabledChange?: (enabled: boolean) => void;
   animatedKeyPadDemoEnabled?: boolean;
   onAnimatedKeyPadDemoEnabledChange?: (enabled: boolean) => void;
+  dynamicHeightSheetDemoEnabled?: boolean;
+  onDynamicHeightSheetDemoEnabledChange?: (enabled: boolean) => void;
+  onOpenDirectDynamicHeightSheetDemo?: () => void;
   onOpenPayWallStoreKitDemo?: () => void;
   onOpenNotificationPermissionDemo?: () => void;
   cloudSyncState: CloudSyncUiState;
@@ -115,6 +118,9 @@ export function SettingsScreen({
   onUserTutorialDemoEnabledChange,
   animatedKeyPadDemoEnabled = false,
   onAnimatedKeyPadDemoEnabledChange,
+  dynamicHeightSheetDemoEnabled = false,
+  onDynamicHeightSheetDemoEnabledChange,
+  onOpenDirectDynamicHeightSheetDemo,
   onOpenPayWallStoreKitDemo,
   onOpenNotificationPermissionDemo,
   cloudSyncState,
@@ -386,6 +392,22 @@ export function SettingsScreen({
                     systemImage="keyboard"
                     isOn={animatedKeyPadDemoEnabled}
                     onIsOnChange={onAnimatedKeyPadDemoEnabledChange}
+                  />
+                ) : null}
+                {__DEV__ && onDynamicHeightSheetDemoEnabledChange ? (
+                  <SwiftToggle
+                    label="Dynamic Height Sheet Demo"
+                    systemImage="rectangle.bottomthird.inset.filled"
+                    isOn={dynamicHeightSheetDemoEnabled}
+                    onIsOnChange={onDynamicHeightSheetDemoEnabledChange}
+                  />
+                ) : null}
+                {__DEV__ && onOpenDirectDynamicHeightSheetDemo ? (
+                  <SettingsActionRow
+                    label="Direct Native Sheet Demo"
+                    systemImage="rectangle.bottomthird.inset.filled"
+                    value="Open"
+                    onPress={onOpenDirectDynamicHeightSheetDemo}
                   />
                 ) : null}
                 {__DEV__ && onOpenPayWallStoreKitDemo ? (
