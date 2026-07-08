@@ -225,7 +225,7 @@ private struct UpcomingPaymentSheetContent: View {
     VStack(spacing: 0) {
       UpcomingPaymentMerchantMark(model: model, size: 52)
       Text(model.merchant)
-        .font(.system(size: 17, weight: .semibold))
+        .font(.system(size: 18, weight: .medium))
         .foregroundStyle(model.color(.text))
         .multilineTextAlignment(.center)
         .lineLimit(1)
@@ -233,7 +233,7 @@ private struct UpcomingPaymentSheetContent: View {
         .padding(.top, 12)
 
       Text(metaLine)
-        .font(.system(size: 13))
+        .font(.system(size: 13, weight: .regular))
         .foregroundStyle(model.color(.textSec))
         .multilineTextAlignment(.center)
         .lineLimit(2)
@@ -241,10 +241,9 @@ private struct UpcomingPaymentSheetContent: View {
 
       HStack(spacing: 1) {
         Text(model.currencySymbol)
-          .foregroundStyle(model.color(.textSec))
         AnimatedCentsTextView(value: $keypadValue)
       }
-      .font(.system(size: 32, weight: .semibold))
+      .font(.system(size: 32, weight: .medium))
       .foregroundStyle(model.color(.text))
       .monospacedDigit()
       .contentTransition(.numericText())
@@ -265,16 +264,16 @@ private struct UpcomingPaymentSheetContent: View {
       } label: {
         HStack(spacing: 12) {
           Text("Amount")
-            .font(.system(size: 16))
+            .font(.system(size: 15, weight: .regular))
             .foregroundStyle(model.color(.textSec))
           Spacer(minLength: 16)
           HStack(spacing: 0) {
             Text(model.currencySymbol)
-              .foregroundStyle(model.color(.textSec))
             AnimatedCentsTextView(value: $keypadValue)
               .foregroundStyle(model.color(.text))
           }
-          .font(.system(size: 17, weight: .semibold))
+          .font(.system(size: 15, weight: .medium))
+          .foregroundStyle(model.color(.text))
           .monospacedDigit()
         }
         .contentShape(Rectangle())
@@ -290,7 +289,7 @@ private struct UpcomingPaymentSheetContent: View {
 
       HStack(spacing: 12) {
         Text("Due date")
-          .font(.system(size: 16))
+          .font(.system(size: 15, weight: .regular))
           .foregroundStyle(model.color(.textSec))
         Spacer(minLength: 16)
         DatePicker("", selection: $dueDate, displayedComponents: .date)
@@ -368,7 +367,7 @@ private struct UpcomingPaymentSheetContent: View {
           Text(model.currencySymbol)
           AnimatedCentsTextView(value: $keypadValue)
         }
-          .font(.system(size: 16, weight: .semibold))
+          .font(.system(size: 16, weight: .medium))
           .foregroundStyle(.white)
           .frame(maxWidth: .infinity)
           .frame(height: 52)
@@ -541,7 +540,7 @@ private struct UpcomingPaymentMerchantMark: View {
   }
 
   private func localImage(url: URL) -> Image? {
-    guard url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) else {
+    guard let uiImage = NativeSheetLogoImage.image(fromLocalURL: url) else {
       return nil
     }
     return Image(uiImage: uiImage)
@@ -555,8 +554,25 @@ private struct UpcomingPaymentMerchantMark: View {
   }
 
   private var logoURL: URL? {
-    guard let raw = model.logoUrl else { return nil }
-    return URL(string: raw)
+    Self.renderableURL(from: model.logoUrl)
+  }
+
+  private static func renderableURL(from value: String?) -> URL? {
+    guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+      return nil
+    }
+    if rawValue.hasPrefix("/") {
+      return URL(fileURLWithPath: rawValue)
+    }
+    if let url = URL(string: rawValue), url.scheme != nil {
+      return url
+    }
+    if let encoded = rawValue.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed),
+       let url = URL(string: encoded),
+       url.scheme != nil {
+      return url
+    }
+    return nil
   }
 
   private var backgroundColor: Color {

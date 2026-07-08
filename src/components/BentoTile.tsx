@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 
+import { SUPPORTS_GLASS } from './GlassButton';
+import NativeGlassCard from '../../modules/glass-card/src/GlassCardView';
 import { MEDIA } from '../wallpaperPalette';
 
 interface Props {
@@ -51,7 +53,18 @@ export function BentoTile({
       bounciness: 0,
     }).start();
 
-  const body = (
+  const glassBody = SUPPORTS_GLASS ? (
+    <View style={styles.nativeGlassBody}>
+      <NativeGlassCard
+        cornerRadius={RADIUS}
+        pressable={false}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={[styles.inner, styles.nativeGlassInner, { borderColor }]}>{children}</View>
+    </View>
+  ) : null;
+
+  const blurBody = (
     <BlurView
       intensity={blurIntensity}
       tint={dark ? 'systemMaterialDark' : 'systemMaterialLight'}
@@ -60,6 +73,7 @@ export function BentoTile({
       <View style={[styles.inner, { borderColor }]}>{children}</View>
     </BlurView>
   );
+  const body = glassBody ?? blurBody;
 
   if (!onPress) {
     return <View style={[styles.tile, style]}>{body}</View>;
@@ -87,6 +101,19 @@ const styles = StyleSheet.create({
   // system surfaces rather than web rounded rectangles.
   tile: { borderRadius: RADIUS, borderCurve: 'continuous' },
   fill: { flex: 1 },
+  nativeGlassBody: {
+    flex: 1,
+    borderRadius: RADIUS,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+  },
+  nativeGlassInner: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
   blur: {
     flex: 1,
     borderRadius: RADIUS,

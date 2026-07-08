@@ -31,13 +31,13 @@ test('automation import queue dedupes by fingerprint', () => {
   const repos = createSQLiteRepositories();
   const first = repos.automationImportsRepo.create({
     source: 'sms',
-    rawText: 'Discover Card Alert: A transaction of $9.27 at EMERALD CITY SMOOTHIE on June 30, 2026.',
-    fingerprint: 'sms:queue:test:emerald',
+    rawText: 'Discover Card Alert: A transaction of $9.27 at NORTHLAKE SMOOTHIE on June 30, 2026.',
+    fingerprint: 'sms:queue:test:northlake',
   });
   const second = repos.automationImportsRepo.create({
     source: 'sms',
-    rawText: 'Discover Card Alert: A transaction of $9.27 at EMERALD CITY SMOOTHIE on June 30, 2026.',
-    fingerprint: 'sms:queue:test:emerald',
+    rawText: 'Discover Card Alert: A transaction of $9.27 at NORTHLAKE SMOOTHIE on June 30, 2026.',
+    fingerprint: 'sms:queue:test:northlake',
   });
 
   assert.equal(second.id, first.id);
@@ -49,16 +49,16 @@ test('queued SMS payload is parsed and saved through the canonical JS automation
   const repos = createSQLiteRepositories();
   const queued = repos.automationImportsRepo.create({
     source: 'sms',
-    rawText: 'Discover Card Alert: A transaction of $9.27 at EMERALD CITY SMOOTHIE on June 30, 2026. No Action needed. See it at https://app.discover.com/ACTVT. Text STOP to end',
+    rawText: 'Discover Card Alert: A transaction of $9.27 at NORTHLAKE SMOOTHIE on June 30, 2026. No Action needed. See it at https://app.discover.com/ACTVT. Text STOP to end',
     amountHint: 9.27,
-    merchantHint: 'EMERALD CITY SMOOTHIE',
+    merchantHint: 'NORTHLAKE SMOOTHIE',
     occurredAtHint: '2026-06-30T12:00:00.000Z',
-    fingerprint: 'sms:queue:test:discover-emerald',
+    fingerprint: 'sms:queue:test:discover-northlake',
   });
   const draft = draftFromAutomationHints(queued);
 
   assert.ok(draft);
-  assert.equal(draft.merchant, 'Emerald City Smoothie');
+  assert.equal(draft.merchant, 'Northlake Smoothie');
   assert.equal(draft.amount, 9.27);
   assert.equal(draft.occurredAt, '2026-06-30T12:00:00.000Z');
 
@@ -75,7 +75,7 @@ test('queued SMS payload is parsed and saved through the canonical JS automation
 
   assert.equal(result.status, 'saved');
   assert.ok(result.transaction);
-  assert.equal(result.transaction.merchant, 'Emerald City Smoothie');
+  assert.equal(result.transaction.merchant, 'Northlake Smoothie');
   assert.equal(result.transaction.amount, 9.27);
   assert.equal(result.transaction.occurredAt, '2026-06-30T12:00:00.000Z');
   assert.equal(result.transaction.meta?.automationSource, 'sms');
@@ -128,7 +128,7 @@ test('queued Wallet payload prefers structured hints over text parsing', async (
 test('queued import processor leaves the saved transaction visible in the active ledger', async () => {
   resetSQLiteDatabaseForTests();
   const repos = createSQLiteRepositories();
-  const rawText = 'Discover Card Alert: A transaction of $9.27 at EMERALD CITY SMOOTHIE on June 30, 2026. No Action needed. See it at https://app.discover.com/ACTVT. Text STOP to end';
+  const rawText = 'Discover Card Alert: A transaction of $9.27 at NORTHLAKE SMOOTHIE on June 30, 2026. No Action needed. See it at https://app.discover.com/ACTVT. Text STOP to end';
   const beforeCount = repos.transactionsRepo.list().length;
   let refreshCount = 0;
   const unsubscribe = repos.transactionsRepo.subscribe(() => {
@@ -140,7 +140,7 @@ test('queued import processor leaves the saved transaction visible in the active
       source: 'sms',
       rawText,
       amountHint: 9.27,
-      merchantHint: 'EMERALD CITY SMOOTHIE',
+      merchantHint: 'NORTHLAKE SMOOTHIE',
       occurredAtHint: '2026-06-30T12:00:00.000Z',
       fingerprint: 'sms:queue:test:processor-visible',
     });
@@ -154,10 +154,10 @@ test('queued import processor leaves the saved transaction visible in the active
 
     assert.equal(result.pendingCount, 1);
     assert.equal(result.savedTransactions.length, 1);
-    assert.equal(result.savedTransactions[0].merchant, 'Emerald City Smoothie');
+    assert.equal(result.savedTransactions[0].merchant, 'Northlake Smoothie');
     assert.equal(repos.transactionsRepo.list().length, beforeCount + 1);
     assert.ok(repos.transactionsRepo.list().some(tx => tx.id === result.savedTransactions[0].id));
-    assert.equal(repos.transactionsRepo.get(result.savedTransactions[0].id)?.merchant, 'Emerald City Smoothie');
+    assert.equal(repos.transactionsRepo.get(result.savedTransactions[0].id)?.merchant, 'Northlake Smoothie');
     assert.equal(
       repos.automationImportsRepo.get(queued.id)?.processedTransactionId,
       result.savedTransactions[0].id,

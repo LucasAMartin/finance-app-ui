@@ -39,6 +39,7 @@ interface Props {
   strokeWidth?: number;
   /** Extra top/bottom breathing room so high/low points and the scrub dot do not clip. */
   verticalInset?: number;
+  bottomInset?: number;
   /** Starts the draw animation only when true; false holds the chart hidden. */
   play?: boolean;
   /** Fires with the active point index while scrubbing, `null` on release. */
@@ -79,6 +80,7 @@ export function SpendChart({
   ringColor = '#FFFFFF',
   strokeWidth = 2.5,
   verticalInset,
+  bottomInset,
   play = true,
   onScrub,
   selectedIdx,
@@ -86,20 +88,21 @@ export function SpendChart({
   haptics = true,
 }: Props) {
   const padX = strokeWidth + 1;
-  const padY = Math.max(strokeWidth + 1, verticalInset ?? strokeWidth + 1);
+  const padTop = Math.max(strokeWidth + 1, verticalInset ?? strokeWidth + 1);
+  const padBottom = Math.max(strokeWidth + 1, bottomInset ?? verticalInset ?? strokeWidth + 1);
   const n = data.length;
 
   const geo = useMemo(() => {
     const max = Math.max(...data, 0);
     const min = Math.min(...data, 0);
     const range = max - min || 1;
-    const innerH = height - padY * 2;
+    const innerH = height - padTop - padBottom;
     const stepX = n > 1 ? (width - padX * 2) / (n - 1) : 0;
     const xs: number[] = [];
     const ys: number[] = [];
     const pts: [number, number][] = data.map((v, i) => {
       const x = padX + i * stepX;
-      const y = padY + (1 - (v - min) / range) * innerH;
+      const y = padTop + (1 - (v - min) / range) * innerH;
       xs.push(x);
       ys.push(y);
       return [x, y];
@@ -110,7 +113,7 @@ export function SpendChart({
     const areaD =
       n === 0
         ? ''
-        : `${lineD} L ${lastX},${height - padY} L ${firstX},${height - padY} Z`;
+        : `${lineD} L ${lastX},${height - padBottom} L ${firstX},${height - padBottom} Z`;
     // Polyline length, over-estimated so the dash fully reveals the curve.
     let len = 0;
     for (let i = 1; i < pts.length; i++) {
@@ -118,7 +121,7 @@ export function SpendChart({
     }
     const dashLen = Math.max(1, len * 1.25);
     return { lineD, areaD, xs, ys, stepX, dashLen };
-  }, [data, width, height, n, padX, padY]);
+  }, [data, width, height, n, padX, padTop, padBottom]);
 
   const drawn = useSharedValue(geo.dashLen);
   const fillIn = useSharedValue(0);
@@ -280,8 +283,8 @@ export function SpendChart({
         {/* Scrub cursor: hairline + haloed dot, fades in on grab. */}
         <AnimatedG animatedProps={cursorProps}>
           <AnimatedLine
-            y1={padY}
-            y2={height - padY}
+            y1={padTop}
+            y2={height - padBottom}
             stroke={color}
             strokeWidth={1.5}
             strokeOpacity={0.35}

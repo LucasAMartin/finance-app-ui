@@ -62,18 +62,18 @@ test('parses purchase alerts with trailing balance details', () => {
 
 test('parses Discover alerts with month-name dates and trailing action links', () => {
   const parsed = parseTransactionIntake(
-    'Discover Card Alert: A transaction of $9.27 at EMERALD CITY SMOOTHIE on June 30, 2026. No Action needed. See it at https://app.discover.com/ACTVT. Text STOP to end',
+    'Discover Card Alert: A transaction of $9.27 at NORTHLAKE SMOOTHIE on June 30, 2026. No Action needed. See it at https://app.discover.com/ACTVT. Text STOP to end',
     'sms',
   );
 
   assert.equal(parsed?.amount, 9.27);
-  assert.equal(parsed?.merchant, 'Emerald City Smoothie');
+  assert.equal(parsed?.merchant, 'Northlake Smoothie');
   assert.equal(parsed?.cat, 'dining');
   assert.equal(parsed?.occurredAt, '2026-06-30T12:00:00.000Z');
-  assert.equal(parsed?.rawDescriptor, 'EMERALD CITY SMOOTHIE');
-  assert.equal(parsed?.normalizedDescriptor, 'EMERALD CITY SMOOTHIE');
+  assert.equal(parsed?.rawDescriptor, 'NORTHLAKE SMOOTHIE');
+  assert.equal(parsed?.normalizedDescriptor, 'NORTHLAKE SMOOTHIE');
   assert.deepEqual(parsed?.merchantCandidates?.map(candidate => candidate.text), [
-    'Emerald City Smoothie',
+    'Northlake Smoothie',
   ]);
 });
 
@@ -107,7 +107,77 @@ test('parses BofA processor descriptors into normalized merchant fields', () => 
   assert.equal(parsed?.rawDescriptor, 'PAYPAL OPENAIOPCOL OPENA');
   assert.equal(parsed?.normalizedDescriptor, 'OPENAIOPCOL OPENA');
   assert.equal(parsed?.processorName, 'PayPal');
-  assert.equal(parsed?.confidence, 0.93);
+  assert.equal(parsed?.confidence, 0.88);
+});
+
+test('marks compressed processor merchant tokens as low-confidence instead of hardcoding aliases', () => {
+  const parsed = parseTransactionIntake(
+    'BofA: Credit card charge $25.00, credit card - 8917, PAYPAL WESTRIDGEWELLNESSCOLLECTIVE, 07/07/26. STOP to end account texts',
+    'sms',
+  );
+
+  assert.equal(parsed?.amount, 25);
+  assert.equal(parsed?.merchant, 'Westridgewellnesscollective');
+  assert.equal(parsed?.rawDescriptor, 'PAYPAL WESTRIDGEWELLNESSCOLLECTIVE');
+  assert.equal(parsed?.normalizedDescriptor, 'WESTRIDGEWELLNESSCOLLECTIVE');
+  assert.equal(parsed?.processorName, 'PayPal');
+  assert.equal(parsed?.confidence, 0.62);
+  assert.equal(parsed?.merchantCandidates?.[0]?.reason, 'processor_compressed_merchant');
+  assert.ok((parsed?.merchantCandidates?.[0]?.score ?? 1) <= 0.48);
+});
+
+test('marks unknown long processor merchant tokens as low-confidence candidates', () => {
+  const parsed = parseTransactionIntake(
+    'BofA: Credit card charge $18.45, credit card - 8917, PAYPAL VERYLONGUNKNOWNMERCHANTNAME, 07/07/26. STOP to end account texts',
+    'sms',
+  );
+
+  assert.equal(parsed?.merchant, 'Verylongunknownmerchantname');
+  assert.equal(parsed?.processorName, 'PayPal');
+  assert.equal(parsed?.confidence, 0.62);
+  assert.equal(parsed?.merchantCandidates?.[0]?.reason, 'processor_compressed_merchant');
+  assert.ok((parsed?.merchantCandidates?.[0]?.score ?? 1) <= 0.48);
+});
+
+test('handles common processor separators and compact merchant descriptors', () => {
+  const cases = [
+    {
+      text: 'BofA: Credit card charge $12.50, credit card - 8917, SQ *LASANG PINOY, 07/07/26. STOP to end account texts',
+      merchant: 'Lasang Pinoy',
+      cat: 'dining',
+      processorName: 'Square',
+    },
+    {
+      text: 'BofA: Credit card charge $18.75, credit card - 8917, TST*CAFE LUNA, 07/07/26. STOP to end account texts',
+      merchant: 'Cafe Luna',
+      cat: 'dining',
+      processorName: 'Toast',
+    },
+    {
+      text: 'BofA: Credit card charge $98.12, credit card - 8917, SHOP PAY *RIVER THREADS, 07/07/26. STOP to end account texts',
+      merchant: 'River Threads',
+      processorName: 'Shop Pay',
+    },
+    {
+      text: 'BofA: Credit card charge $9.27, credit card - 8917, PAYPAL*RAVENWOODWORKSHOP, 07/07/26. STOP to end account texts',
+      merchant: 'Ravenwoodworkshop',
+      processorName: 'PayPal',
+      lowConfidence: true,
+    },
+  ];
+
+  for (const item of cases) {
+    const parsed = parseTransactionIntake(item.text, 'sms');
+    assert.equal(parsed?.merchant, item.merchant, item.text);
+    assert.equal(parsed?.processorName, item.processorName, item.text);
+    if ('cat' in item) {
+      assert.equal(parsed?.cat, item.cat, item.text);
+    }
+    if ('lowConfidence' in item) {
+      assert.equal(parsed?.confidence, 0.62, item.text);
+      assert.equal(parsed?.merchantCandidates?.[0]?.reason, 'processor_compressed_merchant', item.text);
+    }
+  }
 });
 
 test('trims bank alert limit boilerplate after merchant descriptors', () => {
@@ -121,7 +191,7 @@ test('trims bank alert limit boilerplate after merchant descriptors', () => {
   assert.equal(parsed?.cat, 'groceries');
   assert.equal(parsed?.rawDescriptor, 'FRED-MEYER #0424, PUYALLUP');
   assert.equal(parsed?.normalizedDescriptor, 'FRED-MEYER #0424, PUYALLUP');
-  assert.equal(parsed?.confidence, 0.93);
+  assert.equal(parsed?.confidence, 0.88);
   assert.deepEqual(parsed?.merchantCandidates?.map(candidate => candidate.text), [
     'Fred Meyer',
   ]);
@@ -151,7 +221,7 @@ test('parses BofA direct subscription descriptors without card-context candidate
   assert.equal(parsed?.cardLast4, '8917');
   assert.equal(parsed?.rawDescriptor, 'CLAUDE.AI SUBSCRIPTION');
   assert.equal(parsed?.normalizedDescriptor, 'CLAUDE.AI SUBSCRIPTION');
-  assert.equal(parsed?.confidence, 0.93);
+  assert.equal(parsed?.confidence, 0.88);
   assert.equal(parsed?.merchantCandidates?.some(candidate => candidate.text.toLowerCase() === 'credit'), false);
 });
 
@@ -204,18 +274,18 @@ test('handles common bank alert merchant shapes without leaking boilerplate', ()
       rawDescriptor: 'THE HOME DEPOT 4712',
     },
     {
-      text: "US Bank: Debit card purchase of USD 15.20 at MCDONALD'S F12345 on 07/01/26. Reply STOP.",
-      merchant: "Mcdonald's",
+      text: 'US Bank: Debit card purchase of USD 15.20 at BURGER BARN F12345 on 07/01/26. Reply STOP.',
+      merchant: 'Burger Barn',
       amount: 15.2,
       occurredAt: '2026-07-01T12:00:00.000Z',
-      rawDescriptor: "MCDONALD'S F12345",
+      rawDescriptor: 'BURGER BARN F12345',
     },
     {
-      text: 'Citi Alert: Purchase for $8.99 from SPOTIFY USA on card ending in 9876.',
-      merchant: 'Spotify Usa',
+      text: 'Citi Alert: Purchase for $8.99 from MELODY STREAM USA on card ending in 9876.',
+      merchant: 'Melody Stream Usa',
       amount: 8.99,
       cardLast4: '9876',
-      rawDescriptor: 'SPOTIFY USA',
+      rawDescriptor: 'MELODY STREAM USA',
     },
     {
       text: "PNC Alert: VISA purchase approved MERCHANT: TRADER JOE'S #123 $76.54 card ending 4444",

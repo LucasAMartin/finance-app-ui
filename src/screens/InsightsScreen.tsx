@@ -102,6 +102,8 @@ import { GlassCircleButton, ScreenExitButton, EXIT_FLOAT_STYLE, SUPPORTS_GLASS, 
 import { NativeRowMerchantMark } from '../components/NativeRowMerchantMark';
 import { BentoTile } from '../components/BentoTile';
 import { SpendChart } from '../components/charts/SpendChart';
+import { NativeSpendLineChart, SUPPORTS_NATIVE_SPEND_LINE_CHART } from '../../modules/glass-card/src/NativeSpendLineChart';
+import { NativeTrendBarsChart, SUPPORTS_NATIVE_TREND_BARS_CHART } from '../../modules/glass-card/src/NativeTrendBarsChart';
 import { TrendBars } from '../components/charts/TrendBars';
 import { SheetPrimaryButton } from '../components/shared';
 import type { InsightDetailTarget } from './InsightDetailScreen';
@@ -1022,6 +1024,7 @@ interface Props {
   onViewActivity: (filter: ActivityInitialFilter) => void;
   onOpenInsight: (target: InsightDetailTarget) => void;
   onRefreshSync?: () => Promise<void>;
+  onChartInteractionChange?: (active: boolean) => void;
 }
 
 export function InsightsScreen({
@@ -1031,6 +1034,7 @@ export function InsightsScreen({
   onViewActivity,
   onOpenInsight,
   onRefreshSync,
+  onChartInteractionChange,
 }: Props) {
   const { transactionsRepo, categoriesRepo, budgetsRepo, recurringRulesRepo, incomeRepo } =
     useRepositories();
@@ -1045,7 +1049,7 @@ export function InsightsScreen({
   const pWall = makeP(true);
   const p = makeP(theme.dark);
   const shadow = DARK_TEXT_SHADOW;
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Responsive tile geometry — recomputed when the device rotates.
@@ -1818,10 +1822,56 @@ export function InsightsScreen({
     };
   }, [transactionsRepo, timeframe, trendAnchor, repoVersion]);
 
+  const chartPressSuppressedRef = useRef(false);
+  const chartPressSuppressionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setChartInteractionActive = useCallback((isInteracting: boolean) => {
+    onChartInteractionChange?.(isInteracting);
+
+    if (chartPressSuppressionTimerRef.current !== null) {
+      clearTimeout(chartPressSuppressionTimerRef.current);
+      chartPressSuppressionTimerRef.current = null;
+    }
+
+    if (isInteracting) {
+      chartPressSuppressedRef.current = true;
+      return;
+    }
+
+    chartPressSuppressionTimerRef.current = setTimeout(() => {
+      chartPressSuppressionTimerRef.current = null;
+      chartPressSuppressedRef.current = false;
+    }, 180);
+  }, [onChartInteractionChange]);
+
+  const openInsightFromChartTile = useCallback((target: InsightDetailTarget) => {
+    if (chartPressSuppressedRef.current) {
+      return;
+    }
+    onOpenInsight(target);
+  }, [onOpenInsight]);
+
+  const handleChartTouchStart = useCallback(() => {
+    onChartInteractionChange?.(true);
+  }, [onChartInteractionChange]);
+
+  const handleChartTouchEnd = useCallback(() => {
+    onChartInteractionChange?.(false);
+  }, [onChartInteractionChange]);
+
+  useEffect(() => () => {
+    if (chartPressSuppressionTimerRef.current !== null) {
+      clearTimeout(chartPressSuppressionTimerRef.current);
+    }
+    onChartInteractionChange?.(false);
+  }, [onChartInteractionChange]);
+
   // Scrub state for the trends tile — mirrors the hero's scrubIdx: while held,
   // the headline shows the selected bucket's total instead of the average.
   const [trendScrubIdx, setTrendScrubIdx] = useState<number | null>(null);
-  useEffect(() => setTrendScrubIdx(null), [trend]);
+  useEffect(() => {
+    setTrendScrubIdx(null);
+    setChartInteractionActive(false);
+  }, [trend, setChartInteractionActive]);
   const trendScrubbing = trendScrubIdx != null;
   const trendAmount = trendScrubbing
     ? trend.values[trendScrubIdx] ?? trend.avg
@@ -1834,7 +1884,10 @@ export function InsightsScreen({
   // Active scrub point (null = released → show the period total).
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
   // Drop any held scrub when the series changes under it (period/data switch).
-  useEffect(() => setScrubIdx(null), [cumulativeSeries]);
+  useEffect(() => {
+    setScrubIdx(null);
+    setChartInteractionActive(false);
+  }, [cumulativeSeries, setChartInteractionActive]);
 
   const splitMoney = (n: number) => {
     const currency = getActiveCurrency();
@@ -1877,24 +1930,15 @@ export function InsightsScreen({
   const [chartKey, setChartKey] = useState(0);
   const [chartsArmed, setChartsArmed] = useState(active);
   const chartResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chartArmFrameRef = useRef<number | null>(null);
   useEffect(() => {
     if (chartResetTimerRef.current !== null) {
       clearTimeout(chartResetTimerRef.current);
       chartResetTimerRef.current = null;
     }
-    if (chartArmFrameRef.current !== null) {
-      cancelAnimationFrame(chartArmFrameRef.current);
-      chartArmFrameRef.current = null;
-    }
 
     if (active) {
-      setChartsArmed(false);
       setChartKey(k => k + 1);
-      chartArmFrameRef.current = requestAnimationFrame(() => {
-        chartArmFrameRef.current = null;
-        setChartsArmed(true);
-      });
+      setChartsArmed(true);
       return;
     }
 
@@ -1906,23 +1950,6 @@ export function InsightsScreen({
 
   useEffect(() => () => {
     if (chartResetTimerRef.current !== null) clearTimeout(chartResetTimerRef.current);
-    if (chartArmFrameRef.current !== null) cancelAnimationFrame(chartArmFrameRef.current);
-  }, []);
-
-  useEffect(() => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      setLoading(false);
-    };
-    const task = InteractionManager.runAfterInteractions(finish);
-    const fallback = setTimeout(finish, 450);
-    return () => {
-      settled = true;
-      task.cancel();
-      clearTimeout(fallback);
-    };
   }, []);
 
   const onRefresh = useCallback(() => {
@@ -1981,7 +2008,10 @@ export function InsightsScreen({
   // headline shows the cumulative saved amount at that point and the sub-label
   // shows the date it represents (same date mapping as the hero series).
   const [savedScrubIdx, setSavedScrubIdx] = useState<number | null>(null);
-  useEffect(() => setSavedScrubIdx(null), [savedMetric.cumulativeSeries]);
+  useEffect(() => {
+    setSavedScrubIdx(null);
+    setChartInteractionActive(false);
+  }, [savedMetric.cumulativeSeries, setChartInteractionActive]);
   const savedScrubbing = savedScrubIdx != null;
   const savedAmount = savedScrubbing
     ? savedMetric.cumulativeSeries[savedScrubIdx] ?? savedMetric.total
@@ -1989,6 +2019,21 @@ export function InsightsScreen({
   const savedSubLabel = savedScrubbing
     ? scrubDateLabel(savedScrubIdx)
     : rangeContextLabel;
+
+  const handleHeroScrub = useCallback((index: number | null) => {
+    setScrubIdx(index);
+    setChartInteractionActive(index != null);
+  }, [setChartInteractionActive]);
+
+  const handleSavedScrub = useCallback((index: number | null) => {
+    setSavedScrubIdx(index);
+    setChartInteractionActive(index != null);
+  }, [setChartInteractionActive]);
+
+  const handleTrendScrub = useCallback((index: number | null) => {
+    setTrendScrubIdx(index);
+    setChartInteractionActive(index != null);
+  }, [setChartInteractionActive]);
 
   const scrimTop = theme.dark ? 'rgba(3,5,8,0.55)' : 'rgba(3,5,8,0.30)';
   const scrimMid = theme.dark ? 'rgba(3,5,8,0.34)' : 'rgba(3,5,8,0.30)';
@@ -2187,7 +2232,7 @@ export function InsightsScreen({
                 dark={theme.dark}
                 style={styles.tileHero}
                 onPress={() =>
-                  onOpenInsight({
+                  openInsightFromChartTile({
                     title: 'Spending',
                     subtitle: rangeContextLabel,
                     icon: 'chart',
@@ -2196,9 +2241,9 @@ export function InsightsScreen({
                 accessibilityLabel={`Spent, ${spendDisplay.whole}`}
               >
                 <View style={styles.heroLabelRow}>
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>Spent</Text>
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}> · </Text>
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]} numberOfLines={1}>
+                  <Text style={[TYPE.captionEm, { color: p.textTer }]}>Spent</Text>
+                  <Text style={[TYPE.captionEm, { color: p.textTer }]}> · </Text>
+                  <Text style={[TYPE.caption, { color: p.textTer }]} numberOfLines={1}>
                     {heroSubLabel}
                   </Text>
                 </View>
@@ -2210,20 +2255,38 @@ export function InsightsScreen({
                   style={styles.heroChart}
                   accessibilityRole="image"
                   accessibilityLabel={`Spending trend chart for ${rangeContextLabel}`}
+                  onTouchStart={handleChartTouchStart}
+                  onTouchEnd={handleChartTouchEnd}
+                  onTouchCancel={handleChartTouchEnd}
                 >
-                  <SpendChart
-                    key={`hero-${chartReplayKey}`}
-                    data={cumulativeSeries}
-                    width={heroChartW}
-                    height={150}
-                    color={lineColor}
-                    ringColor={theme.surface}
-                    strokeWidth={2.5}
-                    verticalInset={28}
-                    play={chartsArmed}
-                    onScrub={setScrubIdx}
-                    haptics={false}
-                  />
+                  {SUPPORTS_NATIVE_SPEND_LINE_CHART ? (
+                    <NativeSpendLineChart
+                      key={`hero-native-${chartReplayKey}`}
+                      data={cumulativeSeries}
+                      color={lineColor}
+                      ringColor={theme.surface}
+                      strokeWidth={2.5}
+                      verticalInset={40}
+                      bottomInset={24}
+                      play={chartsArmed}
+                      onScrub={handleHeroScrub}
+                      style={{ width: heroChartW, height: 150 }}
+                    />
+                  ) : (
+                    <SpendChart
+                      key={`hero-${chartReplayKey}`}
+                      data={cumulativeSeries}
+                      width={heroChartW}
+                      height={150}
+                      color={lineColor}
+                      ringColor={theme.surface}
+                      strokeWidth={2.5}
+                      verticalInset={40}
+                      bottomInset={24}
+                      play={chartsArmed}
+                      onScrub={handleHeroScrub}
+                    />
+                  )}
                 </View>
               </BentoTile>
 
@@ -2233,7 +2296,7 @@ export function InsightsScreen({
                   dark={theme.dark}
                   style={[styles.tileHalf, { minHeight: Math.round(halfW) }]}
                   onPress={() =>
-                    onOpenInsight({
+                    openInsightFromChartTile({
                       kind: 'savings',
                       title: 'Total saved',
                       subtitle: rangeContextLabel,
@@ -2243,7 +2306,7 @@ export function InsightsScreen({
                   }
                   accessibilityLabel={`Total saved, ${money(savedAmount, 2)}`}
                 >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                  <Text style={[TYPE.captionEm, { color: p.textTer }]}>
                     Total saved
                   </Text>
                   <Text
@@ -2252,29 +2315,48 @@ export function InsightsScreen({
                   >
                     {money(savedAmount, 2)}
                   </Text>
-                  <Text
-                    style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
-                    numberOfLines={1}
-                  >
-                    {savedSubLabel}
-                  </Text>
+                  {savedScrubbing ? (
+                    <Text
+                      style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
+                      numberOfLines={1}
+                    >
+                      {savedSubLabel}
+                    </Text>
+                  ) : null}
                   <View
                     style={styles.tileMiniChart}
                     accessibilityRole="image"
                     accessibilityLabel="Savings trend chart"
+                    onTouchStart={handleChartTouchStart}
+                    onTouchEnd={handleChartTouchEnd}
+                    onTouchCancel={handleChartTouchEnd}
                   >
-                    <SpendChart
-                      key={`saved-${chartReplayKey}`}
-                      data={savedMetric.cumulativeSeries}
-                      width={halfChartW}
-                      height={40}
-                      color={savingsTint}
-                      fillColor={savingsTint}
-                      ringColor={theme.surface}
-                      strokeWidth={2}
-                      play={chartsArmed}
-                      onScrub={setSavedScrubIdx}
-                    />
+                    {SUPPORTS_NATIVE_SPEND_LINE_CHART ? (
+                      <NativeSpendLineChart
+                        key={`saved-native-${chartReplayKey}`}
+                        data={savedMetric.cumulativeSeries}
+                        color={savingsTint}
+                        fillColor={savingsTint}
+                        ringColor={theme.surface}
+                        strokeWidth={2}
+                        play={chartsArmed}
+                        onScrub={handleSavedScrub}
+                        style={{ width: halfChartW, height: 40 }}
+                      />
+                    ) : (
+                      <SpendChart
+                        key={`saved-${chartReplayKey}`}
+                        data={savedMetric.cumulativeSeries}
+                        width={halfChartW}
+                        height={40}
+                        color={savingsTint}
+                        fillColor={savingsTint}
+                        ringColor={theme.surface}
+                        strokeWidth={2}
+                        play={chartsArmed}
+                        onScrub={handleSavedScrub}
+                      />
+                    )}
                   </View>
                 </BentoTile>
 
@@ -2282,7 +2364,7 @@ export function InsightsScreen({
                   dark={theme.dark}
                   style={[styles.tileHalf, { minHeight: Math.round(halfW) }]}
                   onPress={() =>
-                    onOpenInsight({
+                    openInsightFromChartTile({
                       kind: 'trends',
                       title: 'Spending trends',
                       subtitle: `Rolling ${trendCadence} average`,
@@ -2291,7 +2373,7 @@ export function InsightsScreen({
                   }
                   accessibilityLabel={`Spending trends, ${trendRightLabel} ${money(trendAmount, 2)}`}
                 >
-                  <Text style={[TYPE.labelSm, { color: p.textTer }]}>
+                  <Text style={[TYPE.captionEm, { color: p.textTer }]}>
                     Spending trends
                   </Text>
                   <Text
@@ -2300,31 +2382,52 @@ export function InsightsScreen({
                   >
                     {money(trendAmount, 2)}
                   </Text>
-                  <Text
-                    style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
-                    numberOfLines={1}
-                  >
-                    {trendRightLabel}
-                  </Text>
+                  {trendScrubbing ? (
+                    <Text
+                      style={[TYPE.caption, { color: p.textTer, marginTop: 2 }]}
+                      numberOfLines={1}
+                    >
+                      {trendRightLabel}
+                    </Text>
+                  ) : null}
                   <View
                     style={styles.tileTrendChart}
                     accessibilityRole="image"
                     accessibilityLabel={`Spending trends chart, ${trendRightLabel}`}
+                    onTouchStart={handleChartTouchStart}
+                    onTouchEnd={handleChartTouchEnd}
+                    onTouchCancel={handleChartTouchEnd}
                   >
-                    <TrendBars
-                      key={`trends-${chartReplayKey}`}
-                      values={trend.values}
-                      labels={trend.labels}
-                      selectedIdx={trendScrubIdx}
-                      onScrub={setTrendScrubIdx}
-                      width={halfChartW}
-                      height={64}
-                      barColor={lineColorFaint}
-                      selectedColor={lineColor}
-                      labelColor={p.textTer}
-                      selectedLabelColor={p.text}
-                      play={chartsArmed}
-                    />
+                    {SUPPORTS_NATIVE_TREND_BARS_CHART ? (
+                      <NativeTrendBarsChart
+                        key={`trends-native-${chartReplayKey}`}
+                        values={trend.values}
+                        labels={trend.labels}
+                        selectedIdx={trendScrubIdx}
+                        onScrub={handleTrendScrub}
+                        barColor={lineColorFaint}
+                        selectedColor={lineColor}
+                        labelColor={p.textTer}
+                        selectedLabelColor={p.text}
+                        play={chartsArmed}
+                        style={{ width: halfChartW, height: 64 }}
+                      />
+                    ) : (
+                      <TrendBars
+                        key={`trends-${chartReplayKey}`}
+                        values={trend.values}
+                        labels={trend.labels}
+                        selectedIdx={trendScrubIdx}
+                        onScrub={handleTrendScrub}
+                        width={halfChartW}
+                        height={64}
+                        barColor={lineColorFaint}
+                        selectedColor={lineColor}
+                        labelColor={p.textTer}
+                        selectedLabelColor={p.text}
+                        play={chartsArmed}
+                      />
+                    )}
                   </View>
                 </BentoTile>
               </View>

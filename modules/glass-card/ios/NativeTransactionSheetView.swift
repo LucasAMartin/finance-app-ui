@@ -192,10 +192,10 @@ private struct TransactionSheetContent: View {
 
       VStack(spacing: 0) {
         if mode == .compact {
-          hero(size: 52, titleSize: 17, metaSize: 13, amountSize: 32, titleTop: 12, metaTop: 5, amountTop: 18, bottom: 20)
+          hero(size: 52, titleSize: 18, metaSize: 13, amountSize: 32, titleTop: 12, metaTop: 5, amountTop: 16, bottom: 20)
             .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
         } else {
-          hero(size: 42, titleSize: 20, metaSize: 12, amountSize: 28, titleTop: 9, metaTop: 3, amountTop: 12, bottom: 12)
+          hero(size: 42, titleSize: 18, metaSize: 12, amountSize: 32, titleTop: 9, metaTop: 3, amountTop: 12, bottom: 12)
             .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
         }
 
@@ -259,7 +259,7 @@ private struct TransactionSheetContent: View {
     VStack(spacing: 0) {
       TransactionSheetMerchantMark(model: model, size: size)
       Text(model.title)
-        .font(.system(size: titleSize, weight: .semibold))
+        .font(.system(size: titleSize, weight: .medium))
         .foregroundStyle(model.color(.text))
         .multilineTextAlignment(.center)
         .lineLimit(1)
@@ -267,7 +267,7 @@ private struct TransactionSheetContent: View {
         .padding(.top, titleTop)
 
       Text(model.metaLine)
-        .font(.system(size: metaSize))
+        .font(.system(size: metaSize, weight: .regular))
         .foregroundStyle(model.color(.textSec))
         .multilineTextAlignment(.center)
         .lineLimit(2)
@@ -276,10 +276,9 @@ private struct TransactionSheetContent: View {
       HStack(spacing: 1) {
         Text("-")
         Text(model.currencySymbol)
-          .foregroundStyle(model.color(.textSec))
         TxAnimatedCentsTextView(value: $amountValue)
       }
-      .font(.system(size: amountSize, weight: .semibold))
+      .font(.system(size: amountSize, weight: .medium))
       .foregroundStyle(model.color(.text))
       .monospacedDigit()
       .padding(.top, amountTop)
@@ -298,7 +297,7 @@ private struct TransactionSheetContent: View {
             .foregroundStyle(model.color(.textSec))
           Spacer(minLength: 12)
           Text(model.note)
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: 13, weight: .regular))
             .foregroundStyle(model.color(.text))
             .lineLimit(2)
             .multilineTextAlignment(.trailing)
@@ -318,7 +317,7 @@ private struct TransactionSheetContent: View {
           Spacer(minLength: 8)
           HStack(spacing: 3) {
             Text(model.categorySpendText)
-              .font(.system(size: 13, weight: .semibold))
+              .font(.system(size: 13, weight: .medium))
               .foregroundStyle(model.color(.text))
             Text("of \(model.categoryBudgetText)")
               .font(.system(size: 13))
@@ -418,11 +417,11 @@ private struct TransactionSheetContent: View {
         fieldRow(label: "Amount") {
           HStack(spacing: 0) {
             Text(model.currencySymbol)
-              .foregroundStyle(model.color(.textSec))
             TxAnimatedCentsTextView(value: $amountValue)
               .foregroundStyle(model.color(.text))
           }
-          .font(.system(size: 17, weight: .semibold))
+          .font(.system(size: 15, weight: .medium))
+          .foregroundStyle(model.color(.text))
           .monospacedDigit()
         }
       }
@@ -441,7 +440,7 @@ private struct TransactionSheetContent: View {
       } label: {
         fieldRow(label: "Date & time") {
           Text(Self.formatDateTime(occurredAt))
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(size: 15, weight: .regular))
             .foregroundStyle(model.color(.text))
             .lineLimit(1)
             .minimumScaleFactor(0.76)
@@ -468,7 +467,7 @@ private struct TransactionSheetContent: View {
           .disabled(!model.canEdit)
           .multilineTextAlignment(.trailing)
           .textInputAutocapitalization(.words)
-          .font(.system(size: 15, weight: .medium))
+          .font(.system(size: 15, weight: .regular))
           .foregroundStyle(model.color(.text))
           .onTapGesture {
             closeCustomPanels()
@@ -481,7 +480,7 @@ private struct TransactionSheetContent: View {
         TextField("Optional", text: $note)
           .disabled(!model.canEdit)
           .multilineTextAlignment(.trailing)
-          .font(.system(size: 15, weight: .medium))
+          .font(.system(size: 15, weight: .regular))
           .foregroundStyle(model.color(.text))
           .onTapGesture {
             closeCustomPanels()
@@ -514,12 +513,12 @@ private struct TransactionSheetContent: View {
 
       HStack(spacing: 12) {
         Text("Subcategory")
-          .font(.system(size: 16))
+          .font(.system(size: 15, weight: .regular))
           .foregroundStyle(model.color(.textSec))
         Spacer(minLength: 16)
         if categories(for: selectedGroup).isEmpty {
           Text("No subcategories")
-            .font(.system(size: 13))
+            .font(.system(size: 13, weight: .regular))
             .foregroundStyle(model.color(.textTer))
         } else {
           Menu {
@@ -537,7 +536,7 @@ private struct TransactionSheetContent: View {
           } label: {
             HStack(spacing: 5) {
               Text(selectedCategoryLabel)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(model.color(.text))
                 .lineLimit(1)
               Image(systemName: "chevron.down")
@@ -678,7 +677,7 @@ private struct TransactionSheetContent: View {
   private func fieldRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
     HStack(spacing: 12) {
       Text(label)
-        .font(.system(size: 16))
+        .font(.system(size: 15, weight: .regular))
         .foregroundStyle(model.color(.textSec))
         .fixedSize(horizontal: true, vertical: false)
       Spacer(minLength: 16)
@@ -878,7 +877,7 @@ private struct TransactionSheetMerchantMark: View {
   }
 
   private func localImage(url: URL) -> Image? {
-    guard url.isFileURL, let uiImage = UIImage(contentsOfFile: url.path) else {
+    guard let uiImage = NativeSheetLogoImage.image(fromLocalURL: url) else {
       return nil
     }
     return Image(uiImage: uiImage)
@@ -892,8 +891,25 @@ private struct TransactionSheetMerchantMark: View {
   }
 
   private var logoURL: URL? {
-    guard let raw = model.logoUrl else { return nil }
-    return URL(string: raw)
+    Self.renderableURL(from: model.logoUrl)
+  }
+
+  private static func renderableURL(from value: String?) -> URL? {
+    guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines), !rawValue.isEmpty else {
+      return nil
+    }
+    if rawValue.hasPrefix("/") {
+      return URL(fileURLWithPath: rawValue)
+    }
+    if let url = URL(string: rawValue), url.scheme != nil {
+      return url
+    }
+    if let encoded = rawValue.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed),
+       let url = URL(string: encoded),
+       url.scheme != nil {
+      return url
+    }
+    return nil
   }
 
   private var backgroundColor: Color {

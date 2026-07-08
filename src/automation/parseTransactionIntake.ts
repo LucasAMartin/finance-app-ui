@@ -70,6 +70,11 @@ const PROCESSOR_NAMES: Record<string, string> = {
   venmo: 'Venmo',
   zelle: 'Zelle',
 };
+type MerchantQuality = {
+  confidence: number;
+  candidateScoreCap?: number;
+  candidateReason?: string;
+};
 
 function compact(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -350,25 +355,38 @@ function addMerchantCandidate(
   raw: string | undefined,
   reason: string,
   score: number,
+  qualityContext?: Parameters<typeof merchantQuality>[1],
 ) {
   if (!raw) return;
   const text = cleanupMerchant(raw);
   const key = candidateKey(text);
   if (!key || seen.has(key)) return;
+  const quality = qualityContext ? merchantQuality(text, qualityContext) : undefined;
   seen.add(key);
-  candidates.push({ text, reason, score });
+  candidates.push({
+    text,
+    reason: quality?.candidateReason ?? reason,
+    score: quality?.candidateScoreCap ? Math.min(score, quality.candidateScoreCap) : score,
+  });
 }
 
-function parseMerchantCandidates(text: string, merchant: string, rawDescriptor?: string): TransactionMerchantCandidate[] {
+function parseMerchantCandidates(
+  text: string,
+  merchant: string,
+  rawDescriptor?: string,
+  normalizedDescriptor?: string,
+  processorName?: string,
+): TransactionMerchantCandidate[] {
   const searchable = stripSmsFooter(text);
   const candidates: TransactionMerchantCandidate[] = [];
   const seen = new Set<string>();
+  const qualityContext = { rawDescriptor, normalizedDescriptor, processorName };
 
-  addMerchantCandidate(candidates, seen, merchant, 'parsed_merchant', merchant ? 0.9 : 0);
+  addMerchantCandidate(candidates, seen, merchant, 'parsed_merchant', merchant ? 0.9 : 0, qualityContext);
 
-  const normalizedDescriptor = rawDescriptor ? normalizeDescriptor(rawDescriptor) : undefined;
-  addMerchantCandidate(candidates, seen, normalizedDescriptor, 'normalized_descriptor', 0.86);
-  addMerchantCandidate(candidates, seen, rawDescriptor, 'raw_descriptor', 0.76);
+  const descriptorForCandidates = normalizedDescriptor ?? (rawDescriptor ? normalizeDescriptor(rawDescriptor) : undefined);
+  addMerchantCandidate(candidates, seen, descriptorForCandidates, 'normalized_descriptor', 0.86, qualityContext);
+  addMerchantCandidate(candidates, seen, rawDescriptor, 'raw_descriptor', 0.76, qualityContext);
 
   const explicit = searchable.match(/\b(?:at|from|to|by)\s+(.+)$/i);
   addMerchantCandidate(
@@ -377,13 +395,14 @@ function parseMerchantCandidates(text: string, merchant: string, rawDescriptor?:
     explicit ? descriptorFromCandidate(explicit[1]) : undefined,
     'after_preposition',
     0.88,
+    qualityContext,
   );
 
   const amountMatch = searchable.match(MONEY_PATTERN);
   if (amountMatch?.index !== undefined) {
     const afterAmount = searchable.slice(amountMatch.index + amountMatch[0].length);
     if (!startsWithCardContext(afterAmount)) {
-      addMerchantCandidate(candidates, seen, descriptorFromCandidate(afterAmount), 'after_amount', 0.74);
+      addMerchantCandidate(candidates, seen, descriptorFromCandidate(afterAmount), 'after_amount', 0.74, qualityContext);
     }
   }
 
@@ -403,6 +422,10 @@ function cleanBrandToken(value: string): string {
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function compactMerchantKey(value: string): string {
+  return normalizeAutomationMerchant(value).replace(/\s+/g, '');
 }
 
 function domainDescriptorAlias(value: string): string | undefined {
@@ -437,16 +460,52 @@ function storeLocationAlias(value: string): string | undefined {
 }
 
 function merchantAlias(value: string): string | undefined {
-  const genericAlias = domainDescriptorAlias(value) ?? storeLocationAlias(value);
-  if (genericAlias) return genericAlias;
+  const domainAlias = domainDescriptorAlias(value);
+  if (domainAlias) return domainAlias;
 
-  const compacted = normalizeAutomationMerchant(value).replace(/\s+/g, '');
+  const locationAlias = storeLocationAlias(value);
+  if (locationAlias) return locationAlias;
+
+  const compacted = compactMerchantKey(value);
   if (compacted.includes('openai')) return 'OpenAI';
   if (compacted.includes('anthropic')) return 'Anthropic';
   if (/^(amzn|amazon|amazonmktp|amznmktp)/.test(compacted)) return 'Amazon';
   if (compacted.includes('applecombill') || compacted.includes('itunes')) return 'Apple';
   if (compacted.includes('googleyoutube')) return 'YouTube';
   return undefined;
+}
+
+function merchantQuality(
+  merchant: string,
+  context: {
+    rawDescriptor?: string;
+    normalizedDescriptor?: string;
+    processorName?: string;
+  },
+): MerchantQuality {
+  const normalized = normalizeAutomationMerchant(merchant);
+  const key = compactMerchantKey(merchant);
+  const words = normalized ? normalized.split(/\s+/).filter(Boolean) : [];
+  const isProcessorDescriptor = !!context.processorName || (!!context.rawDescriptor && !!processorNameFromPrefix(context.rawDescriptor));
+  const singleLongAlpha = words.length === 1 && /^[a-z]{14,}$/.test(key);
+
+  if (isProcessorDescriptor && singleLongAlpha) {
+    return {
+      confidence: 0.62,
+      candidateScoreCap: 0.48,
+      candidateReason: 'processor_compressed_merchant',
+    };
+  }
+
+  if (isProcessorDescriptor && words.length === 1 && key.length >= 11) {
+    return {
+      confidence: 0.76,
+      candidateScoreCap: 0.68,
+      candidateReason: 'processor_single_token_merchant',
+    };
+  }
+
+  return { confidence: context.rawDescriptor ? 0.88 : 0.86 };
 }
 
 function cleanupMerchant(raw: string): string {
@@ -534,13 +593,13 @@ export function parseTransactionIntake(
   const processorName = rawDescriptor ? processorNameFromPrefix(rawDescriptor) : undefined;
   const merchant = parseMerchant(text);
   if (source === 'sms' && !merchant) return null;
-  const merchantCandidates = parseMerchantCandidates(text, merchant, rawDescriptor);
+  const quality = merchantQuality(merchant, { rawDescriptor, normalizedDescriptor, processorName });
+  const merchantCandidates = parseMerchantCandidates(text, merchant, rawDescriptor, normalizedDescriptor, processorName);
   const categoryProbe = `${merchant} ${rawDescriptor ?? ''} ${text}`;
   const cat = inferExpenseCategory(categoryProbe);
   const cardLast4 = parseCardLast4(text);
   const occurredAt = parseOccurredAt(text);
-  const alias = merchant ? merchantAlias(`${merchant} ${normalizedDescriptor ?? ''}`) : undefined;
-  const confidence = merchant ? (alias ? 0.93 : rawDescriptor ? 0.88 : 0.86) : 0.58;
+  const confidence = merchant ? quality.confidence : 0.58;
 
   return {
     amount,

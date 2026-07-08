@@ -42,6 +42,7 @@ xcodebuild -workspace ios/financeapp.xcworkspace -scheme GlassCard -configuratio
   - `modules/cloudkit-sync` for CloudKit bridge code.
 - SwiftUI views are exported through Expo Modules and consumed by small TS wrappers in each module's `src/` directory.
 - When integrating code supplied from Downloads, preserve the provided implementation unless the user explicitly asks for design/code changes. Prefer minimal adapters over rewriting native screens in React Native.
+- The app is expected to migrate toward full Swift/SwiftUI. Make new changes with that path in mind: keep native UI logic portable, avoid deep React Native rewrites for iOS-specific surfaces, and isolate JS adapters from Swift implementation details.
 
 ## Design & UI Rules
 

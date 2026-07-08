@@ -1163,6 +1163,15 @@ export function DashboardApp() {
   }).current;
 
   const drawerAnim = useRef(new Animated.Value(0)).current;
+  const [chartGestureActive, setChartGestureActive] = useState(false);
+  const chartGestureActiveRef = useRef(false);
+  const handleChartInteractionChange = useCallback((isActive: boolean) => {
+    if (chartGestureActiveRef.current === isActive) {
+      return;
+    }
+    chartGestureActiveRef.current = isActive;
+    setChartGestureActive(isActive);
+  }, []);
   const paywallOpen = paywallGateOpen || payWallStoreKitDemoOpen || animatedKeyPadDemoOpen || notificationPermissionDemoOpen || dynamicHeightSheetDemoOpen;
   const sidebarSwipeOpenEnabled = SIDEBAR_SWIPE_SCREENS.includes(screen)
     && !goalsOpen
@@ -1175,7 +1184,14 @@ export function DashboardApp() {
     && !showOnboarding
     && !paywallOpen
     && !iosStyleOnboardingPreviewOpen
-    && !showIncomePrompt;
+    && !showIncomePrompt
+    && !chartGestureActive;
+
+  useEffect(() => {
+    if (screen !== 'insights') {
+      handleChartInteractionChange(false);
+    }
+  }, [handleChartInteractionChange, screen]);
 
   // Start both drawer animations immediately on press — before setState.
   const openDrawer = useCallback(() => {
@@ -1225,6 +1241,10 @@ export function DashboardApp() {
       }
 
       if (drawerGestureStartedInTabBar(gesture)) {
+        return false;
+      }
+
+      if (chartGestureActiveRef.current) {
         return false;
       }
 
@@ -1670,8 +1690,9 @@ export function DashboardApp() {
       onViewActivity={navigateToActivity}
       onOpenInsight={handleInsightTarget}
       onRefreshSync={handleManualCloudRefresh}
+      onChartInteractionChange={handleChartInteractionChange}
     />
-  ), [handleInsightTarget, handleManualCloudRefresh, navigateToActivity, openDrawer, screen, theme]);
+  ), [handleChartInteractionChange, handleInsightTarget, handleManualCloudRefresh, navigateToActivity, openDrawer, screen, theme]);
 
   const insightDetailScreen = useMemo(() => (
     <InsightDetailScreen
