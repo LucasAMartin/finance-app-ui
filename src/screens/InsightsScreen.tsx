@@ -52,6 +52,8 @@ import {
   truncationMode,
 } from '@expo/ui/swift-ui/modifiers';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS, useSharedValue } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '../ThemeProvider';
@@ -131,6 +133,8 @@ const CARD_INNER_PAD = LAYOUT.cardPadX;
 const CHART_H = 188;
 const TILE_PAD = 16;
 const CHART_RESET_DELAY_MS = 220;
+const TREND_BAR_STAGGER_MS = 58;
+const TREND_BAR_GROW_MS = 600;
 const NATIVE_INSIGHT_ROW_H = 64;
 const NATIVE_INSIGHT_TITLE_H = 24;
 const NATIVE_WHERE_PICKER_H = 30;
@@ -177,6 +181,7 @@ const TF_TO_PERIOD: Record<Timeframe, Period> = {
   '1M': 'Month',
   '1Y': 'Year',
 };
+
 
 // The Spending-trends tile buckets each timeframe at its own granularity, so its
 // resting headline reads "average daily/weekly/…" beside the figure.
@@ -260,6 +265,7 @@ function addDays(d: Date, days: number): Date {
   next.setDate(next.getDate() + days);
   return next;
 }
+
 
 function buildInsightBins(
   period: Period,
@@ -715,6 +721,73 @@ function EmptyState({
       </Text>
     </View>
   );
+}
+
+function ChartScrubOverlay({
+  count,
+  width,
+  mode,
+  onScrub,
+}: {
+  count: number;
+  width: number;
+  mode: 'line' | 'bars';
+  onScrub: (index: number | null) => void;
+}) {
+  const lastIdx = useSharedValue(-1);
+  const tick = useCallback(() => {
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
+  const gesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activateAfterLongPress(140)
+        .failOffsetY([-10, 10])
+        .onStart((event) => {
+          'worklet';
+          if (count <= 0 || width <= 0) return;
+          const index = chartIndexForX(event.x, count, width, mode);
+          lastIdx.value = index;
+          runOnJS(onScrub)(index);
+          runOnJS(tick)();
+        })
+        .onUpdate((event) => {
+          'worklet';
+          if (count <= 0 || width <= 0) return;
+          const index = chartIndexForX(event.x, count, width, mode);
+          if (index === lastIdx.value) return;
+          lastIdx.value = index;
+          runOnJS(onScrub)(index);
+          runOnJS(tick)();
+        })
+        .onFinalize(() => {
+          'worklet';
+          lastIdx.value = -1;
+          runOnJS(onScrub)(null);
+        }),
+    [count, lastIdx, mode, onScrub, tick, width],
+  );
+
+  if (count <= 0 || width <= 0) return null;
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <View style={StyleSheet.absoluteFill} />
+    </GestureDetector>
+  );
+}
+
+function chartIndexForX(x: number, count: number, width: number, mode: 'line' | 'bars'): number {
+  'worklet';
+  if (count <= 1) return 0;
+  if (mode === 'bars') {
+    const band = width / count;
+    return Math.max(0, Math.min(count - 1, Math.floor(x / band)));
+  }
+  const padX = 3.5;
+  const stepX = (width - padX * 2) / (count - 1);
+  return Math.max(0, Math.min(count - 1, Math.round((x - padX) / stepX)));
 }
 
 const NATIVE_INSIGHTS_EMPTY_HEIGHT = 166;
@@ -1850,14 +1923,6 @@ export function InsightsScreen({
     onOpenInsight(target);
   }, [onOpenInsight]);
 
-  const handleChartTouchStart = useCallback(() => {
-    onChartInteractionChange?.(true);
-  }, [onChartInteractionChange]);
-
-  const handleChartTouchEnd = useCallback(() => {
-    onChartInteractionChange?.(false);
-  }, [onChartInteractionChange]);
-
   useEffect(() => () => {
     if (chartPressSuppressionTimerRef.current !== null) {
       clearTimeout(chartPressSuppressionTimerRef.current);
@@ -1868,10 +1933,7 @@ export function InsightsScreen({
   // Scrub state for the trends tile — mirrors the hero's scrubIdx: while held,
   // the headline shows the selected bucket's total instead of the average.
   const [trendScrubIdx, setTrendScrubIdx] = useState<number | null>(null);
-  useEffect(() => {
-    setTrendScrubIdx(null);
-    setChartInteractionActive(false);
-  }, [trend, setChartInteractionActive]);
+
   const trendScrubbing = trendScrubIdx != null;
   const trendAmount = trendScrubbing
     ? trend.values[trendScrubIdx] ?? trend.avg
@@ -1883,11 +1945,6 @@ export function InsightsScreen({
 
   // Active scrub point (null = released → show the period total).
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
-  // Drop any held scrub when the series changes under it (period/data switch).
-  useEffect(() => {
-    setScrubIdx(null);
-    setChartInteractionActive(false);
-  }, [cumulativeSeries, setChartInteractionActive]);
 
   const splitMoney = (n: number) => {
     const currency = getActiveCurrency();
@@ -1976,6 +2033,7 @@ export function InsightsScreen({
   }, [onRefreshSync]);
 
   const chartReplayKey = `${chartKey}-${timeframe}-${dateIdx}`;
+  const chartAnimationMs = TREND_BAR_GROW_MS + Math.max(0, trend.values.length - 1) * TREND_BAR_STAGGER_MS;
 
   // ── Bento summary tiles ───────────────────────────────────────────
   const savingsTint = groupDisplayColor('savings', theme.dark);
@@ -2008,10 +2066,6 @@ export function InsightsScreen({
   // headline shows the cumulative saved amount at that point and the sub-label
   // shows the date it represents (same date mapping as the hero series).
   const [savedScrubIdx, setSavedScrubIdx] = useState<number | null>(null);
-  useEffect(() => {
-    setSavedScrubIdx(null);
-    setChartInteractionActive(false);
-  }, [savedMetric.cumulativeSeries, setChartInteractionActive]);
   const savedScrubbing = savedScrubIdx != null;
   const savedAmount = savedScrubbing
     ? savedMetric.cumulativeSeries[savedScrubIdx] ?? savedMetric.total
@@ -2020,20 +2074,62 @@ export function InsightsScreen({
     ? scrubDateLabel(savedScrubIdx)
     : rangeContextLabel;
 
+  const clearChartSelections = useCallback(() => {
+    setScrubIdx(null);
+    setSavedScrubIdx(null);
+    setTrendScrubIdx(null);
+  }, []);
+
+  useEffect(() => {
+    clearChartSelections();
+    setChartInteractionActive(false);
+  }, [trend, clearChartSelections, setChartInteractionActive]);
+
+  useEffect(() => {
+    clearChartSelections();
+    setChartInteractionActive(false);
+  }, [cumulativeSeries, clearChartSelections, setChartInteractionActive]);
+
+  useEffect(() => {
+    clearChartSelections();
+    setChartInteractionActive(false);
+  }, [savedMetric.cumulativeSeries, clearChartSelections, setChartInteractionActive]);
+
   const handleHeroScrub = useCallback((index: number | null) => {
+    if (index == null) {
+      clearChartSelections();
+      setChartInteractionActive(false);
+      return;
+    }
     setScrubIdx(index);
-    setChartInteractionActive(index != null);
-  }, [setChartInteractionActive]);
+    setSavedScrubIdx(null);
+    setTrendScrubIdx(null);
+    setChartInteractionActive(true);
+  }, [clearChartSelections, setChartInteractionActive]);
 
   const handleSavedScrub = useCallback((index: number | null) => {
+    if (index == null) {
+      clearChartSelections();
+      setChartInteractionActive(false);
+      return;
+    }
     setSavedScrubIdx(index);
-    setChartInteractionActive(index != null);
-  }, [setChartInteractionActive]);
+    setScrubIdx(null);
+    setTrendScrubIdx(null);
+    setChartInteractionActive(true);
+  }, [clearChartSelections, setChartInteractionActive]);
 
   const handleTrendScrub = useCallback((index: number | null) => {
+    if (index == null) {
+      clearChartSelections();
+      setChartInteractionActive(false);
+      return;
+    }
     setTrendScrubIdx(index);
-    setChartInteractionActive(index != null);
-  }, [setChartInteractionActive]);
+    setScrubIdx(null);
+    setSavedScrubIdx(null);
+    setChartInteractionActive(true);
+  }, [clearChartSelections, setChartInteractionActive]);
 
   const scrimTop = theme.dark ? 'rgba(3,5,8,0.55)' : 'rgba(3,5,8,0.30)';
   const scrimMid = theme.dark ? 'rgba(3,5,8,0.34)' : 'rgba(3,5,8,0.30)';
@@ -2255,23 +2351,32 @@ export function InsightsScreen({
                   style={styles.heroChart}
                   accessibilityRole="image"
                   accessibilityLabel={`Spending trend chart for ${rangeContextLabel}`}
-                  onTouchStart={handleChartTouchStart}
-                  onTouchEnd={handleChartTouchEnd}
-                  onTouchCancel={handleChartTouchEnd}
                 >
                   {SUPPORTS_NATIVE_SPEND_LINE_CHART ? (
-                    <NativeSpendLineChart
-                      key={`hero-native-${chartReplayKey}`}
-                      data={cumulativeSeries}
-                      color={lineColor}
-                      ringColor={theme.surface}
-                      strokeWidth={2.5}
-                      verticalInset={40}
-                      bottomInset={24}
-                      play={chartsArmed}
-                      onScrub={handleHeroScrub}
-                      style={{ width: heroChartW, height: 150 }}
-                    />
+                    <>
+                      <NativeSpendLineChart
+                        key={`hero-native-${chartReplayKey}`}
+                        data={cumulativeSeries}
+                        color={lineColor}
+                        ringColor={theme.surface}
+                        strokeWidth={2.5}
+                        verticalInset={40}
+                        bottomInset={24}
+                        selectedIdx={scrubIdx}
+                        play={chartsArmed}
+                        replayToken={chartKey}
+                        animationDurationMs={chartAnimationMs}
+                        scrubEnabled={false}
+                        tapEnabled={false}
+                        style={{ width: heroChartW, height: 150 }}
+                      />
+                      <ChartScrubOverlay
+                        count={cumulativeSeries.length}
+                        width={heroChartW}
+                        mode="line"
+                        onScrub={handleHeroScrub}
+                      />
+                    </>
                   ) : (
                     <SpendChart
                       key={`hero-${chartReplayKey}`}
@@ -2283,6 +2388,7 @@ export function InsightsScreen({
                       strokeWidth={2.5}
                       verticalInset={40}
                       bottomInset={24}
+                      selectedIdx={scrubIdx}
                       play={chartsArmed}
                       onScrub={handleHeroScrub}
                     />
@@ -2327,22 +2433,31 @@ export function InsightsScreen({
                     style={styles.tileMiniChart}
                     accessibilityRole="image"
                     accessibilityLabel="Savings trend chart"
-                    onTouchStart={handleChartTouchStart}
-                    onTouchEnd={handleChartTouchEnd}
-                    onTouchCancel={handleChartTouchEnd}
                   >
                     {SUPPORTS_NATIVE_SPEND_LINE_CHART ? (
-                      <NativeSpendLineChart
-                        key={`saved-native-${chartReplayKey}`}
-                        data={savedMetric.cumulativeSeries}
-                        color={savingsTint}
-                        fillColor={savingsTint}
-                        ringColor={theme.surface}
-                        strokeWidth={2}
-                        play={chartsArmed}
-                        onScrub={handleSavedScrub}
-                        style={{ width: halfChartW, height: 40 }}
-                      />
+                      <>
+                        <NativeSpendLineChart
+                          key={`saved-native-${chartReplayKey}`}
+                          data={savedMetric.cumulativeSeries}
+                          color={savingsTint}
+                          fillColor={savingsTint}
+                          ringColor={theme.surface}
+                          strokeWidth={2}
+                          selectedIdx={savedScrubIdx}
+                          play={chartsArmed}
+                          replayToken={chartKey}
+                          animationDurationMs={chartAnimationMs}
+                          scrubEnabled={false}
+                          tapEnabled={false}
+                          style={{ width: halfChartW, height: 40 }}
+                        />
+                        <ChartScrubOverlay
+                          count={savedMetric.cumulativeSeries.length}
+                          width={halfChartW}
+                          mode="line"
+                          onScrub={handleSavedScrub}
+                        />
+                      </>
                     ) : (
                       <SpendChart
                         key={`saved-${chartReplayKey}`}
@@ -2353,6 +2468,7 @@ export function InsightsScreen({
                         fillColor={savingsTint}
                         ringColor={theme.surface}
                         strokeWidth={2}
+                        selectedIdx={savedScrubIdx}
                         play={chartsArmed}
                         onScrub={handleSavedScrub}
                       />
@@ -2394,24 +2510,32 @@ export function InsightsScreen({
                     style={styles.tileTrendChart}
                     accessibilityRole="image"
                     accessibilityLabel={`Spending trends chart, ${trendRightLabel}`}
-                    onTouchStart={handleChartTouchStart}
-                    onTouchEnd={handleChartTouchEnd}
-                    onTouchCancel={handleChartTouchEnd}
                   >
                     {SUPPORTS_NATIVE_TREND_BARS_CHART ? (
-                      <NativeTrendBarsChart
-                        key={`trends-native-${chartReplayKey}`}
-                        values={trend.values}
-                        labels={trend.labels}
-                        selectedIdx={trendScrubIdx}
-                        onScrub={handleTrendScrub}
-                        barColor={lineColorFaint}
-                        selectedColor={lineColor}
-                        labelColor={p.textTer}
-                        selectedLabelColor={p.text}
-                        play={chartsArmed}
-                        style={{ width: halfChartW, height: 64 }}
-                      />
+                      <>
+                        <NativeTrendBarsChart
+                          key={`trends-native-${chartReplayKey}`}
+                          values={trend.values}
+                          labels={trend.labels}
+                          selectedIdx={trendScrubIdx}
+                          barColor={lineColorFaint}
+                          selectedColor={lineColor}
+                          labelColor={p.textTer}
+                          selectedLabelColor={p.text}
+                          play={chartsArmed}
+                          replayToken={chartKey}
+                          animationDurationMs={chartAnimationMs}
+                          scrubEnabled={false}
+                          tapEnabled={false}
+                          style={{ width: halfChartW, height: 64 }}
+                        />
+                        <ChartScrubOverlay
+                          count={trend.values.length}
+                          width={halfChartW}
+                          mode="bars"
+                          onScrub={handleTrendScrub}
+                        />
+                      </>
                     ) : (
                       <TrendBars
                         key={`trends-${chartReplayKey}`}

@@ -197,12 +197,6 @@ private struct UpcomingPaymentSheetContent: View {
         hero
         fieldCard
 
-        if showKeypad && model.canEdit {
-          keypad
-            .padding(.top, 16)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
-
         actionArea
           .padding(.top, 18)
       }
@@ -210,6 +204,15 @@ private struct UpcomingPaymentSheetContent: View {
       .padding(.horizontal, 20)
       .padding(.bottom, 24)
       .frame(maxWidth: .infinity)
+
+      if model.canEdit {
+        keypadOverlay
+          .offset(y: showKeypad ? 0 : 360)
+          .allowsHitTesting(showKeypad)
+          .accessibilityHidden(!showKeypad)
+          .animation(.snappy(duration: 0.24, extraBounce: 0), value: showKeypad)
+          .zIndex(4)
+      }
     }
     .preferredColorScheme(isDark ? .dark : .light)
     .onChange(of: dueDate) { newValue in
@@ -225,12 +228,13 @@ private struct UpcomingPaymentSheetContent: View {
     VStack(spacing: 0) {
       UpcomingPaymentMerchantMark(model: model, size: 52)
       Text(model.merchant)
-        .font(.system(size: 18, weight: .medium))
+        .font(.title2)
+        .fontWeight(.semibold)
         .foregroundStyle(model.color(.text))
         .multilineTextAlignment(.center)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
-        .padding(.top, 12)
+        .padding(.top, 8)
 
       Text(metaLine)
         .font(.system(size: 13, weight: .regular))
@@ -296,12 +300,59 @@ private struct UpcomingPaymentSheetContent: View {
           .labelsHidden()
           .tint(model.color(.accent))
           .disabled(!model.canEdit)
+          .onTapGesture {
+            closeKeypad()
+          }
       }
       .frame(height: 54)
       .opacity(model.canEdit ? 1 : 0.58)
     }
     .padding(.horizontal, 16)
     .background(model.color(.chipBg), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+  }
+
+  private var keypadOverlay: some View {
+    VStack {
+      Color.clear
+        .contentShape(Rectangle())
+        .onTapGesture {
+          closeKeypad()
+        }
+
+      VStack(spacing: 8) {
+        HStack {
+          Spacer()
+          Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            closeKeypad()
+          } label: {
+            Text("Done")
+              .font(.system(size: 15, weight: .semibold))
+              .foregroundStyle(isDark ? Color.black : Color.white)
+              .padding(.horizontal, 18)
+              .frame(height: 36)
+              .background(isDark ? Color.white : Color.black, in: Capsule())
+          }
+          .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 12)
+
+        keypad
+          .padding(.horizontal, 10)
+          .padding(.bottom, 12)
+      }
+      .padding(.top, 10)
+      .background(model.color(.sheetBg), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+          .stroke(model.color(.sep), lineWidth: 0.5)
+      )
+      .shadow(color: .black.opacity(isDark ? 0.32 : 0.12), radius: 18, y: 8)
+      .compositingGroup()
+      .padding(.horizontal, 10)
+      .padding(.bottom, 8)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
   }
 
   private var keypad: some View {
@@ -322,7 +373,20 @@ private struct UpcomingPaymentSheetContent: View {
         }
       }
 
-      Spacer()
+      Button {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.25)) {
+          keypadValue.append(0)
+          keypadValue.append(0)
+        }
+      } label: {
+        Text("00")
+          .font(.title2.bold())
+          .foregroundStyle(model.color(.text))
+          .frame(maxWidth: .infinity)
+          .frame(height: 62)
+          .contentShape(Rectangle())
+      }
 
       ForEach(["0", "delete.backward.fill"], id: \.self) { key in
         Button {
@@ -414,6 +478,13 @@ private struct UpcomingPaymentSheetContent: View {
 
   private var parsedAmount: Double? {
     Self.amount(fromCentsDigits: keypadValue.stringValue)
+  }
+
+  private func closeKeypad() {
+    guard showKeypad else { return }
+    withAnimation(.snappy(duration: 0.2, extraBounce: 0)) {
+      showKeypad = false
+    }
   }
 
   private static func date(from iso: String) -> Date {

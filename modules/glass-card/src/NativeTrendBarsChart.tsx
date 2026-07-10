@@ -14,7 +14,12 @@ type NativeTrendBarsChartViewProps = ViewProps & {
   partialIndex?: number;
   play?: boolean;
   haptics?: boolean;
+  replayToken?: number;
+  animationDurationMs?: number;
+  scrubEnabled?: boolean;
+  tapEnabled?: boolean;
   onScrub?: (event: { nativeEvent: { index: number | null } }) => void;
+  onTap?: (event: { nativeEvent: { index: number } }) => void;
 };
 
 const NativeTrendBarsChartView = Platform.OS === 'ios'
@@ -34,7 +39,12 @@ export function NativeTrendBarsChart({
   partialIdx,
   play = true,
   haptics = true,
+  replayToken = 0,
+  animationDurationMs,
+  scrubEnabled,
+  tapEnabled,
   onScrub,
+  onTap,
   style,
 }: {
   values: number[];
@@ -47,7 +57,12 @@ export function NativeTrendBarsChart({
   partialIdx?: number | null;
   play?: boolean;
   haptics?: boolean;
+  replayToken?: number;
+  animationDurationMs?: number;
+  scrubEnabled?: boolean;
+  tapEnabled?: boolean;
   onScrub?: (index: number | null) => void;
+  onTap?: (index: number) => void;
   style?: StyleProp<ViewStyle>;
 }) {
   const valuesJson = useMemo(() => JSON.stringify(values), [values]);
@@ -70,7 +85,12 @@ export function NativeTrendBarsChart({
         partialIndex={partialIdx ?? -1}
         play={play}
         haptics={haptics}
+        replayToken={replayToken}
+        animationDurationMs={animationDurationMs}
+        scrubEnabled={scrubEnabled ?? !!onScrub}
+        tapEnabled={tapEnabled ?? !!onTap}
         onScrub={(event) => onScrub?.(event.nativeEvent.index)}
+        onTap={(event) => onTap?.(event.nativeEvent.index)}
         style={styles.nativeView}
       />
     </Host>

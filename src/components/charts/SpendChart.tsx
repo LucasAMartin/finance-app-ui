@@ -48,6 +48,7 @@ interface Props {
   selectedIdx?: number | null;
   /** Fires on a discrete tap; parent handles toggle (same index → deselect). */
   onTap?: (index: number) => void;
+  tapEnabled?: boolean;
   /** Whether scrub/tap should fire selection haptics. Default true. */
   haptics?: boolean;
 }
@@ -85,6 +86,7 @@ export function SpendChart({
   onScrub,
   selectedIdx,
   onTap,
+  tapEnabled = !!onTap,
   haptics = true,
 }: Props) {
   const padX = strokeWidth + 1;
@@ -190,6 +192,7 @@ export function SpendChart({
     () =>
       Gesture.Pan()
         .activateAfterLongPress(140)
+        .failOffsetY([-10, 10])
         .onStart((e) => {
           'worklet';
           const i =
@@ -231,7 +234,7 @@ export function SpendChart({
     [xs, ys, stepX, n, padX, cursorX, cursorY, cursorOn, lastIdx],
   );
 
-  const gesture = useMemo(() => Gesture.Race(tap, pan), [tap, pan]);
+  const gesture = useMemo(() => tapEnabled ? Gesture.Race(tap, pan) : pan, [tap, pan, tapEnabled]);
 
   const lineProps = useAnimatedProps(() => ({ strokeDashoffset: drawn.value }));
   const areaProps = useAnimatedProps(() => ({ opacity: fillIn.value }));

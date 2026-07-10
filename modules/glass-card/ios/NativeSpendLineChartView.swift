@@ -11,9 +11,15 @@ public final class NativeSpendLineChartViewProps: UIBaseViewProps {
   @Field var strokeWidth: Double = 2.5
   @Field var verticalInset: Double = 0
   @Field var bottomInset: Double = 0
+  @Field var selectedIndex: Int = -1
   @Field var play: Bool = true
   @Field var haptics: Bool = true
+  @Field var replayToken: Int = 0
+  @Field var animationDurationMs: Double = 950
+  @Field var scrubEnabled: Bool = true
+  @Field var tapEnabled: Bool = false
   var onScrub = EventDispatcher()
+  var onTap = EventDispatcher()
 }
 
 public struct NativeSpendLineChartView: ExpoSwiftUI.View {
@@ -32,14 +38,22 @@ public struct NativeSpendLineChartView: ExpoSwiftUI.View {
       strokeWidth: CGFloat(props.strokeWidth),
       verticalInset: props.verticalInset > 0 ? CGFloat(props.verticalInset) : nil,
       bottomInset: props.bottomInset > 0 ? CGFloat(props.bottomInset) : nil,
+      selectedIndex: props.selectedIndex,
       play: props.play,
       haptics: props.haptics,
+      replayToken: props.replayToken,
+      animationDuration: max(0.05, props.animationDurationMs / 1000.0),
+      scrubEnabled: props.scrubEnabled,
+      tapEnabled: props.tapEnabled,
       onScrub: { index in
         if let index {
           props.onScrub(["index": index])
         } else {
           props.onScrub(["index": NSNull()])
         }
+      },
+      onTap: { index in
+        props.onTap(["index": index])
       }
     )
   }
@@ -60,30 +74,34 @@ private struct NativeSpendLineChartContent: View {
   let strokeWidth: CGFloat
   let verticalInset: CGFloat?
   let bottomInset: CGFloat?
+  let selectedIndex: Int
   let play: Bool
   let haptics: Bool
+  let replayToken: Int
+  let animationDuration: TimeInterval
+  let scrubEnabled: Bool
+  let tapEnabled: Bool
   let onScrub: (Int?) -> Void
+  let onTap: (Int) -> Void
 
   @State private var animationStart: Date?
   @State private var frameDate = Date()
-  @State private var activeIndex: Int?
   @State private var isScrubbing: Bool = false
   @State private var lastHapticIndex: Int?
   @State private var feedback = UISelectionFeedbackGenerator()
 
-  private let drawDuration: TimeInterval = 0.95
-  private let fillDelay: TimeInterval = 0.26
-  private let fillDuration: TimeInterval = 0.65
   private let frameTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
   var body: some View {
     GeometryReader { proxy in
       let size = proxy.size
       let geometry = ChartGeometry(values: values, size: size, strokeWidth: strokeWidth, verticalInset: verticalInset, bottomInset: bottomInset)
+      let activeIndex = selectedIndex >= 0 ? selectedIndex : nil
 
       ZStack {
-        let lineProgress = animationProgress(at: frameDate, delay: 0, duration: drawDuration)
-        let fillProgress = animationProgress(at: frameDate, delay: fillDelay, duration: fillDuration)
+        let fillDelay = animationDuration * 0.27
+        let lineProgress = animationProgress(at: frameDate, delay: 0, duration: animationDuration)
+        let fillProgress = animationProgress(at: frameDate, delay: fillDelay, duration: animationDuration - fillDelay)
 
         if !values.isEmpty && size.width > 0 && size.height > 0 {
           Canvas { context, _ in
@@ -135,12 +153,15 @@ private struct NativeSpendLineChartContent: View {
         }
       }
       .contentShape(Rectangle())
-      .simultaneousGesture(scrubGesture(geometry: geometry))
+      .nativeSpendOptionalScrubGesture(scrubGesture(geometry: geometry), enabled: scrubEnabled)
+      .nativeSpendOptionalTapGesture(tapGesture(geometry: geometry), enabled: tapEnabled)
       .onChange(of: play) { _, _ in
         replay()
       }
+      .onChange(of: replayToken) { _, _ in
+        replay()
+      }
       .onChange(of: valuesKey) { _, _ in
-        activeIndex = nil
         onScrub(nil)
         replay()
       }
@@ -167,7 +188,7 @@ private struct NativeSpendLineChartContent: View {
 
   private func isAnimationActive(at date: Date) -> Bool {
     guard play, let animationStart else { return false }
-    return date.timeIntervalSince(animationStart) <= max(drawDuration, fillDelay + fillDuration)
+    return date.timeIntervalSince(animationStart) <= animationDuration
   }
 
   private func easeOutCubic(_ progress: CGFloat) -> CGFloat {
@@ -175,26 +196,30 @@ private struct NativeSpendLineChartContent: View {
     return CGFloat(1 - pow(1 - value, 3))
   }
 
+  private func tapGesture(geometry: ChartGeometry) -> some Gesture {
+    SpatialTapGesture()
+      .onEnded { value in
+        guard !isScrubbing, !geometry.points.isEmpty else { return }
+        let index = geometry.index(for: value.location.x)
+        fireHapticIfNeeded(index)
+        lastHapticIndex = nil
+        onTap(index)
+      }
+  }
+
   private func scrubGesture(geometry: ChartGeometry) -> some Gesture {
     LongPressGesture(minimumDuration: 0.14)
       .sequenced(before: DragGesture(minimumDistance: 0))
       .onChanged { value in
-        guard !geometry.points.isEmpty else {
-          return
-        }
+        guard !geometry.points.isEmpty else { return }
 
         switch value {
         case .first:
           break
         case .second(true, let drag):
-          guard let drag else {
-            return
-          }
-          if !isScrubbing {
-            isScrubbing = true
-          }
+          guard let drag else { return }
+          isScrubbing = true
           let index = geometry.index(for: drag.location.x)
-          activeIndex = index
           onScrub(index)
           fireHapticIfNeeded(index)
         default:
@@ -203,7 +228,6 @@ private struct NativeSpendLineChartContent: View {
       }
       .onEnded { _ in
         isScrubbing = false
-        activeIndex = nil
         lastHapticIndex = nil
         onScrub(nil)
       }
@@ -225,6 +249,26 @@ private struct NativeSpendLineChartContent: View {
     lastHapticIndex = index
     feedback.selectionChanged()
     feedback.prepare()
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func nativeSpendOptionalScrubGesture<G: Gesture>(_ gesture: G, enabled: Bool) -> some View {
+    if enabled {
+      self.simultaneousGesture(gesture)
+    } else {
+      self
+    }
+  }
+
+  @ViewBuilder
+  func nativeSpendOptionalTapGesture<G: Gesture>(_ gesture: G, enabled: Bool) -> some View {
+    if enabled {
+      self.simultaneousGesture(gesture)
+    } else {
+      self
+    }
   }
 }
 

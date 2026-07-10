@@ -34,6 +34,7 @@ public class GlassCardModule: Module {
     ExpoUIView(NativeSkeletonView.self)
     ExpoUIView(NativeXStyleSideBarView.self)
     ExpoUIView(NativeDynamicHeightSheetView.self)
+    ExpoUIView(NativeBudgetCategorySheetView.self)
     ExpoUIView(NativeUpcomingPaymentSheetView.self)
     ExpoUIView(NativeTransactionSheetView.self)
     ExpoUIView(NativeWallpaperCarouselView.self)

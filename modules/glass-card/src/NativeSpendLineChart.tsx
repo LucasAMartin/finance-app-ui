@@ -11,9 +11,15 @@ type NativeSpendLineChartViewProps = ViewProps & {
   strokeWidth?: number;
   verticalInset?: number;
   bottomInset?: number;
+  selectedIndex?: number;
   play?: boolean;
   haptics?: boolean;
+  replayToken?: number;
+  animationDurationMs?: number;
+  scrubEnabled?: boolean;
+  tapEnabled?: boolean;
   onScrub?: (event: { nativeEvent: { index: number | null } }) => void;
+  onTap?: (event: { nativeEvent: { index: number } }) => void;
 };
 
 const NativeSpendLineChartView = Platform.OS === 'ios'
@@ -30,9 +36,15 @@ export function NativeSpendLineChart({
   strokeWidth = 2.5,
   verticalInset = 0,
   bottomInset = 0,
+  selectedIdx,
   play = true,
   haptics = true,
+  replayToken = 0,
+  animationDurationMs,
+  scrubEnabled,
+  tapEnabled,
   onScrub,
+  onTap,
   style,
 }: {
   data: number[];
@@ -42,9 +54,15 @@ export function NativeSpendLineChart({
   strokeWidth?: number;
   verticalInset?: number;
   bottomInset?: number;
+  selectedIdx?: number | null;
   play?: boolean;
   haptics?: boolean;
+  replayToken?: number;
+  animationDurationMs?: number;
+  scrubEnabled?: boolean;
+  tapEnabled?: boolean;
   onScrub?: (index: number | null) => void;
+  onTap?: (index: number) => void;
   style?: StyleProp<ViewStyle>;
 }) {
   const valuesJson = useMemo(() => JSON.stringify(data), [data]);
@@ -63,9 +81,15 @@ export function NativeSpendLineChart({
         strokeWidth={strokeWidth}
         verticalInset={verticalInset}
         bottomInset={bottomInset}
+        selectedIndex={selectedIdx ?? -1}
         play={play}
         haptics={haptics}
+        replayToken={replayToken}
+        animationDurationMs={animationDurationMs}
+        scrubEnabled={scrubEnabled ?? !!onScrub}
+        tapEnabled={tapEnabled ?? !!onTap}
         onScrub={(event) => onScrub?.(event.nativeEvent.index)}
+        onTap={(event) => onTap?.(event.nativeEvent.index)}
         style={styles.nativeView}
       />
     </Host>

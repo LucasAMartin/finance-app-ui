@@ -192,10 +192,10 @@ private struct TransactionSheetContent: View {
 
       VStack(spacing: 0) {
         if mode == .compact {
-          hero(size: 52, titleSize: 18, metaSize: 13, amountSize: 32, titleTop: 12, metaTop: 5, amountTop: 16, bottom: 20)
+          hero(size: 52, titleSize: 22, metaSize: 13, amountSize: 32, titleTop: 8, metaTop: 5, amountTop: 16, bottom: 20)
             .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
         } else {
-          hero(size: 42, titleSize: 18, metaSize: 12, amountSize: 32, titleTop: 9, metaTop: 3, amountTop: 12, bottom: 12)
+          hero(size: 42, titleSize: 22, metaSize: 12, amountSize: 32, titleTop: 8, metaTop: 3, amountTop: 12, bottom: 12)
             .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .top)))
         }
 
@@ -259,7 +259,7 @@ private struct TransactionSheetContent: View {
     VStack(spacing: 0) {
       TransactionSheetMerchantMark(model: model, size: size)
       Text(model.title)
-        .font(.system(size: titleSize, weight: .medium))
+        .font(.system(size: titleSize, weight: .semibold))
         .foregroundStyle(model.color(.text))
         .multilineTextAlignment(.center)
         .lineLimit(1)

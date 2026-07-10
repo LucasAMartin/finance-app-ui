@@ -95,6 +95,7 @@ interface Props {
   onScrub?: (index: number | null) => void;
   /** Fires on a discrete tap; parent handles toggle (same index → deselect). */
   onTap?: (index: number) => void;
+  tapEnabled?: boolean;
   /** Whether scrub/tap should fire selection haptics. Default true. */
   haptics?: boolean;
 }
@@ -119,6 +120,7 @@ export function TrendBars({
   play = true,
   onScrub,
   onTap,
+  tapEnabled = !!onTap,
   haptics = true,
 }: Props) {
   const padT = 6;
@@ -162,6 +164,7 @@ export function TrendBars({
     () =>
       Gesture.Pan()
         .activateAfterLongPress(140)
+        .failOffsetY([-10, 10])
         .onStart((e) => {
           'worklet';
           const i = Math.max(0, Math.min(n - 1, Math.floor(e.x / band)));
@@ -190,7 +193,7 @@ export function TrendBars({
   );
 
   // Tap wins on quick touch; pan takes over after the long-press threshold.
-  const gesture = useMemo(() => Gesture.Race(tap, pan), [tap, pan]);
+  const gesture = useMemo(() => tapEnabled ? Gesture.Race(tap, pan) : pan, [tap, pan, tapEnabled]);
 
   if (n === 0 || width <= 0 || height <= 0) {
     return <Svg width={Math.max(0, width)} height={Math.max(0, height)} />;

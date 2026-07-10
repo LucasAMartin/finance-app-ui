@@ -14,7 +14,12 @@ public final class NativeTrendBarsChartViewProps: UIBaseViewProps {
   @Field var partialIndex: Int = -1
   @Field var play: Bool = true
   @Field var haptics: Bool = true
+  @Field var replayToken: Int = 0
+  @Field var animationDurationMs: Double = 0
+  @Field var scrubEnabled: Bool = true
+  @Field var tapEnabled: Bool = false
   var onScrub = EventDispatcher()
+  var onTap = EventDispatcher()
 }
 
 public struct NativeTrendBarsChartView: ExpoSwiftUI.View {
@@ -36,12 +41,19 @@ public struct NativeTrendBarsChartView: ExpoSwiftUI.View {
       partialIndex: props.partialIndex,
       play: props.play,
       haptics: props.haptics,
+      replayToken: props.replayToken,
+      animationDuration: props.animationDurationMs > 0 ? props.animationDurationMs / 1000.0 : nil,
+      scrubEnabled: props.scrubEnabled,
+      tapEnabled: props.tapEnabled,
       onScrub: { index in
         if let index {
           props.onScrub(["index": index])
         } else {
           props.onScrub(["index": NSNull()])
         }
+      },
+      onTap: { index in
+        props.onTap(["index": index])
       }
     )
   }
@@ -72,17 +84,23 @@ private struct NativeTrendBarsChartContent: View {
   let partialIndex: Int
   let play: Bool
   let haptics: Bool
+  let replayToken: Int
+  let animationDuration: TimeInterval?
+  let scrubEnabled: Bool
+  let tapEnabled: Bool
   let onScrub: (Int?) -> Void
+  let onTap: (Int) -> Void
 
   @State private var animationStart: Date?
   @State private var frameDate = Date()
   @State private var lastHapticIndex: Int?
   @State private var feedback = UISelectionFeedbackGenerator()
+  @State private var isScrubbing = false
 
   private let padT: CGFloat = 6
   private let padB: CGFloat = 16
   private let stagger: Double = 0.058
-  private let growDuration: Double = 0.6
+  private let defaultGrowDuration: Double = 0.6
   private let frameTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
   var body: some View {
@@ -131,8 +149,12 @@ private struct NativeTrendBarsChartContent: View {
         }
       }
       .contentShape(Rectangle())
-      .simultaneousGesture(scrubGesture(geometry: geometry))
+      .nativeTrendOptionalScrubGesture(scrubGesture(geometry: geometry), enabled: scrubEnabled)
+      .nativeTrendOptionalTapGesture(tapGesture(geometry: geometry), enabled: tapEnabled)
       .onChange(of: play) { _, _ in
+        replay()
+      }
+      .onChange(of: replayToken) { _, _ in
         replay()
       }
       .onChange(of: valuesKey) { _, _ in
@@ -161,6 +183,17 @@ private struct NativeTrendBarsChartContent: View {
     return easeOutCubic(CGFloat(min(max(raw, 0), 1)))
   }
 
+  private var finalDelay: Double {
+    Double(max(values.count - 1, 0)) * stagger
+  }
+
+  private var growDuration: Double {
+    guard let animationDuration else {
+      return defaultGrowDuration
+    }
+    return max(0.05, animationDuration - finalDelay)
+  }
+
   private func easeOutCubic(_ progress: CGFloat) -> CGFloat {
     let value = Double(progress)
     return CGFloat(1 - pow(1 - value, 3))
@@ -168,25 +201,32 @@ private struct NativeTrendBarsChartContent: View {
 
   private func isAnimationActive(at date: Date) -> Bool {
     guard play, let animationStart else { return false }
-    let finalDelay = Double(max(values.count - 1, 0)) * stagger
     return date.timeIntervalSince(animationStart) <= finalDelay + growDuration
+  }
+
+  private func tapGesture(geometry: NativeTrendBarsGeometry) -> some Gesture {
+    SpatialTapGesture()
+      .onEnded { value in
+        guard !isScrubbing, values.count > 0 else { return }
+        let index = geometry.index(for: value.location.x)
+        fireHapticIfNeeded(index)
+        lastHapticIndex = nil
+        onTap(index)
+      }
   }
 
   private func scrubGesture(geometry: NativeTrendBarsGeometry) -> some Gesture {
     LongPressGesture(minimumDuration: 0.14)
       .sequenced(before: DragGesture(minimumDistance: 0))
       .onChanged { value in
-        guard values.count > 0 else {
-          return
-        }
+        guard values.count > 0 else { return }
 
         switch value {
         case .first:
           break
         case .second(true, let drag):
-          guard let drag else {
-            return
-          }
+          guard let drag else { return }
+          isScrubbing = true
           let index = geometry.index(for: drag.location.x)
           onScrub(index)
           fireHapticIfNeeded(index)
@@ -195,6 +235,7 @@ private struct NativeTrendBarsChartContent: View {
         }
       }
       .onEnded { _ in
+        isScrubbing = false
         lastHapticIndex = nil
         onScrub(nil)
       }
@@ -216,6 +257,26 @@ private struct NativeTrendBarsChartContent: View {
     lastHapticIndex = index
     feedback.selectionChanged()
     feedback.prepare()
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func nativeTrendOptionalScrubGesture<G: Gesture>(_ gesture: G, enabled: Bool) -> some View {
+    if enabled {
+      self.simultaneousGesture(gesture)
+    } else {
+      self
+    }
+  }
+
+  @ViewBuilder
+  func nativeTrendOptionalTapGesture<G: Gesture>(_ gesture: G, enabled: Bool) -> some View {
+    if enabled {
+      self.simultaneousGesture(gesture)
+    } else {
+      self
+    }
   }
 }
 

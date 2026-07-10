@@ -50,6 +50,8 @@ import { Icon } from '../components/Icon';
 import { ScreenExitButton } from '../components/GlassButton';
 import { SpendChart } from '../components/charts/SpendChart';
 import { TrendBars } from '../components/charts/TrendBars';
+import { NativeSpendLineChart, SUPPORTS_NATIVE_SPEND_LINE_CHART } from '../../modules/glass-card/src/NativeSpendLineChart';
+import { NativeTrendBarsChart, SUPPORTS_NATIVE_TREND_BARS_CHART } from '../../modules/glass-card/src/NativeTrendBarsChart';
 import { MerchantMark } from '../components/MerchantMark';
 import { merchantLogoKey, transactionUsesMerchantLogo, useMerchantLogoMap } from '../merchantLogos';
 import { NativeRowMerchantMark } from '../components/NativeRowMerchantMark';
@@ -83,6 +85,8 @@ const CHART_H = 160;
 const DETAIL_CHART_INSET_Y = 20;
 const DETAIL_TX_LIMIT = 10;
 const LIST_SCRUB_DEBOUNCE_MS = 120;
+const TREND_BAR_STAGGER_MS = 58;
+const TREND_BAR_GROW_MS = 600;
 const NATIVE_DETAIL_DAY_PAD_X = 16;
 const NATIVE_DETAIL_DAY_PAD_TOP = 16;
 const NATIVE_DETAIL_DAY_PAD_BOTTOM = 4;
@@ -320,6 +324,7 @@ export function InsightDetailScreen({ theme, target, onClose, onSeeAll }: Props)
   const trendValues = trend.values;
   const trendSlots = trend.slots;
   const trendLabels = trendSlots.map(s => s.label);
+  const chartAnimationMs = TREND_BAR_GROW_MS + Math.max(0, trendValues.length - 1) * TREND_BAR_STAGGER_MS;
 
   // Current (in-progress) period = the last slot, whose end is still in the
   // future. Dimmed in the chart and held out of the average/trajectory so a
@@ -680,36 +685,71 @@ export function InsightDetailScreen({ theme, target, onClose, onSeeAll }: Props)
                   <Text style={[styles.metricHeroAmount, { color: pW.text }, DARK_TEXT_SHADOW]}>{metricDisplay}</Text>
                   <View style={styles.heroChart}>
                     {isTrendsDetail ? (
-                      <TrendBars
-                        key={chartKey}
-                        values={trendValues}
-                        labels={trendLabels}
-                        width={CHART_W}
-                        height={CHART_H}
-                        selectedIdx={scrubIdx}
-                        partialIdx={trendPartialIdx}
-                        onScrub={handleChartScrub}
-                        onTap={handleChartTap}
-                        barColor="rgba(147,197,253,0.68)"
-                        selectedColor="rgba(147,197,253,1)"
-                        labelColor={pW.textSec}
-                        selectedLabelColor="rgba(147,197,253,1)"
-                      />
+                      SUPPORTS_NATIVE_TREND_BARS_CHART ? (
+                        <NativeTrendBarsChart
+                          values={trendValues}
+                          labels={trendLabels}
+                          selectedIdx={scrubIdx}
+                          partialIdx={trendPartialIdx}
+                          onScrub={handleChartScrub}
+                          onTap={handleChartTap}
+                          barColor="rgba(147,197,253,0.68)"
+                          selectedColor="rgba(147,197,253,1)"
+                          labelColor={pW.textSec}
+                          selectedLabelColor="rgba(147,197,253,1)"
+                          replayToken={chartKey}
+                          animationDurationMs={chartAnimationMs}
+                          style={{ width: CHART_W, height: CHART_H }}
+                        />
+                      ) : (
+                        <TrendBars
+                          key={chartKey}
+                          values={trendValues}
+                          labels={trendLabels}
+                          width={CHART_W}
+                          height={CHART_H}
+                          selectedIdx={scrubIdx}
+                          partialIdx={trendPartialIdx}
+                          onScrub={handleChartScrub}
+                          onTap={handleChartTap}
+                          barColor="rgba(147,197,253,0.68)"
+                          selectedColor="rgba(147,197,253,1)"
+                          labelColor={pW.textSec}
+                          selectedLabelColor="rgba(147,197,253,1)"
+                        />
+                      )
                     ) : (
-                      <SpendChart
-                        key={chartKey}
-                        data={activeSeries}
-                        width={CHART_W}
-                        height={CHART_H}
-                        color={lineColor}
-                        fillColor={isSavingsDetail ? savingsTint : undefined}
-                        ringColor="#08060e"
-                        strokeWidth={2.5}
-                        verticalInset={DETAIL_CHART_INSET_Y}
-                        selectedIdx={scrubIdx}
-                        onScrub={handleChartScrub}
-                        onTap={handleChartTap}
-                      />
+                      SUPPORTS_NATIVE_SPEND_LINE_CHART ? (
+                        <NativeSpendLineChart
+                          data={activeSeries}
+                          color={lineColor}
+                          fillColor={isSavingsDetail ? savingsTint : undefined}
+                          ringColor="#08060e"
+                          strokeWidth={2.5}
+                          verticalInset={DETAIL_CHART_INSET_Y}
+                          selectedIdx={scrubIdx}
+                          onScrub={handleChartScrub}
+                          onTap={handleChartTap}
+                          replayToken={chartKey}
+                          animationDurationMs={chartAnimationMs}
+                          style={{ width: CHART_W, height: CHART_H }}
+                        />
+                      ) : (
+                        <SpendChart
+                          key={chartKey}
+                          data={activeSeries}
+                          width={CHART_W}
+                          height={CHART_H}
+                          color={lineColor}
+                          fillColor={isSavingsDetail ? savingsTint : undefined}
+                          ringColor="#08060e"
+                          strokeWidth={2.5}
+                          verticalInset={DETAIL_CHART_INSET_Y}
+                          selectedIdx={scrubIdx}
+                          onScrub={handleChartScrub}
+                          onTap={handleChartTap}
+                        />
+                      )
                     )}
                   </View>
                   {isSavingsDetail ? (

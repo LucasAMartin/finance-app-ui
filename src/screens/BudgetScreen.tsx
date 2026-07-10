@@ -1,5 +1,4 @@
 import React, { useMemo, useState, useRef, useCallback, useEffect, useContext, useSyncExternalStore } from 'react';
-import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   View,
   Text,
@@ -40,6 +39,11 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { SectionCard } from '../components/SectionCard';
 import { Skeleton } from '../components/Skeleton';
 import { Toast } from '../components/Toast';
+import {
+  NativeBudgetCategorySheet,
+  type NativeBudgetCategorySheetDraft,
+  type NativeBudgetCategorySheetPayload,
+} from '../../modules/glass-card/src/NativeBudgetCategorySheet';
 import { makeBgTranslateY, BG_PARALLAX_MAX } from '../components/headerScroll';
 import { FONT_WEIGHT, TYPE } from '../typography';
 import { SPACE, LAYOUT } from '../spacing';
@@ -52,6 +56,7 @@ import type { Bill, Category, GroupKey, Income, SpendGroup, SpendSub, Transactio
 import { monthlyIncome, spendGroups, upcomingBillsFromRecurring } from '../selectors/finance';
 import { contributionTotal, goalFromCategory, goalProgressPct, goalRemaining, goalSavedFromParts } from '../selectors/goals';
 import { CATEGORY_ICON_OPTIONS, ICON_DISPLAY_NAMES, inferCategoryIcon } from '../categoryIcons';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -1320,6 +1325,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
   const [duplicateNameError, setDuplicateNameError] = useState(false);
   const [categoryFormError, setCategoryFormError] = useState('');
   const [categoryNotes, setCategoryNotes] = useState('');
+  const [categoryPresentationToken, setCategoryPresentationToken] = useState(0);
 
   const scrollViewRef = useRef<GHScrollView>(null);
   const outerTapRef = useRef<any>(null);
@@ -1759,6 +1765,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
     setCategoryGroupDraft(category.group);
     setDuplicateNameError(false);
     setCategoryFormError('');
+    setCategoryPresentationToken(token => token + 1);
   };
 
   useEffect(() => {
@@ -1781,13 +1788,21 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
     setCategoryFormError('');
   };
 
-	  const saveCategoryEdit = (): boolean => {
+	  const saveCategoryEdit = (draft?: NativeBudgetCategorySheetDraft): boolean => {
 	    if (!editingCategory) return false;
     if (!canEditCategoryId(editingCategory.id)) {
       showNotice(`${lockedOwnerName(editingCategory.createdByUserId)} has locked edits for this category.`);
       return false;
     }
-	    const label = categoryLabelDraft.trim();
+    const draftLabel = draft?.label ?? categoryLabelDraft;
+    const draftIcon = draft?.icon ?? categoryIconDraft;
+    const draftGroup = (draft?.group ?? categoryGroupDraft) as GroupKey;
+    const draftGoalTarget = draft?.goalTarget ?? categoryGoalTarget;
+    const draftGoalSaved = draft?.goalSaved ?? categoryGoalSaved;
+    const draftGoalDeadline = draft?.goalDeadline ?? categoryGoalDeadline;
+    const draftBudget = draft?.budget ?? categoryBudgetDraft;
+    const draftNotes = draft?.notes ?? categoryNotes;
+	    const label = draftLabel.trim();
     if (!label) {
       setCategoryFormError('Category name is required');
       return false;
@@ -1803,24 +1818,24 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
       return false;
     }
     setDuplicateNameError(false);
-    const actualGroup: GroupKey = categoryGroupDraft;
-    const goalTarget = parseAmountDraft(categoryGoalTarget);
-    const goalSaved = parseAmountDraft(categoryGoalSaved);
-    if (categoryGroupDraft === 'savings' && goalTarget !== null && goalSaved !== null && goalTarget > 0 && goalSaved > goalTarget) {
+    const actualGroup: GroupKey = draftGroup;
+    const goalTarget = parseAmountDraft(draftGoalTarget);
+    const goalSaved = parseAmountDraft(draftGoalSaved);
+    if (draftGroup === 'savings' && goalTarget !== null && goalSaved !== null && goalTarget > 0 && goalSaved > goalTarget) {
       setCategoryFormError('Saved amount cannot be greater than the target');
       return false;
     }
-    if (categoryGroupDraft === 'savings' && goalSaved !== null && goalSaved > 0 && (!goalTarget || goalTarget <= 0)) {
+    if (draftGroup === 'savings' && goalSaved !== null && goalSaved > 0 && (!goalTarget || goalTarget <= 0)) {
       setCategoryFormError('Add a target before entering saved so far');
       return false;
     }
     setCategoryFormError('');
-    const budgetValue = parseAmountDraft(categoryBudgetDraft);
+    const budgetValue = parseAmountDraft(draftBudget);
     const nextDefaultBudget = budgetValue !== null
       ? budgetValue
       : budgets[bKey(editingCategory.group, editingCategory.label)] ?? editingCategory.defaultBudget;
     const nextMeta: Record<string, unknown> = { ...(editingCategory.meta ?? {}) };
-    if (categoryGroupDraft === 'savings' && goalTarget && goalTarget > 0) {
+    if (draftGroup === 'savings' && goalTarget && goalTarget > 0) {
       const existingGoal = goalFromCategory(editingCategory, { transactions: allTransactions });
       const contributions = existingGoal?.contributions ?? [];
       const saved = goalSaved && goalSaved > 0 ? goalSaved : 0;
@@ -1839,8 +1854,8 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
       } else {
         delete nextMeta.goalCompletedAt;
       }
-      if (categoryGoalDeadline.trim()) {
-        nextMeta.goalDeadline = categoryGoalDeadline.trim();
+      if (draftGoalDeadline.trim()) {
+        nextMeta.goalDeadline = draftGoalDeadline.trim();
       } else {
         delete nextMeta.goalDeadline;
       }
@@ -1854,14 +1869,14 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
       delete nextMeta.goalStatus;
       delete nextMeta.goalCompletedAt;
     }
-    if (categoryNotes.trim()) {
-      nextMeta.notes = categoryNotes.trim();
+    if (draftNotes.trim()) {
+      nextMeta.notes = draftNotes.trim();
     } else {
       delete nextMeta.notes;
     }
     categoriesRepo.update(editingCategory.id, {
       label,
-      icon: categoryIconDraft,
+      icon: draftIcon,
       group: actualGroup,
       defaultBudget: nextDefaultBudget,
       meta: nextMeta,
@@ -1875,7 +1890,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
           group: actualGroup,
           category: editingCategory.id,
           label,
-          icon: categoryIconDraft,
+          icon: draftIcon,
         });
       });
     const oldKey = bKey(editingCategory.group, editingCategory.label);
@@ -2289,6 +2304,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
                   setCategoryNotes('');
                   setDuplicateNameError(false);
                   setCategoryFormError('');
+                  setCategoryPresentationToken(token => token + 1);
                 };
 
                 if (SUPPORTS_GLASS) {
@@ -2620,6 +2636,7 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
 
       <CategoryEditSheet
         theme={theme}
+        presentationToken={categoryPresentationToken}
         category={editingCategory}
         addingForGroup={addingForGroup}
         label={categoryLabelDraft}
@@ -2633,20 +2650,23 @@ export function BudgetScreen({ theme, onOpenDrawer, onOpenIncome, onRefreshSync,
         formError={categoryFormError}
         canEdit={canEditEditingCategory}
         notes={categoryNotes}
-        onLabelChange={(v) => { setCategoryLabelDraft(v); if (duplicateNameError) setDuplicateNameError(false); if (categoryFormError) setCategoryFormError(''); }}
-        onIconChange={setCategoryIconDraft}
-        onGroupChange={setCategoryGroupDraft}
-        onGoalTargetChange={setCategoryGoalTarget}
-        onGoalSavedChange={setCategoryGoalSaved}
-        onBudgetChange={setCategoryBudgetDraft}
-        onGoalDeadlineChange={setCategoryGoalDeadline}
-        onNotesChange={(v) => { setCategoryNotes(v); if (categoryFormError) setCategoryFormError(''); }}
         onClose={() => { closeCategoryEditor(); setAddingForGroup(null); }}
-        onSave={saveCategoryEdit}
+        onSave={(draft) => saveCategoryEdit(draft)}
         onDelete={deleteEditingCategory}
-        onAddNew={(lbl, icn, grp, bgt, gt, gs, gd) => {
-          return addSub(grp, lbl, icn, bgt, gt, gs, gd);
-          // The sheet owns dismissal; parent drafts reset after native onDismiss.
+        onAddNew={(draft) => {
+          const trimmedLabel = draft.label.trim();
+          const rawBudget = parseAmountDraft(draft.budget);
+          const rawGoalTarget = parseAmountDraft(draft.goalTarget);
+          const rawGoalSaved = parseAmountDraft(draft.goalSaved);
+          return addSub(
+            draft.group as GroupKey,
+            trimmedLabel,
+            draft.icon,
+            rawBudget ?? undefined,
+            rawGoalTarget && rawGoalTarget > 0 ? rawGoalTarget : undefined,
+            rawGoalSaved && rawGoalSaved > 0 ? rawGoalSaved : undefined,
+            draft.goalDeadline || undefined,
+          );
         }}
       />
 
@@ -2772,6 +2792,117 @@ function SheetNumericField({ displayValue, draft, active, placeholder, color, ac
 }
 
 function CategoryEditSheet({
+  theme, presentationToken, category, addingForGroup, label, icon, group, goalTarget, goalSaved,
+  budget, goalDeadline, nameError, formError, canEdit, notes,
+  onClose, onSave, onDelete, onAddNew,
+}: {
+  theme: Theme;
+  presentationToken: number;
+  category: Category | null;
+  addingForGroup: string | null;
+  label: string;
+  icon: string;
+  group: GroupKey;
+  goalTarget: string;
+  goalSaved: string;
+  budget: string;
+  goalDeadline: string;
+  nameError: boolean;
+  formError: string;
+  canEdit: boolean;
+  notes: string;
+  onClose: () => void;
+  onSave: (draft: NativeBudgetCategorySheetDraft) => boolean;
+  onDelete: () => void;
+  onAddNew: (draft: NativeBudgetCategorySheetDraft) => boolean;
+}) {
+  const presented = category !== null || addingForGroup !== null;
+  const isAddMode = addingForGroup !== null && category === null;
+  const groupColor = (key: GroupKey) =>
+    theme.dark
+      ? (GROUP_COLORS[key]?.dark ?? theme.textTer)
+      : (GROUP_COLORS[key]?.light ?? theme.textTer);
+
+  const payload = useMemo<NativeBudgetCategorySheetPayload | null>(() => {
+    if (!presented) return null;
+    return {
+      mode: isAddMode ? 'add' : 'edit',
+      title: isAddMode ? 'New category' : category?.label ?? 'Category',
+      label,
+      icon,
+      group,
+      budget,
+      goalTarget,
+      goalSaved,
+      goalDeadline,
+      notes,
+      canEdit,
+      lockedCopy: !isAddMode && !canEdit ? 'This category is locked by its owner.' : undefined,
+      nameError,
+      formError,
+      currencySymbol: getActiveCurrency().symbol,
+      iconOptions: CATEGORY_ICON_OPTIONS.map(option => ({
+        id: option,
+        label: ICON_DISPLAY_NAMES[option] ?? option,
+        systemName: ICON_SF_SYMBOL[option] ?? BUDGET_FALLBACK_SYMBOL,
+      })),
+      surface: theme.surface,
+      sheetBg: theme.dark ? theme.surface : '#FFFFFF',
+      chipBg: theme.chipBg,
+      text: theme.text,
+      textSec: theme.textSec,
+      textTer: theme.textTer,
+      sep: theme.sep,
+      hairline: theme.hairline,
+      accent: theme.accent.fill,
+      accentInk: theme.accent.ink,
+      over: OVER_DOT,
+      needsColor: groupColor('needs'),
+      wantsColor: groupColor('wants'),
+      savingsColor: groupColor('savings'),
+    };
+  }, [
+    presented,
+    isAddMode,
+    category?.label,
+    label,
+    icon,
+    group,
+    budget,
+    goalTarget,
+    goalSaved,
+    goalDeadline,
+    notes,
+    canEdit,
+    nameError,
+    formError,
+    theme,
+  ]);
+
+  const submit = useCallback((draft: NativeBudgetCategorySheetDraft) => {
+    const saved = isAddMode ? onAddNew(draft) : onSave(draft);
+    if (saved) onClose();
+  }, [isAddMode, onAddNew, onClose, onSave]);
+
+  const remove = useCallback(() => {
+    onDelete();
+    onClose();
+  }, [onClose, onDelete]);
+
+  return (
+    <NativeBudgetCategorySheet
+      presentationToken={presentationToken}
+      presented={presented}
+      payload={payload}
+      isDark={theme.dark}
+      onSubmit={submit}
+      onDelete={remove}
+      onDismiss={onClose}
+    />
+  );
+}
+
+function LegacyCategoryEditSheet({
   theme, category, addingForGroup, label, icon, group, goalTarget, goalSaved,
   budget, goalDeadline, nameError, formError, canEdit, notes,
   onLabelChange, onIconChange, onGroupChange, onGoalTargetChange, onGoalSavedChange,
